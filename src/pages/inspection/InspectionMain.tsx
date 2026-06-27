@@ -1,0 +1,253 @@
+import { useEffect, useRef, useState } from 'react'
+import { supabase } from '../../lib/supabase'
+
+interface InspectionItem {
+  id: string
+  invoice_no: string
+  customer_name: string
+  product_code: string
+  product_name: string
+  quantity: number
+  inspected_qty: number
+}
+
+interface UnregisteredModal {
+  barcode: string
+  candidates: InspectionItem[]
+}
+
+export default function InspectionMain() {
+  const [invoiceNo, setInvoiceNo] = useState('')
+  const [items, setItems] = useState<InspectionItem[]>([])
+  const [barcode, setBarcode] = useState('')
+  const [modal, setModal] = useState<UnregisteredModal | null>(null)
+  const [message, setMessage] = useState('')
+  const [done, setDone] = useState(false)
+
+  const invoiceRef = useRef<HTMLInputElement>(null)
+  const barcodeRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    invoiceRef.current?.focus()
+  }, [])
+
+  useEffect(() => {
+    if (done) {
+      setTimeout(() => {
+        setDone(false)
+        setItems([])
+        setInvoiceNo('')
+        setMessage('')
+        invoiceRef.current?.focus()
+      }, 2000)
+    }
+  }, [done])
+
+  async function loadInvoice(e: React.FormEvent) {
+    e.preventDefault()
+    if (!invoiceNo.trim()) return
+
+    const { data, error } = await supabase
+      .from('inspection_items')
+      .select('*')
+      .eq('invoice_no', invoiceNo.trim())
+
+    if (error || !data?.length) {
+      setMessage('해당 운송장번호의 주문이 없습니다.')
+      setItems([])
+      return
+    }
+
+    setItems(data)
+    setMessage('')
+    setTimeout(() => barcodeRef.current?.focus(), 100)
+  }
+
+  async function handleBarcodeScan(e: React.FormEvent) {
+    e.preventDefault()
+    if (!barcode.trim() || !items.length) return
+
+    const scanned = barcode.trim()
+    setBarcode('')
+
+    // barcodes 테이블에서 조회
+    const { data: bcData } = await supabase
+      .from('barcodes')
+      .select('product_code')
+      .eq('barcode', scanned)
+      .single()
+
+    if (bcData) {
+      await countUp(bcData.product_code)
+    } else {
+      // 미등록 바코드 → 모달
+      setModal({ barcode: scanned, candidates: items })
+    }
+
+    barcodeRef.current?.focus()
+  }
+
+  async function countUp(productCode: string) {
+    const target = items.find(i => i.product_code === productCode)
+    if (!target) {
+      setMessage(`현재 주문에 없는 상품입니다. (${productCode})`)
+      return
+    }
+    if (target.inspected_qty >= target.quantity) {
+      setMessage(`이미 수량이 완료된 상품입니다. (${target.product_name})`)
+      return
+    }
+
+    const newQty = target.inspected_qty + 1
+    await supabase
+      .from('inspection_items')
+      .update({ inspected_qty: newQty })
+      .eq('id', target.id)
+
+    const updated = items.map(i =>
+      i.id === target.id ? { ...i, inspected_qty: newQty } : i
+    )
+    setItems(updated)
+    setMessage('')
+
+    if (updated.every(i => i.inspected_qty >= i.quantity)) {
+      setDone(true)
+    }
+  }
+
+  async function registerBarcode(item: InspectionItem) {
+    if (!modal) return
+
+    await supabase.from('barcodes').upsert({
+      barcode: modal.barcode,
+      product_code: item.product_code,
+      product_name: item.product_name,
+    }, { onConflict: 'barcode' })
+
+    setModal(null)
+    await countUp(item.product_code)
+  }
+
+  const allDone = items.length > 0 && items.every(i => i.inspected_qty >= i.quantity)
+
+  return (
+    <div className="max-w-2xl">
+      <h2 className="text-xl font-bold text-gray-800 mb-6">바코드 검수</h2>
+
+      {/* 운송장 입력 */}
+      <form onSubmit={loadInvoice} className="bg-white rounded-xl border p-4 mb-4 flex gap-2">
+        <input
+          ref={invoiceRef}
+          value={invoiceNo}
+          onChange={e => setInvoiceNo(e.target.value)}
+          placeholder="운송장번호 스캔 또는 입력"
+          className="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button
+          type="submit"
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700"
+        >
+          조회
+        </button>
+      </form>
+
+      {/* 완료 배너 */}
+      {(allDone || done) && (
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4 text-center">
+          <p className="text-green-700 font-bold text-lg">✅ 검수 완료!</p>
+          <p className="text-green-600 text-sm mt-1">다음 운송장을 스캔하세요</p>
+        </div>
+      )}
+
+      {/* 주문 목록 */}
+      {items.length > 0 && (
+        <div className="bg-white rounded-xl border mb-4 overflow-hidden">
+          <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
+            <span className="font-medium text-gray-800">{items[0].customer_name}</span>
+            <span className="text-sm font-mono text-gray-500">{items[0].invoice_no}</span>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="border-b">
+              <tr>
+                <th className="text-left px-4 py-2 font-medium text-gray-600">상품명</th>
+                <th className="text-center px-4 py-2 font-medium text-gray-600 w-20">주문</th>
+                <th className="text-center px-4 py-2 font-medium text-gray-600 w-20">검수</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map(item => {
+                const complete = item.inspected_qty >= item.quantity
+                return (
+                  <tr key={item.id} className={`border-b last:border-0 ${complete ? 'bg-green-50' : ''}`}>
+                    <td className="px-4 py-3">
+                      <span className={complete ? 'text-green-700' : 'text-gray-800'}>
+                        {complete ? '✅ ' : ''}{item.product_name}
+                      </span>
+                      <span className="ml-2 text-xs text-gray-400 font-mono">{item.product_code}</span>
+                    </td>
+                    <td className="text-center px-4 py-3 text-gray-600">{item.quantity}</td>
+                    <td className={`text-center px-4 py-3 font-bold ${complete ? 'text-green-600' : item.inspected_qty > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
+                      {item.inspected_qty}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 바코드 입력 */}
+      {items.length > 0 && !allDone && (
+        <form onSubmit={handleBarcodeScan} className="bg-white rounded-xl border p-4 flex gap-2">
+          <input
+            ref={barcodeRef}
+            value={barcode}
+            onChange={e => setBarcode(e.target.value)}
+            placeholder="바코드 스캔"
+            className="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="submit"
+            className="bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800"
+          >
+            입력
+          </button>
+        </form>
+      )}
+
+      {message && (
+        <p className="mt-3 text-sm text-red-500">{message}</p>
+      )}
+
+      {/* 미등록 바코드 모달 */}
+      {modal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+            <h3 className="font-bold text-gray-800 mb-1">미등록 바코드</h3>
+            <p className="text-sm font-mono text-gray-500 mb-4">{modal.barcode}</p>
+            <p className="text-sm text-gray-600 mb-3">어떤 상품인가요?</p>
+            <div className="space-y-2 mb-4">
+              {modal.candidates.map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => registerBarcode(item)}
+                  className="w-full text-left px-4 py-3 rounded-xl border hover:bg-blue-50 hover:border-blue-300 transition-colors"
+                >
+                  <p className="font-medium text-gray-800 text-sm">{item.product_name}</p>
+                  <p className="text-xs text-gray-400 font-mono mt-0.5">{item.product_code}</p>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setModal(null)}
+              className="w-full py-2 text-sm text-gray-500 hover:text-gray-700"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

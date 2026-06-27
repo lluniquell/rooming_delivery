@@ -51,6 +51,10 @@ metadata:
 ## 카페24 주문 상태 흐름
 상품준비중 → 배송준비중(송장출력) → 배송대기 → 배송중 → 배송완료
 
+## Supabase
+- 프로젝트 URL: https://ivahnozcmltdzaodmbzb.supabase.co
+- 딜리버리 + 차수+검수 모듈 공용
+
 ## 미결 기술 사항
 - 카페24 API 운송장번호로 주문 역조회 가능 여부 (개발 시 확인 필요)
-- 이카운트 Open API 키 발급
+- 이카운트 엑셀 업로드 방식으로 barcodes 테이블 관리 (API 연동 대신)

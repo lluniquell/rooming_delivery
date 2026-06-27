@@ -12,6 +12,8 @@ const navItems = [
   { to: '/admin/assign', label: '배송원 배정' },
   { to: '/admin/drivers', label: '배송원 관리' },
   { to: '/admin/storage', label: '스토리지' },
+  { to: '/admin/inspection', label: '🔍 검수' },
+  { to: '/admin/barcodes', label: '바코드 DB' },
 ]
 
 export default function AdminLayout({ driver }: Props) {

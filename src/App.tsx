@@ -11,6 +11,8 @@ import AdminRegister from './pages/admin/AdminRegister'
 import AdminAssign from './pages/admin/AdminAssign'
 import AdminDrivers from './pages/admin/AdminDrivers'
 import AdminStorage from './pages/admin/AdminStorage'
+import InspectionMain from './pages/inspection/InspectionMain'
+import BarcodeDB from './pages/inspection/BarcodeDB'
 import DriverLayout from './pages/driver/DriverLayout'
 import DriverList from './pages/driver/DriverList'
 import DriverDetail from './pages/driver/DriverDetail'
@@ -56,6 +58,8 @@ function App() {
           <Route path="assign" element={<AdminAssign />} />
           <Route path="drivers" element={<AdminDrivers />} />
           <Route path="storage" element={<AdminStorage />} />
+          <Route path="inspection" element={<InspectionMain />} />
+          <Route path="barcodes" element={<BarcodeDB />} />
         </Route>
 
         {/* 배송원 */}

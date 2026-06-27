@@ -80,3 +80,80 @@ create policy "배송원 본인 건 사진 조회" on delivery_photos
 
 -- Realtime 활성화
 alter publication supabase_realtime add table deliveries;
+
+
+-- =============================================
+-- 차수 관리 + 바코드 검수 모듈
+-- =============================================
+
+-- batches (차수, 고정 01~10)
+create table batches (
+  id         uuid primary key default gen_random_uuid(),
+  batch_no   text not null unique check (batch_no in ('01','02','03','04','05','06','07','08','09','10')),
+  name       text not null default ''
+);
+
+-- 고정 10개 초기 데이터
+insert into batches (batch_no, name) values
+  ('01', ''), ('02', ''), ('03', ''), ('04', ''), ('05', ''),
+  ('06', ''), ('07', ''), ('08', ''), ('09', ''), ('10', '');
+
+-- orders (카페24 주문 헤더)
+create table orders (
+  id                uuid primary key default gen_random_uuid(),
+  cafe24_order_no   text not null unique,
+  customer_name     text not null,
+  address           text not null,
+  created_at        timestamptz not null default now()
+);
+
+-- order_items (주문 내 상품별 행)
+create table order_items (
+  id             uuid primary key default gen_random_uuid(),
+  order_id       uuid not null references orders(id) on delete cascade,
+  product_code   text not null,
+  product_name   text not null,
+  option_info    text,
+  quantity       integer not null default 1,
+  team           text check (team in ('interior', 'delivery')),
+  batch_id       uuid references batches(id),
+  batch_date     date,
+  inspected_qty  integer not null default 0,
+  status         text not null default 'unassigned'
+                   check (status in ('unassigned', 'assigned', 'partial', 'done')),
+  created_at     timestamptz not null default now()
+);
+
+-- barcodes (품목 바코드 마스터, 이카운트 엑셀 업로드)
+create table barcodes (
+  id             uuid primary key default gen_random_uuid(),
+  barcode        text not null unique,
+  product_code   text not null,
+  product_name   text not null,
+  created_at     timestamptz not null default now()
+);
+
+-- RLS 활성화 (차수+검수는 관리자만 접근)
+alter table batches    enable row level security;
+alter table orders     enable row level security;
+alter table order_items enable row level security;
+alter table barcodes   enable row level security;
+
+create policy "관리자만 접근" on batches
+  for all using (exists (select 1 from drivers where id = auth.uid() and role = 'admin'));
+
+create policy "관리자만 접근" on orders
+  for all using (exists (select 1 from drivers where id = auth.uid() and role = 'admin'));
+
+create policy "관리자만 접근" on order_items
+  for all using (exists (select 1 from drivers where id = auth.uid() and role = 'admin'));
+
+create policy "관리자만 접근" on barcodes
+  for all using (exists (select 1 from drivers where id = auth.uid() and role = 'admin'));
+
+-- 인덱스
+create index on order_items (order_id);
+create index on order_items (batch_id, batch_date);
+create index on order_items (status);
+create index on barcodes (barcode);
+create index on barcodes (product_code);
