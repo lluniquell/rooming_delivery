@@ -5,8 +5,11 @@ interface InspectionItem {
   id: string
   invoice_no: string
   customer_name: string
+  brand: string | null
   product_code: string
   product_name: string
+  option_info: string | null
+  supplier_name: string | null
   quantity: number
   inspected_qty: number
 }
@@ -167,11 +170,13 @@ export default function InspectionMain() {
             <span className="text-sm font-mono text-gray-500">{items[0].invoice_no}</span>
           </div>
           <table className="w-full text-sm">
-            <thead className="border-b">
+            <thead className="border-b bg-gray-50">
               <tr>
-                <th className="text-left px-4 py-2 font-medium text-gray-600">상품명</th>
-                <th className="text-center px-4 py-2 font-medium text-gray-600 w-20">주문</th>
-                <th className="text-center px-4 py-2 font-medium text-gray-600 w-20">검수</th>
+                <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs w-24">브랜드</th>
+                <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">상품명 / 옵션</th>
+                <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs w-36">공급사 상품명</th>
+                <th className="text-center px-3 py-2 font-medium text-gray-500 text-xs w-14">수량</th>
+                <th className="text-center px-3 py-2 font-medium text-gray-500 text-xs w-14">검수</th>
               </tr>
             </thead>
             <tbody>
@@ -179,14 +184,22 @@ export default function InspectionMain() {
                 const complete = item.inspected_qty >= item.quantity
                 return (
                   <tr key={item.id} className={`border-b last:border-0 ${complete ? 'bg-green-50' : ''}`}>
-                    <td className="px-4 py-3">
-                      <span className={complete ? 'text-green-700' : 'text-gray-800'}>
-                        {complete ? '✅ ' : ''}{item.product_name}
-                      </span>
-                      <span className="ml-2 text-xs text-gray-400 font-mono">{item.product_code}</span>
+                    <td className={`px-3 py-3 text-xs ${complete ? 'text-green-600' : 'text-gray-500'}`}>
+                      {item.brand ?? '-'}
                     </td>
-                    <td className="text-center px-4 py-3 text-gray-600">{item.quantity}</td>
-                    <td className={`text-center px-4 py-3 font-bold ${complete ? 'text-green-600' : item.inspected_qty > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
+                    <td className="px-3 py-3">
+                      <div className={`text-sm ${complete ? 'text-green-700 font-medium' : 'text-gray-800'}`}>
+                        {item.product_name}
+                      </div>
+                      {item.option_info && (
+                        <div className="text-xs text-gray-400 mt-0.5">{item.option_info}</div>
+                      )}
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="text-xs text-gray-400 leading-tight">{item.supplier_name ?? '-'}</div>
+                    </td>
+                    <td className="text-center px-3 py-3 text-gray-600 text-sm">{item.quantity}</td>
+                    <td className={`text-center px-3 py-3 text-sm font-bold ${complete ? 'text-green-600' : item.inspected_qty > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
                       {item.inspected_qty}
                     </td>
                   </tr>
