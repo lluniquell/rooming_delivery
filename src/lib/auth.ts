@@ -13,13 +13,13 @@ export async function getSession() {
 }
 
 export async function getCurrentDriver() {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session?.user) return null
 
   const { data } = await supabase
     .from('drivers')
     .select('*')
-    .eq('id', user.id)
+    .eq('id', session.user.id)
     .single()
 
   return data
