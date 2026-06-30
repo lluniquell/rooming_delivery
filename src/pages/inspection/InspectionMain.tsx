@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
+function parseInvoiceNo(raw: string): string {
+  const trimmed = raw.trim()
+  const n = Number(trimmed)
+  if (!isNaN(n) && (trimmed.includes('E') || trimmed.includes('e'))) {
+    return Math.round(n).toString()
+  }
+  return trimmed
+}
+
 interface InspectionItem {
   id: string
   invoice_no: string
@@ -29,6 +38,55 @@ export default function InspectionMain() {
 
   const invoiceRef = useRef<HTMLInputElement>(null)
   const barcodeRef = useRef<HTMLInputElement>(null)
+  const uploadRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadMsg, setUploadMsg] = useState('')
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setUploadMsg('')
+
+    const text = await file.text()
+    const lines = text.split(/\r?\n/).filter(l => l.trim())
+    if (lines.length < 2) {
+      setUploadMsg('데이터가 없습니다.')
+      setUploading(false)
+      return
+    }
+
+    // 헤더: 브랜드,상품명,상품옵션,상품품목코드,수량,수령인,운송장번호,공급사 상품명
+    const rows = lines.slice(1).map(line => {
+      const cols = line.split(',')
+      return {
+        brand: cols[0]?.trim() || null,
+        product_name: cols[1]?.trim() || '',
+        option_info: cols[2]?.trim() || null,
+        product_code: cols[3]?.trim() || '',
+        quantity: parseInt(cols[4]?.trim() || '1', 10) || 1,
+        customer_name: cols[5]?.trim() || '',
+        invoice_no: parseInvoiceNo(cols[6] || ''),
+        supplier_name: cols[7]?.trim() || null,
+        inspected_qty: 0,
+      }
+    }).filter(r => r.invoice_no && r.product_code)
+
+    if (!rows.length) {
+      setUploadMsg('파싱된 데이터가 없습니다. 컬럼 순서를 확인하세요.')
+      setUploading(false)
+      return
+    }
+
+    const { error } = await supabase.from('inspection_items').insert(rows)
+    if (error) {
+      setUploadMsg(`오류: ${error.message}`)
+    } else {
+      setUploadMsg(`✅ ${rows.length}건 업로드 완료`)
+    }
+    setUploading(false)
+    e.target.value = ''
+  }
 
   useEffect(() => {
     invoiceRef.current?.focus()
@@ -135,7 +193,20 @@ export default function InspectionMain() {
 
   return (
     <div className="max-w-2xl">
-      <h2 className="text-xl font-bold text-gray-800 mb-6">바코드 검수</h2>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl font-bold text-gray-800">바코드 검수</h2>
+        <div className="flex items-center gap-2">
+          {uploadMsg && <span className="text-sm text-gray-500">{uploadMsg}</span>}
+          <input ref={uploadRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleUpload} />
+          <button
+            onClick={() => uploadRef.current?.click()}
+            disabled={uploading}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {uploading ? '업로드 중...' : '주문 엑셀 업로드'}
+          </button>
+        </div>
+      </div>
 
       {/* 운송장 입력 */}
       <form onSubmit={loadInvoice} className="bg-white rounded-xl border p-4 mb-4 flex gap-2">
