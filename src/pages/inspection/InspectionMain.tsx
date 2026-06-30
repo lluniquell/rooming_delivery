@@ -94,15 +94,24 @@ export default function InspectionMain() {
 
   useEffect(() => {
     if (done) {
-      setTimeout(() => {
-        setDone(false)
-        setItems([])
-        setInvoiceNo('')
-        setMessage('')
-        invoiceRef.current?.focus()
-      }, 2000)
+      // A: 검수 완료 시 자동 삭제 (카페24 API 연동 예정)
+      deleteInvoice(items[0]?.invoice_no).then(() => {
+        setTimeout(() => {
+          setDone(false)
+          setItems([])
+          setInvoiceNo('')
+          setMessage('')
+          invoiceRef.current?.focus()
+        }, 2000)
+      })
     }
   }, [done])
+
+  async function deleteInvoice(invoice: string) {
+    if (!invoice) return
+    await supabase.from('inspection_items').delete().eq('invoice_no', invoice)
+    // TODO: 카페24 API - 해당 운송장 배송완료 처리
+  }
 
   async function loadInvoice(e: React.FormEvent) {
     e.preventDefault()
@@ -237,8 +246,23 @@ export default function InspectionMain() {
       {items.length > 0 && (
         <div className="bg-white rounded-xl border mb-4 overflow-hidden">
           <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
-            <span className="font-medium text-gray-800">{items[0].customer_name}</span>
-            <span className="text-sm font-mono text-gray-500">{items[0].invoice_no}</span>
+            <div>
+              <span className="font-medium text-gray-800">{items[0].customer_name}</span>
+              <span className="text-sm font-mono text-gray-400 ml-3">{items[0].invoice_no}</span>
+            </div>
+            <button
+              onClick={async () => {
+                if (!confirm('이 운송장 주문을 DB에서 삭제할까요?')) return
+                await deleteInvoice(items[0].invoice_no)
+                setItems([])
+                setInvoiceNo('')
+                setMessage('삭제됐습니다.')
+                invoiceRef.current?.focus()
+              }}
+              className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50"
+            >
+              삭제
+            </button>
           </div>
           <table className="w-full text-sm">
             <thead className="border-b bg-gray-50">
