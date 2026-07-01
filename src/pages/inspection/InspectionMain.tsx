@@ -28,6 +28,12 @@ interface UnregisteredModal {
   candidates: InspectionItem[]
 }
 
+interface PendingInvoice {
+  invoice_no: string
+  customer_name: string
+  item_count: number
+}
+
 export default function InspectionMain() {
   const [invoiceNo, setInvoiceNo] = useState('')
   const [items, setItems] = useState<InspectionItem[]>([])
@@ -35,12 +41,29 @@ export default function InspectionMain() {
   const [modal, setModal] = useState<UnregisteredModal | null>(null)
   const [message, setMessage] = useState('')
   const [done, setDone] = useState(false)
+  const [pendingList, setPendingList] = useState<PendingInvoice[]>([])
+  const [showPending, setShowPending] = useState(false)
 
   const invoiceRef = useRef<HTMLInputElement>(null)
   const barcodeRef = useRef<HTMLInputElement>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadMsg, setUploadMsg] = useState('')
+
+  async function loadPending() {
+    const { data } = await supabase
+      .from('inspection_items')
+      .select('invoice_no, customer_name')
+    if (!data) return
+    const map: Record<string, PendingInvoice> = {}
+    for (const row of data) {
+      if (!map[row.invoice_no]) {
+        map[row.invoice_no] = { invoice_no: row.invoice_no, customer_name: row.customer_name, item_count: 0 }
+      }
+      map[row.invoice_no].item_count++
+    }
+    setPendingList(Object.values(map))
+  }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -83,6 +106,7 @@ export default function InspectionMain() {
       setUploadMsg(`오류: ${error.message}`)
     } else {
       setUploadMsg(`✅ ${rows.length}건 업로드 완료`)
+      loadPending()
     }
     setUploading(false)
     e.target.value = ''
@@ -90,6 +114,7 @@ export default function InspectionMain() {
 
   useEffect(() => {
     invoiceRef.current?.focus()
+    loadPending()
   }, [])
 
   useEffect(() => {
@@ -111,6 +136,7 @@ export default function InspectionMain() {
     if (!invoice) return
     await supabase.from('inspection_items').delete().eq('invoice_no', invoice)
     // TODO: 카페24 API - 해당 운송장 배송완료 처리
+    loadPending()
   }
 
   async function loadInvoice(e: React.FormEvent) {
@@ -202,10 +228,18 @@ export default function InspectionMain() {
 
   return (
     <div className="max-w-2xl">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-gray-800">바코드 검수</h2>
         <div className="flex items-center gap-2">
           {uploadMsg && <span className="text-sm text-gray-500">{uploadMsg}</span>}
+          {pendingList.length > 0 && (
+            <button
+              onClick={() => setShowPending(v => !v)}
+              className="text-sm text-gray-500 hover:text-gray-800 px-3 py-1.5 rounded-lg border hover:bg-gray-50"
+            >
+              잔여 <span className="font-bold text-blue-600">{pendingList.length}</span>건
+            </button>
+          )}
           <input ref={uploadRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleUpload} />
           <button
             onClick={() => uploadRef.current?.click()}
@@ -216,6 +250,38 @@ export default function InspectionMain() {
           </button>
         </div>
       </div>
+
+      {/* 잔여 주문 목록 */}
+      {showPending && (
+        <div className="bg-white rounded-xl border mb-4 overflow-hidden">
+          <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-700">잔여 주문 목록</span>
+            <button onClick={() => setShowPending(false)} className="text-gray-400 hover:text-gray-600 text-xs">닫기</button>
+          </div>
+          <div className="divide-y max-h-64 overflow-y-auto">
+            {pendingList.map(p => (
+              <button
+                key={p.invoice_no}
+                onClick={() => {
+                  setInvoiceNo(p.invoice_no)
+                  setShowPending(false)
+                  // 자동 조회
+                  supabase.from('inspection_items').select('*').eq('invoice_no', p.invoice_no).then(({ data }) => {
+                    if (data?.length) { setItems(data); setMessage(''); setTimeout(() => barcodeRef.current?.focus(), 100) }
+                  })
+                }}
+                className="w-full text-left px-4 py-3 hover:bg-blue-50 flex items-center justify-between"
+              >
+                <div>
+                  <span className="text-sm font-medium text-gray-800">{p.customer_name}</span>
+                  <span className="text-xs font-mono text-gray-400 ml-2">{p.invoice_no}</span>
+                </div>
+                <span className="text-xs text-gray-400">{p.item_count}종</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 운송장 입력 */}
       <form onSubmit={loadInvoice} className="bg-white rounded-xl border p-4 mb-4 flex gap-2">
