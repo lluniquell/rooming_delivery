@@ -80,17 +80,20 @@ export default function InspectionMain() {
     }
 
     // 헤더: 브랜드,상품명,상품옵션,상품품목코드,수량,수령인,운송장번호,공급사 상품명
+    // 포맷: "값","값","값" — 구분자는 ","
+    const clean = (v?: string) => (v ?? '').replace(/^["'\s]+|["'\s]+$/g, '').trim()
+
     const rows = lines.slice(1).map(line => {
-      const cols = line.split(',')
+      const cols = line.split('","')
       return {
-        brand: cols[0]?.trim() || null,
-        product_name: cols[1]?.trim() || '',
-        option_info: cols[2]?.trim() || null,
-        product_code: cols[3]?.trim() || '',
-        quantity: parseInt(cols[4]?.trim() || '1', 10) || 1,
-        customer_name: cols[5]?.trim() || '',
-        invoice_no: parseInvoiceNo(cols[6] || ''),
-        supplier_name: cols[7]?.trim() || null,
+        brand: clean(cols[0]) || null,
+        product_name: clean(cols[1]),
+        option_info: clean(cols[2]) || null,
+        product_code: clean(cols[3]),
+        quantity: parseInt(clean(cols[4]) || '1', 10) || 1,
+        customer_name: clean(cols[5]),
+        invoice_no: parseInvoiceNo(clean(cols[6])),
+        supplier_name: clean(cols[7]) || null,
         inspected_qty: 0,
       }
     }).filter(r => r.invoice_no && r.product_code)
