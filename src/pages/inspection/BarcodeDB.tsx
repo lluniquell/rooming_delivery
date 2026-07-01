@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 
 interface Barcode {
@@ -13,6 +13,55 @@ export default function BarcodeDB() {
   const [barcodes, setBarcodes] = useState<Barcode[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [uploadMsg, setUploadMsg] = useState('')
+  const uploadRef = useRef<HTMLInputElement>(null)
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setUploadMsg('')
+
+    const text = await file.text()
+    const lines = text.split(/\r?\n/).filter(l => l.trim())
+    if (lines.length < 2) {
+      setUploadMsg('데이터가 없습니다.')
+      setUploading(false)
+      return
+    }
+
+    // 이카운트 형식: 상품코드, 상품명, 바코드
+    const rows = lines.slice(1).map(line => {
+      const cols = line.split(',')
+      return {
+        product_code: cols[0]?.trim() || '',
+        product_name: cols[1]?.trim() || '',
+        barcode: cols[2]?.trim() || '',
+      }
+    }).filter(r => r.barcode && r.product_code)
+
+    if (!rows.length) {
+      setUploadMsg('파싱된 데이터가 없습니다.')
+      setUploading(false)
+      return
+    }
+
+    const { error } = await supabase
+      .from('barcodes')
+      .upsert(rows, { onConflict: 'barcode' })
+
+    if (error) {
+      setUploadMsg(`오류: ${error.message}`)
+    } else {
+      setUploadMsg(`✅ ${rows.length}건 업로드 완료`)
+      // 목록 새로고침
+      const { data } = await supabase.from('barcodes').select('*').order('created_at', { ascending: false })
+      setBarcodes(data ?? [])
+    }
+    setUploading(false)
+    e.target.value = ''
+  }
 
   useEffect(() => {
     supabase
@@ -50,12 +99,23 @@ export default function BarcodeDB() {
     <div className="max-w-3xl">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold text-gray-800">바코드 DB</h2>
-        <button
-          onClick={downloadExcel}
-          className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700"
-        >
-          이카운트용 CSV 다운로드
-        </button>
+        <div className="flex items-center gap-2">
+          {uploadMsg && <span className="text-sm text-gray-500">{uploadMsg}</span>}
+          <input ref={uploadRef} type="file" accept=".csv" className="hidden" onChange={handleUpload} />
+          <button
+            onClick={() => uploadRef.current?.click()}
+            disabled={uploading}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {uploading ? '업로드 중...' : '이카운트 CSV 업로드'}
+          </button>
+          <button
+            onClick={downloadExcel}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700"
+          >
+            CSV 다운로드
+          </button>
+        </div>
       </div>
 
       <div className="mb-4">
