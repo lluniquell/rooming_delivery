@@ -41,7 +41,12 @@ export default function BarcodeDB() {
       }
     }).filter(r => r.barcode && r.product_code)
 
-    if (!rows.length) {
+    // 같은 파일 내 중복 바코드 제거 (마지막 행 기준)
+    const deduped = Object.values(
+      Object.fromEntries(rows.map(r => [r.barcode, r]))
+    )
+
+    if (!deduped.length) {
       setUploadMsg('파싱된 데이터가 없습니다.')
       setUploading(false)
       return
@@ -49,12 +54,12 @@ export default function BarcodeDB() {
 
     const { error } = await supabase
       .from('barcodes')
-      .upsert(rows, { onConflict: 'barcode' })
+      .upsert(deduped, { onConflict: 'barcode' })
 
     if (error) {
       setUploadMsg(`오류: ${error.message}`)
     } else {
-      setUploadMsg(`✅ ${rows.length}건 업로드 완료`)
+      setUploadMsg(`✅ ${deduped.length}건 업로드 완료`)
       // 목록 새로고침
       const { data } = await supabase.from('barcodes').select('*').order('created_at', { ascending: false })
       setBarcodes(data ?? [])
