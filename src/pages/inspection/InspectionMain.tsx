@@ -363,8 +363,18 @@ export default function InspectionMain() {
                       <div className="text-xs text-gray-400 leading-tight">{item.supplier_name ?? '-'}</div>
                     </td>
                     <td className="text-center px-3 py-3 text-gray-600 text-sm">{item.quantity}</td>
-                    <td className={`text-center px-3 py-3 text-sm font-bold ${complete ? 'text-green-600' : item.inspected_qty > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
-                      {item.inspected_qty}
+                    <td className="text-center px-3 py-3">
+                      <div className="flex items-center justify-center gap-1">
+                        <span className={`text-sm font-bold ${complete ? 'text-green-600' : item.inspected_qty > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
+                          {item.inspected_qty}
+                        </span>
+                        {!complete && (
+                          <button
+                            onClick={() => countUp(item.product_code)}
+                            className="w-5 h-5 rounded-full bg-gray-200 hover:bg-blue-500 hover:text-white text-gray-500 text-xs font-bold flex items-center justify-center leading-none"
+                          >+</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )
