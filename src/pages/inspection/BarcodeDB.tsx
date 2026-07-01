@@ -11,6 +11,7 @@ interface Barcode {
 
 export default function BarcodeDB() {
   const [barcodes, setBarcodes] = useState<Barcode[]>([])
+  const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -128,9 +129,10 @@ export default function BarcodeDB() {
 
       <div className="mb-4">
         <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="상품명 / 상품코드 / 바코드 검색"
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') setSearch(searchInput) }}
+          placeholder="상품명 / 상품코드 / 바코드 검색 후 Enter"
           className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
