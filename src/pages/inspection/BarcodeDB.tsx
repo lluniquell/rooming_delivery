@@ -31,13 +31,18 @@ export default function BarcodeDB() {
       return
     }
 
+    // 탭 또는 콤마 구분자 자동 감지
+    const delimiter = lines[1]?.includes('\t') ? '\t' : ','
+
+    const clean = (v: string) => v?.replace(/^["'\s]+|["'\s]+$/g, '').trim()
+
     // 이카운트 형식: 상품코드, 상품명, 바코드
     const rows = lines.slice(1).map(line => {
-      const cols = line.split(',')
+      const cols = line.split(delimiter)
       return {
-        product_code: cols[0]?.trim() || '',
-        product_name: cols[1]?.trim() || '',
-        barcode: cols[2]?.trim() || '',
+        product_code: clean(cols[0]),
+        product_name: clean(cols[1]),
+        barcode: clean(cols[2]),
       }
     }).filter(r => r.barcode && r.product_code)
 
