@@ -427,6 +427,7 @@ export default function InspectionMain() {
                   className="w-full text-left px-4 py-3 rounded-xl border hover:bg-blue-50 hover:border-blue-300 transition-colors"
                 >
                   <p className="font-medium text-gray-800 text-sm">{item.product_name}</p>
+                  {item.option_info && <p className="text-xs text-blue-500 mt-0.5">{item.option_info}</p>}
                   <p className="text-xs text-gray-400 font-mono mt-0.5">{item.product_code}</p>
                 </button>
               ))}
