@@ -145,17 +145,28 @@ export default function BarcodeDB() {
                 <th className="text-left px-4 py-3 font-medium text-gray-600">상품명</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600 w-36">상품코드</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600 w-36">바코드</th>
+                <th className="w-8"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={3} className="text-center py-12 text-gray-400">데이터가 없습니다.</td></tr>
+                <tr><td colSpan={4} className="text-center py-12 text-gray-400">데이터가 없습니다.</td></tr>
               )}
               {filtered.map(b => (
-                <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50">
+                <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50 group">
                   <td className="px-4 py-3 text-gray-800">{b.product_name}</td>
                   <td className="px-4 py-3 font-mono text-gray-500 text-xs">{b.product_code}</td>
                   <td className="px-4 py-3 font-mono text-gray-500 text-xs">{b.barcode}</td>
+                  <td className="px-2 py-3">
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`삭제할까요?\n${b.product_name} / ${b.barcode}`)) return
+                        await supabase.from('barcodes').delete().eq('id', b.id)
+                        setBarcodes(prev => prev.filter(x => x.id !== b.id))
+                      }}
+                      className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity text-xs px-1"
+                    >✕</button>
+                  </td>
                 </tr>
               ))}
             </tbody>

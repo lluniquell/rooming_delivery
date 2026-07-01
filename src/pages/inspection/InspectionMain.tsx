@@ -177,7 +177,12 @@ export default function InspectionMain() {
       .single()
 
     if (bcData) {
-      await countUp(bcData.product_code)
+      const matched = items.find(i => i.product_code === bcData.product_code)
+      if (!matched) {
+        setMessage(`중복 바코드 또는 잘못 등록된 바코드입니다. (DB: ${bcData.product_code})`)
+      } else {
+        await countUp(bcData.product_code)
+      }
     } else {
       // 미등록 바코드 → 모달
       setModal({ barcode: scanned, candidates: items })
