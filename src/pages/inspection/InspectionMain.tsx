@@ -108,6 +108,14 @@ export default function InspectionMain() {
     if (error) {
       setUploadMsg(`오류: ${error.message}`)
     } else {
+      // 공급사 상품명에서 로케이션 추출 → barcodes 업데이트
+      const locationRegex = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
+      const locationUpdates = rows
+        .map(r => ({ product_code: r.product_code, location: (r.supplier_name ?? '').match(locationRegex)?.[0] ?? null }))
+        .filter(r => r.location)
+      for (const u of locationUpdates) {
+        await supabase.from('barcodes').update({ location: u.location }).eq('product_code', u.product_code)
+      }
       setUploadMsg(`✅ ${rows.length}건 업로드 완료`)
       loadPending()
     }

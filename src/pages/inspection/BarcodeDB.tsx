@@ -6,6 +6,7 @@ interface Barcode {
   barcode: string
   product_code: string
   product_name: string
+  location: string | null
   created_at: string
 }
 
@@ -85,8 +86,8 @@ export default function BarcodeDB() {
 
   function downloadExcel() {
     const rows = [
-      ['상품코드', '상품명', '바코드'],
-      ...barcodes.map(b => [b.product_code, b.product_name, b.barcode]),
+      ['상품코드', '상품명', '바코드', '로케이션'],
+      ...barcodes.map(b => [b.product_code, b.product_name, b.barcode, b.location ?? '']),
     ]
     const csv = rows.map(r => r.join(',')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
@@ -147,18 +148,20 @@ export default function BarcodeDB() {
                 <th className="text-left px-4 py-3 font-medium text-gray-600">상품명</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600 w-36">상품코드</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600 w-36">바코드</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600 w-28">로케이션</th>
                 <th className="w-8"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={4} className="text-center py-12 text-gray-400">데이터가 없습니다.</td></tr>
+                <tr><td colSpan={5} className="text-center py-12 text-gray-400">데이터가 없습니다.</td></tr>
               )}
               {filtered.map(b => (
                 <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50 group">
                   <td className="px-4 py-3 text-gray-800">{b.product_name}</td>
                   <td className="px-4 py-3 font-mono text-gray-500 text-xs">{b.product_code}</td>
                   <td className="px-4 py-3 font-mono text-gray-500 text-xs">{b.barcode}</td>
+                  <td className="px-4 py-3 font-mono text-blue-500 text-xs">{b.location ?? ''}</td>
                   <td className="px-2 py-3">
                     <button
                       onClick={async () => {
