@@ -53,24 +53,16 @@ export default function InspectionMain() {
 
   async function downloadPickingList() {
     const { data: items } = await supabase.from('inspection_items').select('product_code, brand, product_name, option_info, supplier_name, quantity')
-    const { data: barcodes } = await supabase.from('barcodes').select('product_code, location')
     if (!items) return
 
-    const locationMap: Record<string, string> = {}
-    for (const b of barcodes ?? []) {
-      if (b.location) locationMap[b.product_code] = b.location
-    }
-
-    const locationRegex = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/g
+    const locationRegex = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
     const rows = items
-      .map(i => ({
-        location: locationMap[i.product_code] ?? '',
-        brand: i.brand ?? '',
-        product_name: i.product_name,
-        option_info: i.option_info ?? '',
-        supplier_note: (i.supplier_name ?? '').replace(locationRegex, '').replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '').trim(),
-        quantity: i.quantity,
-      }))
+      .map(i => {
+        const supplier = i.supplier_name ?? ''
+        const location = supplier.match(locationRegex)?.[0] ?? ''
+        const supplier_note = supplier.replace(locationRegex, '').replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '').trim()
+        return { location, brand: i.brand ?? '', product_name: i.product_name, option_info: i.option_info ?? '', supplier_note, quantity: i.quantity }
+      })
       .sort((a, b) => a.location.localeCompare(b.location))
 
     const csv = [
