@@ -310,7 +310,21 @@ export default function InspectionMain() {
         <div className="bg-white rounded-xl border mb-4 overflow-hidden">
           <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
             <span className="text-sm font-medium text-gray-700">잔여 주문 목록</span>
-            <button onClick={() => setShowPending(false)} className="text-gray-400 hover:text-gray-600 text-xs">닫기</button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={async () => {
+                  if (!confirm(`잔여 주문 ${pendingList.length}건을 모두 삭제할까요?`)) return
+                  await supabase.from('inspection_items').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+                  setItems([]); setInvoiceNo(''); setMessage('')
+                  setShowPending(false)
+                  loadPending()
+                }}
+                className="text-xs text-red-400 hover:text-red-600"
+              >
+                일괄 삭제
+              </button>
+              <button onClick={() => setShowPending(false)} className="text-gray-400 hover:text-gray-600 text-xs">닫기</button>
+            </div>
           </div>
           <div className="divide-y max-h-64 overflow-y-auto">
             {pendingList.map(p => (
