@@ -52,7 +52,7 @@ export default function InspectionMain() {
   const [hasUploaded, setHasUploaded] = useState(false)
 
   async function downloadPickingList() {
-    const { data: items } = await supabase.from('inspection_items').select('product_code, brand, product_name, option_info, quantity')
+    const { data: items } = await supabase.from('inspection_items').select('product_code, brand, product_name, option_info, supplier_name, quantity')
     const { data: barcodes } = await supabase.from('barcodes').select('product_code, location')
     if (!items) return
 
@@ -61,13 +61,21 @@ export default function InspectionMain() {
       if (b.location) locationMap[b.product_code] = b.location
     }
 
+    const locationRegex = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/g
     const rows = items
-      .map(i => ({ location: locationMap[i.product_code] ?? '', brand: i.brand ?? '', product_name: i.product_name, option_info: i.option_info ?? '', quantity: i.quantity }))
+      .map(i => ({
+        location: locationMap[i.product_code] ?? '',
+        brand: i.brand ?? '',
+        product_name: i.product_name,
+        option_info: i.option_info ?? '',
+        supplier_note: (i.supplier_name ?? '').replace(locationRegex, '').replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '').trim(),
+        quantity: i.quantity,
+      }))
       .sort((a, b) => a.location.localeCompare(b.location))
 
     const csv = [
-      ['로케이션', '브랜드', '상품명', '옵션', '주문수량'],
-      ...rows.map(r => [r.location, r.brand, r.product_name, r.option_info, r.quantity]),
+      ['로케이션', '브랜드', '상품명', '옵션', '공급사 상품명', '주문수량'],
+      ...rows.map(r => [r.location, r.brand, r.product_name, r.option_info, r.supplier_note, r.quantity]),
     ].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
 
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
