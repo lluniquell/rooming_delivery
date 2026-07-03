@@ -19,6 +19,7 @@ export default function BarcodeDB() {
   const [uploadMsg, setUploadMsg] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
 
+
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
