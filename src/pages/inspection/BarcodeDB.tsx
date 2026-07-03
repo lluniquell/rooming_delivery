@@ -10,15 +10,43 @@ interface Barcode {
   created_at: string
 }
 
+const PAGE_SIZE = 100
+
 export default function BarcodeDB() {
   const [barcodes, setBarcodes] = useState<Barcode[]>([])
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
+  const [total, setTotal] = useState(0)
+  const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [uploadMsg, setUploadMsg] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
 
+  async function fetchBarcodes(p: number, q: string) {
+    setLoading(true)
+    let query = supabase
+      .from('barcodes')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE - 1)
+
+    if (q) {
+      query = query.or(`product_name.ilike.%${q}%,product_code.ilike.%${q}%,barcode.ilike.%${q}%`)
+    }
+
+    const { data, count } = await query
+    setBarcodes(data ?? [])
+    setTotal(count ?? 0)
+    setLoading(false)
+  }
+
+  useEffect(() => { fetchBarcodes(page, search) }, [page, search])
+
+  function doSearch() {
+    setPage(0)
+    setSearch(searchInput)
+  }
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -34,8 +62,6 @@ export default function BarcodeDB() {
       return
     }
 
-    // 이카운트 형식: "품목코드\t","품목명\t","바코드\t"
-    // 구분자는 "," (따옴표-콤마-따옴표), 값 내부에 탭/공백 포함
     const clean = (v?: string) => (v ?? '').replace(/[\t"]/g, '').trim()
 
     const rows = lines.slice(1).map(line => {
@@ -47,10 +73,7 @@ export default function BarcodeDB() {
       }
     }).filter(r => r.barcode && r.product_code)
 
-    // 같은 파일 내 중복 바코드 제거 (마지막 행 기준)
-    const deduped = Object.values(
-      Object.fromEntries(rows.map(r => [r.barcode, r]))
-    )
+    const deduped = Object.values(Object.fromEntries(rows.map(r => [r.barcode, r])))
 
     if (!deduped.length) {
       setUploadMsg('파싱된 데이터가 없습니다.')
@@ -58,37 +81,33 @@ export default function BarcodeDB() {
       return
     }
 
-    const { error } = await supabase
-      .from('barcodes')
-      .upsert(deduped, { onConflict: 'barcode' })
+    const { error } = await supabase.from('barcodes').upsert(deduped, { onConflict: 'barcode' })
 
     if (error) {
       setUploadMsg(`오류: ${error.message}`)
     } else {
       setUploadMsg(`✅ ${deduped.length}건 업로드 완료`)
-      // 목록 새로고침
-      const { data } = await supabase.from('barcodes').select('*').order('created_at', { ascending: false })
-      setBarcodes(data ?? [])
+      fetchBarcodes(0, search)
+      setPage(0)
     }
     setUploading(false)
     e.target.value = ''
   }
 
-  useEffect(() => {
-    supabase
-      .from('barcodes')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .then(({ data }) => {
-        setBarcodes(data ?? [])
-        setLoading(false)
-      })
-  }, [])
-
-  function downloadExcel() {
+  async function downloadExcel() {
+    // 전체 다운로드 - 페이지 순회
+    let all: Barcode[] = []
+    let from = 0
+    while (true) {
+      const { data } = await supabase.from('barcodes').select('*').order('created_at', { ascending: false }).range(from, from + 999)
+      if (!data?.length) break
+      all = all.concat(data)
+      if (data.length < 1000) break
+      from += 1000
+    }
     const rows = [
       ['상품코드', '상품명', '바코드', '로케이션'],
-      ...barcodes.map(b => [b.product_code, b.product_name, b.barcode, b.location ?? '']),
+      ...all.map(b => [b.product_code, b.product_name, b.barcode ?? '', b.location ?? '']),
     ]
     const csv = rows.map(r => r.join(',')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
@@ -100,11 +119,7 @@ export default function BarcodeDB() {
     URL.revokeObjectURL(url)
   }
 
-  const filtered = barcodes.filter(b =>
-    b.product_name.includes(search) ||
-    b.product_code.includes(search) ||
-    b.barcode.includes(search)
-  )
+  const totalPages = Math.ceil(total / PAGE_SIZE)
 
   return (
     <div className="max-w-3xl">
@@ -133,7 +148,7 @@ export default function BarcodeDB() {
         <input
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') setSearch(searchInput) }}
+          onKeyDown={e => e.key === 'Enter' && doSearch()}
           placeholder="상품명 / 상품코드 / 바코드 검색 후 Enter"
           className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
@@ -154,10 +169,10 @@ export default function BarcodeDB() {
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 && (
+              {barcodes.length === 0 && (
                 <tr><td colSpan={5} className="text-center py-12 text-gray-400">데이터가 없습니다.</td></tr>
               )}
-              {filtered.map(b => (
+              {barcodes.map(b => (
                 <tr key={b.id} className="border-b last:border-0 hover:bg-gray-50 group">
                   <td className="px-4 py-3 text-gray-800">{b.product_name}</td>
                   <td className="px-4 py-3 font-mono text-gray-500 text-xs">{b.product_code}</td>
@@ -168,7 +183,7 @@ export default function BarcodeDB() {
                       onClick={async () => {
                         if (!confirm(`삭제할까요?\n${b.product_name} / ${b.barcode}`)) return
                         await supabase.from('barcodes').delete().eq('id', b.id)
-                        setBarcodes(prev => prev.filter(x => x.id !== b.id))
+                        fetchBarcodes(page, search)
                       }}
                       className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity text-xs px-1"
                     >✕</button>
@@ -179,7 +194,19 @@ export default function BarcodeDB() {
           </table>
         )}
       </div>
-      <p className="mt-2 text-xs text-gray-400 text-right">총 {filtered.length}개</p>
+
+      <div className="mt-3 flex items-center justify-between text-xs text-gray-400">
+        <span>총 {total.toLocaleString()}개</span>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <button onClick={() => setPage(0)} disabled={page === 0} className="px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-30">«</button>
+            <button onClick={() => setPage(p => p - 1)} disabled={page === 0} className="px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-30">‹</button>
+            <span className="px-2">{page + 1} / {totalPages}</span>
+            <button onClick={() => setPage(p => p + 1)} disabled={page >= totalPages - 1} className="px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-30">›</button>
+            <button onClick={() => setPage(totalPages - 1)} disabled={page >= totalPages - 1} className="px-2 py-1 rounded hover:bg-gray-100 disabled:opacity-30">»</button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
