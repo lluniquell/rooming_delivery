@@ -18,6 +18,7 @@ const deliveryItems = [
 const propItems = [
   { to: '/admin/inspection', label: '바코드 검수' },
   { to: '/admin/barcodes', label: '바코드 DB' },
+  { to: '/admin/barcode-assign', label: '바코드 채번' },
 ]
 
 function NavGroup({ label, items }: { label: string; items: { to: string; label: string }[] }) {
