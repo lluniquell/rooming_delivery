@@ -49,6 +49,35 @@ export default function InspectionMain() {
   const uploadRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadMsg, setUploadMsg] = useState('')
+  const [hasUploaded, setHasUploaded] = useState(false)
+
+  async function downloadPickingList() {
+    const { data: items } = await supabase.from('inspection_items').select('product_code, product_name, option_info, quantity')
+    const { data: barcodes } = await supabase.from('barcodes').select('product_code, location')
+    if (!items) return
+
+    const locationMap: Record<string, string> = {}
+    for (const b of barcodes ?? []) {
+      if (b.location) locationMap[b.product_code] = b.location
+    }
+
+    const rows = items
+      .map(i => ({ location: locationMap[i.product_code] ?? '', product_name: i.product_name, option_info: i.option_info ?? '', quantity: i.quantity }))
+      .sort((a, b) => a.location.localeCompare(b.location))
+
+    const csv = [
+      ['로케이션', '상품명', '옵션', '주문수량'],
+      ...rows.map(r => [r.location, r.product_name, r.option_info, r.quantity]),
+    ].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `픽킹리스트_${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   async function loadPending() {
     const { data } = await supabase
@@ -117,6 +146,7 @@ export default function InspectionMain() {
         await supabase.from('barcodes').update({ location: u.location }).eq('product_code', u.product_code)
       }
       setUploadMsg(`✅ ${rows.length}건 업로드 완료`)
+      setHasUploaded(true)
       loadPending()
     }
     setUploading(false)
@@ -247,6 +277,14 @@ export default function InspectionMain() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-gray-800">바코드 검수</h2>
         <div className="flex items-center gap-2">
+          {hasUploaded && (
+            <button
+              onClick={downloadPickingList}
+              className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700"
+            >
+              픽킹 리스트 다운로드
+            </button>
+          )}
           {uploadMsg && <span className="text-sm text-gray-500">{uploadMsg}</span>}
           {pendingList.length > 0 && (
             <button
