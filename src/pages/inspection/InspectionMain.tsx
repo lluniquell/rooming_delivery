@@ -222,8 +222,8 @@ export default function InspectionMain() {
         await countUp(bcData.product_code)
       }
     } else {
-      // 미등록 바코드 → 모달
-      setModal({ barcode: scanned, candidates: items })
+      // 미등록 바코드 → 미완료 항목만 후보로
+      setModal({ barcode: scanned, candidates: items.filter(i => i.inspected_qty < i.quantity) })
     }
 
     barcodeRef.current?.focus()
@@ -479,7 +479,7 @@ export default function InspectionMain() {
             <h3 className="font-bold text-gray-800 mb-1">미등록 바코드</h3>
             <p className="text-sm font-mono text-gray-500 mb-4">{modal.barcode}</p>
             <p className="text-sm text-gray-600 mb-3">어떤 상품인가요?</p>
-            <div className="space-y-2 mb-4">
+            <div className="space-y-2 mb-4 max-h-72 overflow-y-auto">
               {modal.candidates.map(item => (
                 <button
                   key={item.id}
