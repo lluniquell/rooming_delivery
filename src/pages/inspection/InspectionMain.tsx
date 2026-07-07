@@ -56,14 +56,19 @@ export default function InspectionMain() {
     if (!items) return
 
     const locationRegex = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
-    const rows = items
-      .map(i => {
-        const supplier = i.supplier_name ?? ''
-        const location = supplier.match(locationRegex)?.[0] ?? ''
-        const supplier_note = supplier.replace(locationRegex, '').replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '').trim()
-        return { location, brand: i.brand ?? '', product_name: i.product_name, option_info: i.option_info ?? '', supplier_note, quantity: i.quantity }
-      })
-      .sort((a, b) => a.location.localeCompare(b.location))
+    const merged: Record<string, { location: string; brand: string; product_name: string; option_info: string; supplier_note: string; quantity: number }> = {}
+    for (const i of items) {
+      const supplier = i.supplier_name ?? ''
+      const location = supplier.match(locationRegex)?.[0] ?? ''
+      const supplier_note = supplier.replace(locationRegex, '').replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '').trim()
+      const key = `${i.product_code}__${i.option_info ?? ''}`
+      if (merged[key]) {
+        merged[key].quantity += i.quantity
+      } else {
+        merged[key] = { location, brand: i.brand ?? '', product_name: i.product_name, option_info: i.option_info ?? '', supplier_note, quantity: i.quantity }
+      }
+    }
+    const rows = Object.values(merged).sort((a, b) => a.location.localeCompare(b.location))
 
     const csv = [
       ['로케이션', '브랜드', '상품명', '옵션', '공급사 상품명', '주문수량'],
