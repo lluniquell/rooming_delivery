@@ -138,7 +138,20 @@ export default function InspectionMain() {
       return
     }
 
-    const { error } = await supabase.from('inspection_items').insert(rows)
+    // 이미 DB에 있는 운송장번호 제외
+    const invoiceNos = [...new Set(rows.map(r => r.invoice_no))]
+    const { data: existing } = await supabase.from('inspection_items').select('invoice_no').in('invoice_no', invoiceNos)
+    const existingSet = new Set(existing?.map(e => e.invoice_no) ?? [])
+    const newRows = rows.filter(r => !existingSet.has(r.invoice_no))
+
+    if (!newRows.length) {
+      setUploadMsg('모든 주문이 이미 등록되어 있습니다.')
+      setUploading(false)
+      return
+    }
+
+    const skipped = invoiceNos.length - [...new Set(newRows.map(r => r.invoice_no))].length
+    const { error } = await supabase.from('inspection_items').insert(newRows)
     if (error) {
       setUploadMsg(`오류: ${error.message}`)
     } else {
@@ -155,7 +168,7 @@ export default function InspectionMain() {
           await supabase.from('barcodes').insert({ product_code: u.product_code, product_name: u.product_name, location: u.location })
         }
       }
-      setUploadMsg(`✅ ${rows.length}건 업로드 완료`)
+      setUploadMsg(`✅ ${newRows.length}건 업로드${skipped ? ` (중복 ${skipped}건 제외)` : ''}`)
       setHasUploaded(true)
       loadPending()
     }
