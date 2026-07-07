@@ -177,7 +177,19 @@ export default function BarcodeDB() {
                   <td className="px-4 py-3 text-gray-800">{b.product_name}</td>
                   <td className="px-4 py-3 font-mono text-gray-500 text-xs">{b.product_code}</td>
                   <td className="px-4 py-3 font-mono text-gray-500 text-xs">{b.barcode}</td>
-                  <td className="px-4 py-3 font-mono text-blue-500 text-xs">{b.location ?? ''}</td>
+                  <td className="px-2 py-2">
+                    <input
+                      defaultValue={b.location ?? ''}
+                      onBlur={async e => {
+                        const val = e.target.value.trim() || null
+                        if (val === (b.location ?? null)) return
+                        await supabase.from('barcodes').update({ location: val }).eq('id', b.id)
+                        setBarcodes(prev => prev.map(x => x.id === b.id ? { ...x, location: val } : x))
+                      }}
+                      className="w-full font-mono text-blue-500 text-xs border-0 bg-transparent focus:bg-white focus:border focus:border-blue-300 rounded px-1 py-0.5 focus:outline-none"
+                      placeholder="-"
+                    />
+                  </td>
                   <td className="px-2 py-3">
                     <button
                       onClick={async () => {
