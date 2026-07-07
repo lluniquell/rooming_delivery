@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { getCafe24AuthUrl } from '../../lib/cafe24'
 import type { Delivery, Driver } from '../../types'
 
 const STATUS_LABEL: Record<string, string> = { pending: '대기', done: '완료', failed: '불가' }
@@ -59,6 +60,12 @@ export default function AdminDashboard() {
           {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
         </select>
         <span className="text-sm text-gray-500 ml-auto">총 {filtered.length}건</span>
+        <a
+          href={getCafe24AuthUrl()}
+          className="text-xs text-gray-400 hover:text-blue-500 border rounded px-2 py-1"
+        >
+          카페24 연동
+        </a>
       </div>
 
       <div className="bg-white rounded-xl border overflow-hidden">

@@ -14,6 +14,7 @@ import AdminStorage from './pages/admin/AdminStorage'
 import InspectionMain from './pages/inspection/InspectionMain'
 import BarcodeDB from './pages/inspection/BarcodeDB'
 import BarcodeAssign from './pages/inspection/BarcodeAssign'
+import Cafe24Callback from './pages/auth/Cafe24Callback'
 import DriverLayout from './pages/driver/DriverLayout'
 import DriverList from './pages/driver/DriverList'
 import DriverDetail from './pages/driver/DriverDetail'
@@ -47,6 +48,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={!driver ? <LoginPage /> : <Navigate to="/" />} />
+        <Route path="/auth/cafe24/callback" element={<Cafe24Callback />} />
 
         {/* 관리자 */}
         <Route
