@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { exchangeCodeForTokens } from '../../lib/cafe24'
+import { exchangeCodeForTokens, getCafe24AuthUrl } from '../../lib/cafe24'
 
 export default function Cafe24Callback() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
@@ -44,9 +44,15 @@ export default function Cafe24Callback() {
           <>
             <p className="text-red-600 font-bold">인증 실패</p>
             <p className="text-gray-500 text-sm mt-2">{error}</p>
+            <a
+              href={getCafe24AuthUrl()}
+              className="mt-4 inline-block text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+            >
+              다시 시도
+            </a>
             <button
               onClick={() => navigate('/admin/dashboard')}
-              className="mt-4 text-sm text-blue-500 hover:underline"
+              className="mt-2 block text-sm text-gray-400 hover:underline"
             >
               대시보드로 돌아가기
             </button>
