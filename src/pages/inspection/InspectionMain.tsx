@@ -147,8 +147,13 @@ export default function InspectionMain() {
       const locationUpdates = rows
         .map(r => ({ product_code: r.product_code, product_name: r.product_name, location: (r.supplier_name ?? '').match(locationRegex)?.[0] ?? null }))
         .filter(r => r.location)
-      if (locationUpdates.length) {
-        await supabase.from('barcodes').upsert(locationUpdates, { onConflict: 'product_code', ignoreDuplicates: false })
+      for (const u of locationUpdates) {
+        const { data: existing } = await supabase.from('barcodes').select('id').eq('product_code', u.product_code).limit(1)
+        if (existing?.length) {
+          await supabase.from('barcodes').update({ location: u.location }).eq('product_code', u.product_code)
+        } else {
+          await supabase.from('barcodes').insert({ product_code: u.product_code, product_name: u.product_name, location: u.location })
+        }
       }
       setUploadMsg(`✅ ${rows.length}건 업로드 완료`)
       setHasUploaded(true)

@@ -105,17 +105,19 @@ export default function BarcodeAssign() {
       serial = parseInt(existing[0].barcode.slice(-5), 10) + 1
     }
 
-    // product_code 중복 체크
+    // product_code 기존 바코드 여부 확인 (경고만, 중단 안 함)
     const codes = items.map(i => i.product_code)
-    const { data: dupes } = await supabase
+    const { data: existing_codes } = await supabase
       .from('barcodes')
       .select('product_code')
       .in('product_code', codes)
 
-    if (dupes?.length) {
-      setMessage(`중복 품목코드 있음: ${dupes.map(d => d.product_code).join(', ')} — 채번 중단`)
-      setProcessing(false)
-      return
+    if (existing_codes?.length) {
+      const dupeList = [...new Set(existing_codes.map(d => d.product_code))].join(', ')
+      if (!confirm(`이미 바코드가 있는 품목코드:\n${dupeList}\n\n추가 채번할까요?`)) {
+        setProcessing(false)
+        return
+      }
     }
 
     const newRows = items.map(item => ({
