@@ -8,9 +8,13 @@ export default function Cafe24Callback() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get('code')
-    if (!code) {
-      setError('인증 코드가 없습니다.')
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('code')
+    const error = params.get('error')
+    const errorDesc = params.get('error_description')
+
+    if (error || !code) {
+      setError(errorDesc?.replace(/\+/g, ' ') || '인증이 거부됐습니다. 운영자 계정으로 다시 시도해주세요.')
       setStatus('error')
       return
     }
@@ -39,7 +43,13 @@ export default function Cafe24Callback() {
         {status === 'error' && (
           <>
             <p className="text-red-600 font-bold">인증 실패</p>
-            <p className="text-gray-500 text-sm mt-1">{error}</p>
+            <p className="text-gray-500 text-sm mt-2">{error}</p>
+            <button
+              onClick={() => navigate('/admin/dashboard')}
+              className="mt-4 text-sm text-blue-500 hover:underline"
+            >
+              대시보드로 돌아가기
+            </button>
           </>
         )}
       </div>
