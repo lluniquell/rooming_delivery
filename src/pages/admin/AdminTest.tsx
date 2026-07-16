@@ -5,6 +5,13 @@ export default function AdminTest() {
   const [result, setResult] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [tokenStatus, setTokenStatus] = useState<any>(null)
+
+  async function checkToken() {
+    const res = await fetch('/api/cafe24/status')
+    const data = await res.json()
+    setTokenStatus(data)
+  }
 
   async function search(e: React.FormEvent) {
     e.preventDefault()
@@ -28,7 +35,18 @@ export default function AdminTest() {
 
   return (
     <div className="max-w-2xl">
-      <h2 className="text-xl font-bold text-gray-800 mb-6">카페24 주문 조회 테스트</h2>
+      <h2 className="text-xl font-bold text-gray-800 mb-4">카페24 주문 조회 테스트</h2>
+
+      <div className="mb-6">
+        <button onClick={checkToken} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-sm hover:bg-gray-200">
+          토큰 상태 확인
+        </button>
+        {tokenStatus && (
+          <pre className="mt-2 text-xs bg-gray-50 border rounded p-3 overflow-auto">
+            {JSON.stringify(tokenStatus, null, 2)}
+          </pre>
+        )}
+      </div>
 
       <form onSubmit={search} className="flex gap-2 mb-6">
         <input
