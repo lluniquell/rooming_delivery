@@ -22,6 +22,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@supabase/supabase-js": "^2.108.2",
+    "@vercel/node": "^5.8.25",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.0",
