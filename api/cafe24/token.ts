@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 
-const MALL_ID = process.env.VITE_CAFE24_MALL_ID!
-const CLIENT_ID = process.env.VITE_CAFE24_CLIENT_ID!
-const CLIENT_SECRET = process.env.CAFE24_CLIENT_SECRET!
+const MALL_ID = (process.env.VITE_CAFE24_MALL_ID ?? '').trim()
+const CLIENT_ID = (process.env.VITE_CAFE24_CLIENT_ID ?? '').trim()
+const CLIENT_SECRET = (process.env.CAFE24_CLIENT_SECRET ?? '').trim()
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL!,
