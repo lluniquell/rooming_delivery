@@ -17,7 +17,6 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     headers: {
       Authorization: `Bearer ${tokenRow.access_token}`,
       'Content-Type': 'application/json',
-      'X-Cafe24-Api-Version': '2023-08-01',
     },
   })
   const text = await apiRes.text()
