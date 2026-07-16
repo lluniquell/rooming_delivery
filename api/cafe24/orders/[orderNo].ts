@@ -45,7 +45,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = await getAccessToken()
     const url = `https://${MALL_ID}.cafe24api.com/api/v2/admin/orders/${orderNo}?shop_no=1`
     const apiRes = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Cafe24-Api-Version': '2024-03-01',
+      },
     })
     const text = await apiRes.text()
     let data: any
