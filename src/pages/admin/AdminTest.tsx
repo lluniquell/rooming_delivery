@@ -14,12 +14,14 @@ export default function AdminTest() {
     setResult(null)
 
     const res = await fetch(`/api/cafe24/orders/${orderNo.trim()}`)
-    const data = await res.json()
+    const text = await res.text()
+    let data: any
+    try { data = JSON.parse(text) } catch { data = text }
 
     if (!res.ok) {
-      setError(JSON.stringify(data, null, 2))
+      setError(text)
     } else {
-      setResult(data)
+      setResult(data ?? '(빈 응답)')
     }
     setLoading(false)
   }
@@ -51,11 +53,11 @@ export default function AdminTest() {
         </div>
       )}
 
-      {result && (
+      {result !== null && (
         <div className="bg-white rounded-xl border p-4">
           <p className="text-sm font-medium text-gray-700 mb-3">응답 데이터</p>
           <pre className="text-xs text-gray-600 overflow-auto max-h-96 bg-gray-50 rounded p-3">
-            {JSON.stringify(result, null, 2)}
+            {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
           </pre>
         </div>
       )}
