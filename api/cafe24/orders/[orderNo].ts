@@ -43,11 +43,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { orderNo } = req.query
   try {
     const token = await getAccessToken()
-    const apiRes = await fetch(
-      `https://${MALL_ID}.cafe24api.com/api/v2/admin/orders/${orderNo}?shop_no=1`,
-      { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
-    )
-    const data = await apiRes.json()
+    const url = `https://${MALL_ID}.cafe24api.com/api/v2/admin/orders/${orderNo}?shop_no=1`
+    const apiRes = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    })
+    const text = await apiRes.text()
+    let data: any
+    try { data = JSON.parse(text) } catch {
+      return res.status(apiRes.status).json({ error: `Cafe24 응답 파싱 실패 (${apiRes.status})`, raw: text.slice(0, 500), url })
+    }
     if (!apiRes.ok) return res.status(apiRes.status).json(data)
     res.status(200).json(data.order ?? data)
   } catch (e: any) {
