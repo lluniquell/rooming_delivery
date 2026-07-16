@@ -47,13 +47,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const apiRes = await fetch(url, {
       headers: {
         Authorization: `Bearer ${token}`,
-        'X-Cafe24-Api-Version': '2024-03-01',
+        'Content-Type': 'application/json',
+        'X-Cafe24-Api-Version': '2023-08-01',
       },
     })
     const text = await apiRes.text()
+    const responseHeaders: Record<string, string> = {}
+    apiRes.headers.forEach((v, k) => { responseHeaders[k] = v })
     let data: any
     try { data = JSON.parse(text) } catch {
-      return res.status(apiRes.status).json({ error: `Cafe24 응답 파싱 실패 (${apiRes.status})`, raw: text.slice(0, 500), url })
+      return res.status(apiRes.status).json({ error: `Cafe24 응답 파싱 실패 (${apiRes.status})`, raw: text.slice(0, 500), url, responseHeaders })
     }
     if (!apiRes.ok) return res.status(apiRes.status).json(data)
     res.status(200).json(data.order ?? data)
