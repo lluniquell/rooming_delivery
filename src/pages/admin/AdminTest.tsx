@@ -13,6 +13,14 @@ export default function AdminTest() {
     setTokenStatus(data)
   }
 
+  async function checkShop() {
+    const res = await fetch('/api/cafe24/shop')
+    const text = await res.text()
+    let data: any
+    try { data = JSON.parse(text) } catch { data = text }
+    setTokenStatus(data)
+  }
+
   async function search(e: React.FormEvent) {
     e.preventDefault()
     if (!orderNo.trim()) return
@@ -38,8 +46,11 @@ export default function AdminTest() {
       <h2 className="text-xl font-bold text-gray-800 mb-4">카페24 주문 조회 테스트</h2>
 
       <div className="mb-6">
-        <button onClick={checkToken} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-sm hover:bg-gray-200">
+        <button onClick={checkToken} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-sm hover:bg-gray-200 mr-2">
           토큰 상태 확인
+        </button>
+        <button onClick={checkShop} className="bg-blue-100 text-blue-700 px-3 py-1.5 rounded-lg text-sm hover:bg-blue-200">
+          쇼핑몰 정보 조회 (API 테스트)
         </button>
         {tokenStatus && (
           <pre className="mt-2 text-xs bg-gray-50 border rounded p-3 overflow-auto">
