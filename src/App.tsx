@@ -15,6 +15,7 @@ import InspectionMain from './pages/inspection/InspectionMain'
 import BarcodeDB from './pages/inspection/BarcodeDB'
 import BarcodeAssign from './pages/inspection/BarcodeAssign'
 import Cafe24Callback from './pages/auth/Cafe24Callback'
+import AdminTest from './pages/admin/AdminTest'
 import DriverLayout from './pages/driver/DriverLayout'
 import DriverList from './pages/driver/DriverList'
 import DriverDetail from './pages/driver/DriverDetail'
@@ -64,6 +65,7 @@ function App() {
           <Route path="inspection" element={<InspectionMain />} />
           <Route path="barcodes" element={<BarcodeDB />} />
           <Route path="barcode-assign" element={<BarcodeAssign />} />
+          <Route path="test" element={<AdminTest />} />
         </Route>
 
         {/* 배송원 */}

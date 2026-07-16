@@ -21,6 +21,10 @@ const propItems = [
   { to: '/admin/barcode-assign', label: '바코드 채번' },
 ]
 
+const devItems = [
+  { to: '/admin/test', label: '카페24 테스트' },
+]
+
 function NavGroup({ label, items }: { label: string; items: { to: string; label: string }[] }) {
   const [open, setOpen] = useState(false)
   const location = useLocation()
@@ -73,6 +77,7 @@ export default function AdminLayout({ driver }: Props) {
           <nav className="flex gap-1">
             <NavGroup label="배송팀" items={deliveryItems} />
             <NavGroup label="소품팀" items={propItems} />
+            <NavGroup label="테스트" items={devItems} />
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm text-gray-500">
