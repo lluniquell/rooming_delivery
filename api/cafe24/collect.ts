@@ -30,8 +30,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const token = await getToken()
 
-    const endDate = new Date().toISOString().slice(0, 10)
-    const startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    const { start_date, end_date } = req.body ?? {}
+    const endDate = end_date ?? new Date().toISOString().slice(0, 10)
+    const startDate = start_date ?? new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
     const data = await cafe24Get(
       `/api/v2/admin/orders?shipping_status=B&limit=100&shop_no=1&start_date=${startDate}&end_date=${endDate}`,

@@ -18,6 +18,21 @@ interface Batch {
 
 const DELIVERY_METHODS = ['CJ', '배송팀', '문종철', '경동', '팀무버']
 
+const today = () => new Date().toISOString().slice(0, 10)
+const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
+
+const PRESETS = [
+  { label: '오늘', start: () => today() },
+  { label: '어제', start: () => daysAgo(1), end: () => daysAgo(1) },
+  { label: '3일', start: () => daysAgo(3) },
+  { label: '7일', start: () => daysAgo(7) },
+  { label: '15일', start: () => daysAgo(15) },
+  { label: '1개월', start: () => daysAgo(30) },
+  { label: '3개월', start: () => daysAgo(90) },
+  { label: '6개월', start: () => daysAgo(180) },
+  { label: '1년', start: () => daysAgo(365) },
+]
+
 export default function SoumOrders() {
   const [orders, setOrders] = useState<Order[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
@@ -27,6 +42,15 @@ export default function SoumOrders() {
   const [showModal, setShowModal] = useState(false)
   const [assignBatchId, setAssignBatchId] = useState('')
   const [assignMethod, setAssignMethod] = useState('CJ')
+  const [startDate, setStartDate] = useState(daysAgo(180))
+  const [endDate, setEndDate] = useState(today())
+  const [activePreset, setActivePreset] = useState('6개월')
+
+  function applyPreset(preset: typeof PRESETS[0]) {
+    setStartDate(preset.start())
+    setEndDate(preset.end ? preset.end() : today())
+    setActivePreset(preset.label)
+  }
 
   useEffect(() => {
     loadOrders()
@@ -65,7 +89,11 @@ export default function SoumOrders() {
     setCollecting(true)
     setCollectMsg('')
     try {
-      const res = await fetch('/api/cafe24/collect', { method: 'POST' })
+      const res = await fetch('/api/cafe24/collect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_date: startDate, end_date: endDate }),
+      })
       const data = await res.json()
       if (data.error) {
         setCollectMsg(`오류: ${data.error}`)
@@ -118,6 +146,38 @@ export default function SoumOrders() {
           >
             {collecting ? '수집 중...' : '카페24 주문 수집'}
           </button>
+        </div>
+      </div>
+
+      {/* 날짜 선택 */}
+      <div className="bg-white rounded-xl border p-3 mb-4 flex flex-wrap items-center gap-2">
+        {PRESETS.map(p => (
+          <button
+            key={p.label}
+            onClick={() => applyPreset(p)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              activePreset === p.label
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+        <div className="flex items-center gap-1 ml-2">
+          <input
+            type="date"
+            value={startDate}
+            onChange={e => { setStartDate(e.target.value); setActivePreset('') }}
+            className="border rounded-lg px-2 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <span className="text-gray-400 text-sm">~</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={e => { setEndDate(e.target.value); setActivePreset('') }}
+            className="border rounded-lg px-2 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
         </div>
       </div>
 
