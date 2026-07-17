@@ -76,7 +76,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await supabase.from('order_items').insert(
             items.map((item: any) => ({
               order_id: saved.id,
-              product_code: item.product_code ?? '',
+              product_code: item.variant_code ?? item.product_code ?? '',
               product_name: item.product_name ?? '',
               option_info: item.option_value || null,
               brand: item.brand_name || null,
