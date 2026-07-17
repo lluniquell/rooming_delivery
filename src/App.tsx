@@ -16,6 +16,8 @@ import BarcodeDB from './pages/inspection/BarcodeDB'
 import BarcodeAssign from './pages/inspection/BarcodeAssign'
 import Cafe24Callback from './pages/auth/Cafe24Callback'
 import AdminTest from './pages/admin/AdminTest'
+import SoumOrders from './pages/soum/SoumOrders'
+import SoumBatch from './pages/soum/SoumBatch'
 import DriverLayout from './pages/driver/DriverLayout'
 import DriverList from './pages/driver/DriverList'
 import DriverDetail from './pages/driver/DriverDetail'
@@ -62,6 +64,8 @@ function App() {
           <Route path="assign" element={<AdminAssign />} />
           <Route path="drivers" element={<AdminDrivers />} />
           <Route path="storage" element={<AdminStorage />} />
+          <Route path="soum/orders" element={<SoumOrders />} />
+          <Route path="soum/batches" element={<SoumBatch />} />
           <Route path="inspection" element={<InspectionMain />} />
           <Route path="barcodes" element={<BarcodeDB />} />
           <Route path="barcode-assign" element={<BarcodeAssign />} />

@@ -16,7 +16,9 @@ const deliveryItems = [
 ]
 
 const propItems = [
-  { to: '/admin/inspection', label: '바코드 검수' },
+  { to: '/admin/soum/orders', label: '주문 수집' },
+  { to: '/admin/soum/batches', label: '배치 현황' },
+  { to: '/admin/inspection', label: '출고 검수' },
   { to: '/admin/barcodes', label: '바코드 DB' },
   { to: '/admin/barcode-assign', label: '바코드 채번' },
 ]
