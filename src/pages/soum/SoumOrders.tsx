@@ -171,6 +171,14 @@ export default function SoumOrders() {
     loadOrders()
   }
 
+  async function quickAssign(group: OrderGroup, batchId: string) {
+    await supabase.from('order_items').update({
+      batch_id: batchId,
+      status: 'confirmed',
+    }).in('id', group.items.map(i => i.id))
+    loadOrders()
+  }
+
   function locationOf(item: Item) {
     return item.supplier_name?.match(LOC_REGEX)?.[0] ?? ''
   }
@@ -267,9 +275,21 @@ export default function SoumOrders() {
                   />
                   <span className="font-mono text-xs text-gray-500">{group.cafe24_order_no}</span>
                   <span className="font-medium text-gray-800 text-sm">{group.customer_name}</span>
-                  <span className="text-xs text-gray-400 ml-auto">
+                  <span className="text-xs text-gray-400">
                     {group.order_date ? new Date(group.order_date).toLocaleDateString('ko-KR') : '-'}
                   </span>
+                  <div className="flex gap-1 ml-auto" onClick={e => e.stopPropagation()}>
+                    {batches.map(b => (
+                      <button
+                        key={b.id}
+                        onClick={() => quickAssign(group, b.id)}
+                        title={`${b.batch_no}번 ${b.name}으로 배정`}
+                        className="px-2 py-1 rounded text-xs font-medium border border-gray-200 text-gray-500 bg-white hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-colors"
+                      >
+                        {b.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 {/* 상품 행 */}
                 {group.items.map(item => (
