@@ -98,7 +98,8 @@ export default function SoumOrders() {
       if (data.error) {
         setCollectMsg(`오류: ${JSON.stringify(data.error)}`)
       } else if (data.collected === 0) {
-        setCollectMsg(`카페24 ${data.total ?? 0}건 조회 / 신규 0건 (기존 ${data.skipped ?? 0}건)`)
+        const errMsg = data.errors?.length ? ` | 실패: ${data.errors[0]}` : ''
+        setCollectMsg(`카페24 ${data.total ?? 0}건 조회 / 신규 0건 (기존 ${data.skipped ?? 0}건)${errMsg}`)
       } else {
         setCollectMsg(`✅ ${data.collected}건 수집 (기존 ${data.skipped}건 제외)`)
         loadOrders()
