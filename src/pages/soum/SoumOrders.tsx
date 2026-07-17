@@ -172,10 +172,13 @@ export default function SoumOrders() {
   }
 
   async function quickAssign(group: OrderGroup, batchId: string) {
+    // 이 주문에서 체크된 상품이 있으면 그 상품만, 없으면 주문 전체
+    const checkedInGroup = group.items.filter(i => selected.has(i.id))
+    const targets = checkedInGroup.length ? checkedInGroup : group.items
     await supabase.from('order_items').update({
       batch_id: batchId,
       status: 'confirmed',
-    }).in('id', group.items.map(i => i.id))
+    }).in('id', targets.map(i => i.id))
     loadOrders()
   }
 
