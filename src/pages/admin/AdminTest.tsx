@@ -64,6 +64,26 @@ export default function AdminTest() {
     setLoading(false)
   }
 
+  async function searchItems(e: React.FormEvent) {
+    e.preventDefault()
+    if (!orderNo.trim()) return
+    setLoading(true)
+    setError('')
+    setResult(null)
+
+    const res = await fetch(`/api/cafe24/order-items?order_id=${orderNo.trim()}`)
+    const text = await res.text()
+    let data: any
+    try { data = JSON.parse(text) } catch { data = text }
+
+    if (!res.ok) {
+      setError(text)
+    } else {
+      setResult(data ?? '(빈 응답)')
+    }
+    setLoading(false)
+  }
+
   return (
     <div className="max-w-2xl">
       <h2 className="text-xl font-bold text-gray-800 mb-4">카페24 주문 조회 테스트</h2>
@@ -97,7 +117,14 @@ export default function AdminTest() {
           disabled={loading}
           className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
         >
-          {loading ? '조회 중...' : '조회'}
+          {loading ? '조회 중...' : '주문 조회'}
+        </button>
+        <button
+          onClick={searchItems}
+          disabled={loading}
+          className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {loading ? '조회 중...' : '아이템 조회'}
         </button>
       </form>
 
