@@ -77,6 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           supplier_name: item.supplier_product_name || null,
           quantity: item.quantity ?? 1,
           inspected_qty: 0,
+          status: 'collected',
         }))
       )
       if (error) throw new Error(`아이템 저장 실패: ${error.message}`)
