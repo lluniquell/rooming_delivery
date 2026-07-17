@@ -6,26 +6,22 @@ interface Batch {
   batch_no: string
   name: string
   type: string
-  order_count: number
+  item_count: number
 }
 
-interface OrderItem {
+interface Item {
+  id: string
   product_code: string
   product_name: string
   option_info: string | null
   brand: string | null
   supplier_name: string | null
   quantity: number
-}
-
-interface Order {
-  id: string
+  delivery_method: string | null
+  status: string
   cafe24_order_no: string
   customer_name: string
-  delivery_method: string | null
   tracking_number: string | null
-  status: string
-  order_items: OrderItem[]
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -45,7 +41,7 @@ const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
 export default function SoumBatch() {
   const [batches, setBatches] = useState<Batch[]>([])
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null)
-  const [orders, setOrders] = useState<Order[]>([])
+  const [items, setItems] = useState<Item[]>([])
   const [showPicking, setShowPicking] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -55,17 +51,17 @@ export default function SoumBatch() {
     const { data: batchData } = await supabase.from('batches').select('*').order('batch_no')
     if (!batchData) return
 
-    const { data: orderData } = await supabase
-      .from('orders')
+    const { data: itemData } = await supabase
+      .from('order_items')
       .select('batch_id')
       .in('status', ['confirmed', 'in_transit'])
 
     const countMap: Record<string, number> = {}
-    for (const o of orderData ?? []) {
-      if (o.batch_id) countMap[o.batch_id] = (countMap[o.batch_id] ?? 0) + 1
+    for (const it of itemData ?? []) {
+      if (it.batch_id) countMap[it.batch_id] = (countMap[it.batch_id] ?? 0) + 1
     }
 
-    setBatches(batchData.map(b => ({ ...b, order_count: countMap[b.id] ?? 0 })))
+    setBatches(batchData.map(b => ({ ...b, item_count: countMap[b.id] ?? 0 })))
   }
 
   async function selectBatch(batchId: string) {
@@ -73,19 +69,35 @@ export default function SoumBatch() {
     setShowPicking(false)
     setLoading(true)
     const { data } = await supabase
-      .from('orders')
-      .select('*, order_items(*)')
+      .from('order_items')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, delivery_method, status, orders!inner(cafe24_order_no, customer_name, tracking_number, order_date)')
       .eq('batch_id', batchId)
       .in('status', ['confirmed', 'in_transit'])
-      .order('order_date', { ascending: true })
-    setOrders(data ?? [])
+    const rows = ((data ?? []) as any[])
+      .map(row => ({
+        id: row.id,
+        product_code: row.product_code,
+        product_name: row.product_name,
+        option_info: row.option_info,
+        brand: row.brand,
+        supplier_name: row.supplier_name,
+        quantity: row.quantity,
+        delivery_method: row.delivery_method,
+        status: row.status,
+        cafe24_order_no: row.orders.cafe24_order_no,
+        customer_name: row.orders.customer_name,
+        tracking_number: row.orders.tracking_number,
+        _date: row.orders.order_date ?? '',
+      }))
+      .sort((a, b) => a._date.localeCompare(b._date) || a.cafe24_order_no.localeCompare(b.cafe24_order_no))
+    setItems(rows)
     setLoading(false)
   }
 
-  async function moveToHold(orderId: string) {
+  async function moveToHold(itemId: string) {
     const { data: holdBatch } = await supabase.from('batches').select('id').eq('type', 'hold').single()
     if (!holdBatch) return
-    await supabase.from('orders').update({ batch_id: holdBatch.id }).eq('id', orderId)
+    await supabase.from('order_items').update({ batch_id: holdBatch.id }).eq('id', itemId)
     if (activeBatchId) selectBatch(activeBatchId)
     loadBatches()
   }
@@ -96,23 +108,21 @@ export default function SoumBatch() {
       option_info: string; supplier_note: string; quantity: number
     }> = {}
 
-    for (const order of orders) {
-      for (const item of order.order_items) {
-        const supplier = item.supplier_name ?? ''
-        const location = supplier.match(LOC_REGEX)?.[0] ?? ''
-        const supplier_note = supplier.replace(LOC_REGEX, '').replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '').trim()
-        const key = `${item.product_code}__${item.option_info ?? ''}`
-        if (merged[key]) {
-          merged[key].quantity += item.quantity
-        } else {
-          merged[key] = {
-            location,
-            brand: item.brand ?? '',
-            product_name: item.product_name,
-            option_info: item.option_info ?? '',
-            supplier_note,
-            quantity: item.quantity,
-          }
+    for (const item of items) {
+      const supplier = item.supplier_name ?? ''
+      const location = supplier.match(LOC_REGEX)?.[0] ?? ''
+      const supplier_note = supplier.replace(LOC_REGEX, '').replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '').trim()
+      const key = `${item.product_code}__${item.option_info ?? ''}`
+      if (merged[key]) {
+        merged[key].quantity += item.quantity
+      } else {
+        merged[key] = {
+          location,
+          brand: item.brand ?? '',
+          product_name: item.product_name,
+          option_info: item.option_info ?? '',
+          supplier_note,
+          quantity: item.quantity,
         }
       }
     }
@@ -141,9 +151,9 @@ export default function SoumBatch() {
             <div className="text-xs text-gray-400 mb-1">{batch.batch_no}번</div>
             <div className="font-medium text-gray-800 text-sm leading-tight">{batch.name}</div>
             <div className={`text-2xl font-bold mt-2 ${
-              batch.order_count > 0 ? 'text-indigo-600' : 'text-gray-200'
+              batch.item_count > 0 ? 'text-indigo-600' : 'text-gray-200'
             }`}>
-              {batch.order_count}
+              {batch.item_count}
             </div>
           </button>
         ))}
@@ -155,9 +165,9 @@ export default function SoumBatch() {
           <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
             <span className="font-medium text-gray-800">
               {activeBatch?.batch_no}번 {activeBatch?.name}
-              <span className="text-gray-400 font-normal ml-2 text-sm">{orders.length}건</span>
+              <span className="text-gray-400 font-normal ml-2 text-sm">상품 {items.length}개</span>
             </span>
-            {orders.length > 0 && (
+            {items.length > 0 && (
               <button
                 onClick={() => setShowPicking(v => !v)}
                 className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
@@ -166,15 +176,15 @@ export default function SoumBatch() {
                     : 'bg-green-600 text-white hover:bg-green-700'
                 }`}
               >
-                {showPicking ? '주문 목록' : '픽킹리스트'}
+                {showPicking ? '상품 목록' : '픽킹리스트'}
               </button>
             )}
           </div>
 
           {loading ? (
             <div className="p-12 text-center text-gray-400 text-sm">불러오는 중...</div>
-          ) : orders.length === 0 ? (
-            <div className="p-12 text-center text-gray-400 text-sm">이 배치에 주문이 없습니다</div>
+          ) : items.length === 0 ? (
+            <div className="p-12 text-center text-gray-400 text-sm">이 배치에 상품이 없습니다</div>
           ) : showPicking ? (
             <table className="w-full text-sm">
               <thead className="border-b bg-gray-50">
@@ -206,27 +216,33 @@ export default function SoumBatch() {
                 <tr>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">주문번호</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">수령인</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">상품</th>
+                  <th className="text-center px-4 py-2 font-medium text-gray-500 text-xs w-12">수량</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">배송방법</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">운송장</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">상태</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {orders.map(order => (
-                  <tr key={order.id} className="border-b last:border-0 hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs text-gray-500">{order.cafe24_order_no}</td>
-                    <td className="px-4 py-3 font-medium text-gray-800">{order.customer_name}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{order.delivery_method ?? '-'}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-gray-400">{order.tracking_number ?? '-'}</td>
+                {items.map(item => (
+                  <tr key={item.id} className="border-b last:border-0 hover:bg-gray-50">
+                    <td className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{item.cafe24_order_no}</td>
+                    <td className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap">{item.customer_name}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      {item.brand && <span className="text-gray-400 text-xs mr-1.5">[{item.brand}]</span>}
+                      {item.product_name}
+                      {item.option_info && <span className="text-gray-400 text-xs ml-1.5">{item.option_info}</span>}
+                    </td>
+                    <td className="px-4 py-3 text-center font-semibold text-gray-800">{item.quantity}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600">{item.delivery_method ?? '-'}</td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[order.status] ?? 'bg-gray-100 text-gray-500'}`}>
-                        {STATUS_LABEL[order.status] ?? order.status}
+                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[item.status] ?? 'bg-gray-100 text-gray-500'}`}>
+                        {STATUS_LABEL[item.status] ?? item.status}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
-                        onClick={() => moveToHold(order.id)}
+                        onClick={() => moveToHold(item.id)}
                         className="text-xs text-gray-300 hover:text-orange-400 transition-colors"
                       >
                         보류로

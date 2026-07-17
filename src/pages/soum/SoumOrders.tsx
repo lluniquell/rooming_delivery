@@ -1,19 +1,22 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 
-interface OrderItem {
+interface Item {
+  id: string
+  product_code: string
   product_name: string
   option_info: string | null
   brand: string | null
+  supplier_name: string | null
   quantity: number
 }
 
-interface Order {
-  id: string
+interface OrderGroup {
+  order_id: string
   cafe24_order_no: string
   customer_name: string
   order_date: string | null
-  items: OrderItem[]
+  items: Item[]
 }
 
 interface Batch {
@@ -24,6 +27,7 @@ interface Batch {
 }
 
 const DELIVERY_METHODS = ['CJ', '배송팀', '문종철', '경동', '팀무버']
+const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
 
 const today = () => new Date().toISOString().slice(0, 10)
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
@@ -41,7 +45,7 @@ const PRESETS = [
 ]
 
 export default function SoumOrders() {
-  const [orders, setOrders] = useState<Order[]>([])
+  const [groups, setGroups] = useState<OrderGroup[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [collecting, setCollecting] = useState(false)
@@ -49,9 +53,9 @@ export default function SoumOrders() {
   const [showModal, setShowModal] = useState(false)
   const [assignBatchId, setAssignBatchId] = useState('')
   const [assignMethod, setAssignMethod] = useState('CJ')
-  const [startDate, setStartDate] = useState(daysAgo(180))
+  const [startDate, setStartDate] = useState(today())
   const [endDate, setEndDate] = useState(today())
-  const [activePreset, setActivePreset] = useState('6개월')
+  const [activePreset, setActivePreset] = useState('오늘')
 
   function applyPreset(preset: typeof PRESETS[0]) {
     setStartDate(preset.start())
@@ -66,20 +70,36 @@ export default function SoumOrders() {
 
   async function loadOrders() {
     const { data } = await supabase
-      .from('orders')
-      .select('id, cafe24_order_no, customer_name, order_date, order_items(product_name, option_info, brand, quantity)')
+      .from('order_items')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, order_date)')
       .eq('status', 'collected')
       .is('batch_id', null)
-      .order('order_date', { ascending: false })
-    setOrders(
-      (data ?? []).map((o: any) => ({
-        id: o.id,
-        cafe24_order_no: o.cafe24_order_no,
-        customer_name: o.customer_name,
-        order_date: o.order_date,
-        items: o.order_items ?? [],
-      }))
+    const map: Record<string, OrderGroup> = {}
+    for (const row of (data ?? []) as any[]) {
+      const o = row.orders
+      if (!map[o.id]) {
+        map[o.id] = {
+          order_id: o.id,
+          cafe24_order_no: o.cafe24_order_no,
+          customer_name: o.customer_name,
+          order_date: o.order_date,
+          items: [],
+        }
+      }
+      map[o.id].items.push({
+        id: row.id,
+        product_code: row.product_code,
+        product_name: row.product_name,
+        option_info: row.option_info,
+        brand: row.brand,
+        supplier_name: row.supplier_name,
+        quantity: row.quantity,
+      })
+    }
+    setGroups(
+      Object.values(map).sort((a, b) => (b.order_date ?? '').localeCompare(a.order_date ?? ''))
     )
+    setSelected(new Set())
   }
 
   async function loadBatches() {
@@ -116,6 +136,8 @@ export default function SoumOrders() {
     setCollecting(false)
   }
 
+  const allItemIds = groups.flatMap(g => g.items.map(i => i.id))
+
   function toggle(id: string) {
     setSelected(prev => {
       const next = new Set(prev)
@@ -124,24 +146,37 @@ export default function SoumOrders() {
     })
   }
 
+  function toggleGroup(group: OrderGroup) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      const allSelected = group.items.every(i => next.has(i.id))
+      for (const item of group.items) {
+        allSelected ? next.delete(item.id) : next.add(item.id)
+      }
+      return next
+    })
+  }
+
   function toggleAll() {
-    setSelected(selected.size === orders.length ? new Set() : new Set(orders.map(o => o.id)))
+    setSelected(selected.size === allItemIds.length ? new Set() : new Set(allItemIds))
   }
 
   async function confirmAssign() {
-    await supabase.from('orders').update({
+    await supabase.from('order_items').update({
       batch_id: assignBatchId,
       delivery_method: assignMethod,
       status: 'confirmed',
-      confirmed_at: new Date().toISOString(),
     }).in('id', [...selected])
-    setSelected(new Set())
     setShowModal(false)
     loadOrders()
   }
 
+  function locationOf(item: Item) {
+    return item.supplier_name?.match(LOC_REGEX)?.[0] ?? ''
+  }
+
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-5xl">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold text-gray-800">주문 수집</h2>
         <div className="flex items-center gap-3">
@@ -188,9 +223,9 @@ export default function SoumOrders() {
         </div>
       </div>
 
-      {orders.length === 0 ? (
+      {groups.length === 0 ? (
         <div className="bg-white rounded-xl border p-16 text-center text-gray-400 text-sm">
-          미배정 주문이 없습니다
+          미배정 상품이 없습니다
         </div>
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
@@ -198,67 +233,79 @@ export default function SoumOrders() {
             <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
               <input
                 type="checkbox"
-                checked={selected.size === orders.length && orders.length > 0}
+                checked={selected.size === allItemIds.length && allItemIds.length > 0}
                 onChange={toggleAll}
                 className="rounded"
               />
-              전체 선택 ({orders.length}건)
+              전체 선택 (주문 {groups.length}건 / 상품 {allItemIds.length}개)
             </label>
             {selected.size > 0 && (
               <button
                 onClick={() => setShowModal(true)}
                 className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-700"
               >
-                {selected.size}건 배치 배정
+                상품 {selected.size}개 배치 배정
               </button>
             )}
           </div>
 
-          <div>
-            {orders.map(order => (
-              <div
-                key={order.id}
-                onClick={() => toggle(order.id)}
-                className={`border-b last:border-0 cursor-pointer transition-colors px-4 py-3 ${
-                  selected.has(order.id) ? 'bg-blue-50' : 'hover:bg-gray-50'
-                }`}
-              >
-                <div className="flex items-center gap-3">
+          {groups.map(group => {
+            const allChecked = group.items.every(i => selected.has(i.id))
+            return (
+              <div key={group.order_id} className="border-b last:border-0">
+                {/* 주문 헤더 */}
+                <div
+                  onClick={() => toggleGroup(group)}
+                  className="px-4 py-2 bg-gray-50/60 flex items-center gap-3 cursor-pointer hover:bg-gray-100"
+                >
                   <input
                     type="checkbox"
-                    checked={selected.has(order.id)}
-                    onChange={() => toggle(order.id)}
+                    checked={allChecked}
+                    onChange={() => toggleGroup(group)}
                     onClick={e => e.stopPropagation()}
                     className="rounded"
                   />
-                  <span className="font-mono text-xs text-gray-500">{order.cafe24_order_no}</span>
-                  <span className="font-medium text-gray-800 text-sm">{order.customer_name}</span>
+                  <span className="font-mono text-xs text-gray-500">{group.cafe24_order_no}</span>
+                  <span className="font-medium text-gray-800 text-sm">{group.customer_name}</span>
                   <span className="text-xs text-gray-400 ml-auto">
-                    {order.order_date ? new Date(order.order_date).toLocaleDateString('ko-KR') : '-'}
+                    {group.order_date ? new Date(group.order_date).toLocaleDateString('ko-KR') : '-'}
                   </span>
                 </div>
-                {order.items.length > 0 && (
-                  <div className="mt-2 ml-7 space-y-0.5">
-                    {order.items.map((item, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs">
-                        {item.brand && <span className="text-gray-400 shrink-0">[{item.brand}]</span>}
-                        <span className="text-gray-700">{item.product_name}</span>
-                        {item.option_info && <span className="text-gray-400">{item.option_info}</span>}
-                        <span className="text-gray-800 font-semibold shrink-0">×{item.quantity}</span>
-                      </div>
-                    ))}
+                {/* 상품 행 */}
+                {group.items.map(item => (
+                  <div
+                    key={item.id}
+                    onClick={() => toggle(item.id)}
+                    className={`pl-10 pr-4 py-2.5 flex items-center gap-3 cursor-pointer border-t border-gray-100 transition-colors ${
+                      selected.has(item.id) ? 'bg-blue-50' : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.has(item.id)}
+                      onChange={() => toggle(item.id)}
+                      onClick={e => e.stopPropagation()}
+                      className="rounded"
+                    />
+                    <span className="text-xs text-gray-400 w-24 shrink-0">{item.brand ?? '-'}</span>
+                    <span className="text-sm text-gray-800 flex-1">
+                      {item.product_name}
+                      {item.option_info && <span className="text-gray-400 text-xs ml-2">{item.option_info}</span>}
+                    </span>
+                    <span className="font-mono text-xs text-indigo-600 shrink-0">{locationOf(item)}</span>
+                    <span className="text-sm font-semibold text-gray-800 w-10 text-right shrink-0">×{item.quantity}</span>
                   </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
+            )
+          })}
         </div>
       )}
 
       {showModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
-            <h3 className="font-bold text-gray-800 mb-5">배치 배정 ({selected.size}건)</h3>
+            <h3 className="font-bold text-gray-800 mb-5">배치 배정 (상품 {selected.size}개)</h3>
 
             <div className="mb-4">
               <p className="text-xs font-medium text-gray-500 mb-2">배치</p>
