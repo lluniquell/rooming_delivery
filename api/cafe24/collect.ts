@@ -35,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const startDate = start_date ?? new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
     const data = await cafe24Get(
-      `/api/v2/admin/orders?shipping_status=F&limit=100&shop_no=1&start_date=${startDate}&end_date=${endDate}`,
+      `/api/v2/admin/orders?shipping_status=A&limit=100&shop_no=1&start_date=${startDate}&end_date=${endDate}`,
       token
     )
     if (data.error) return res.status(400).json(data)
