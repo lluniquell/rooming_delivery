@@ -1,12 +1,19 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 
+interface OrderItem {
+  product_name: string
+  option_info: string | null
+  brand: string | null
+  quantity: number
+}
+
 interface Order {
   id: string
   cafe24_order_no: string
   customer_name: string
   order_date: string | null
-  item_count: number
+  items: OrderItem[]
 }
 
 interface Batch {
@@ -60,7 +67,7 @@ export default function SoumOrders() {
   async function loadOrders() {
     const { data } = await supabase
       .from('orders')
-      .select('id, cafe24_order_no, customer_name, order_date, order_items(count)')
+      .select('id, cafe24_order_no, customer_name, order_date, order_items(product_name, option_info, brand, quantity)')
       .eq('status', 'collected')
       .is('batch_id', null)
       .order('order_date', { ascending: false })
@@ -70,7 +77,7 @@ export default function SoumOrders() {
         cafe24_order_no: o.cafe24_order_no,
         customer_name: o.customer_name,
         order_date: o.order_date,
-        item_count: o.order_items?.[0]?.count ?? 0,
+        items: o.order_items ?? [],
       }))
     )
   }
@@ -97,12 +104,11 @@ export default function SoumOrders() {
       const data = await res.json()
       if (data.error) {
         setCollectMsg(`오류: ${JSON.stringify(data.error)}`)
-      } else if (data.collected === 0) {
-        const errMsg = data.errors?.length ? ` | 실패: ${data.errors[0]}` : ''
-        setCollectMsg(`카페24 ${data.total ?? 0}건 조회 / 신규 0건 (기존 ${data.skipped ?? 0}건)${errMsg}`)
       } else {
-        setCollectMsg(`✅ ${data.collected}건 수집 (기존 ${data.skipped}건 제외)`)
-        loadOrders()
+        const errMsg = data.errors?.length ? ` | 실패: ${data.errors[0]}` : ''
+        const backfillMsg = data.items_backfilled ? ` / 상품보충 ${data.items_backfilled}건` : ''
+        setCollectMsg(`카페24 ${data.total ?? 0}건 조회 / 신규 ${data.collected ?? 0}건${backfillMsg}${errMsg}`)
+        if (data.collected > 0 || data.items_backfilled > 0) loadOrders()
       }
     } catch {
       setCollectMsg('네트워크 오류')
@@ -208,44 +214,44 @@ export default function SoumOrders() {
             )}
           </div>
 
-          <table className="w-full text-sm">
-            <thead className="border-b">
-              <tr className="bg-gray-50">
-                <th className="w-10 px-4 py-2" />
-                <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">주문번호</th>
-                <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">수령인</th>
-                <th className="text-center px-4 py-2 font-medium text-gray-500 text-xs">품목</th>
-                <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">주문일</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map(order => (
-                <tr
-                  key={order.id}
-                  onClick={() => toggle(order.id)}
-                  className={`border-b last:border-0 cursor-pointer transition-colors ${
-                    selected.has(order.id) ? 'bg-blue-50' : 'hover:bg-gray-50'
-                  }`}
-                >
-                  <td className="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(order.id)}
-                      onChange={() => toggle(order.id)}
-                      onClick={e => e.stopPropagation()}
-                      className="rounded"
-                    />
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500">{order.cafe24_order_no}</td>
-                  <td className="px-4 py-3 font-medium text-gray-800">{order.customer_name}</td>
-                  <td className="px-4 py-3 text-center text-gray-500">{order.item_count}종</td>
-                  <td className="px-4 py-3 text-xs text-gray-400">
+          <div>
+            {orders.map(order => (
+              <div
+                key={order.id}
+                onClick={() => toggle(order.id)}
+                className={`border-b last:border-0 cursor-pointer transition-colors px-4 py-3 ${
+                  selected.has(order.id) ? 'bg-blue-50' : 'hover:bg-gray-50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(order.id)}
+                    onChange={() => toggle(order.id)}
+                    onClick={e => e.stopPropagation()}
+                    className="rounded"
+                  />
+                  <span className="font-mono text-xs text-gray-500">{order.cafe24_order_no}</span>
+                  <span className="font-medium text-gray-800 text-sm">{order.customer_name}</span>
+                  <span className="text-xs text-gray-400 ml-auto">
                     {order.order_date ? new Date(order.order_date).toLocaleDateString('ko-KR') : '-'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </span>
+                </div>
+                {order.items.length > 0 && (
+                  <div className="mt-2 ml-7 space-y-0.5">
+                    {order.items.map((item, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs">
+                        {item.brand && <span className="text-gray-400 shrink-0">[{item.brand}]</span>}
+                        <span className="text-gray-700">{item.product_name}</span>
+                        {item.option_info && <span className="text-gray-400">{item.option_info}</span>}
+                        <span className="text-gray-800 font-semibold shrink-0">×{item.quantity}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
