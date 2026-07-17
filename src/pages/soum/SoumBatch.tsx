@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../../lib/supabase'
 
 interface Batch {
@@ -22,6 +23,11 @@ interface Item {
   cafe24_order_no: string
   customer_name: string
   tracking_number: string | null
+  receiver_name: string | null
+  receiver_phone: string | null
+  zipcode: string | null
+  address: string | null
+  shipping_message: string | null
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -70,7 +76,7 @@ export default function SoumBatch() {
     setLoading(true)
     const { data } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, delivery_method, status, orders!inner(cafe24_order_no, customer_name, tracking_number, order_date)')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, delivery_method, status, orders!inner(cafe24_order_no, customer_name, tracking_number, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message)')
       .eq('batch_id', batchId)
       .in('status', ['confirmed', 'in_transit'])
     const rows = ((data ?? []) as any[])
@@ -87,6 +93,11 @@ export default function SoumBatch() {
         cafe24_order_no: row.orders.cafe24_order_no,
         customer_name: row.orders.customer_name,
         tracking_number: row.orders.tracking_number,
+        receiver_name: row.orders.receiver_name,
+        receiver_phone: row.orders.receiver_phone,
+        zipcode: row.orders.zipcode,
+        address: row.orders.address,
+        shipping_message: row.orders.shipping_message,
         _date: row.orders.order_date ?? '',
       }))
       .sort((a, b) => a._date.localeCompare(b._date) || a.cafe24_order_no.localeCompare(b.cafe24_order_no))
@@ -131,6 +142,92 @@ export default function SoumBatch() {
 
   const activeBatch = batches.find(b => b.id === activeBatchId)
   const pickingList = buildPickingList()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  function downloadCJ() {
+    // 주문 단위로 묶기 (한 주문 = 송장 1건)
+    const byOrder: Record<string, {
+      orderNo: string; name: string; phone: string; zipcode: string
+      address: string; message: string; products: string[]; qty: number
+    }> = {}
+    for (const item of items) {
+      const key = item.cafe24_order_no
+      if (!byOrder[key]) {
+        byOrder[key] = {
+          orderNo: key,
+          name: item.receiver_name || item.customer_name,
+          phone: item.receiver_phone ?? '',
+          zipcode: item.zipcode ?? '',
+          address: item.address ?? '',
+          message: item.shipping_message ?? '',
+          products: [],
+          qty: 0,
+        }
+      }
+      byOrder[key].products.push(item.product_name)
+      byOrder[key].qty += item.quantity
+    }
+
+    const rows = Object.values(byOrder).map(o => ({
+      '주문번호': o.orderNo,
+      '받는분성명': o.name,
+      '받는분전화번호': o.phone,
+      '우편번호': o.zipcode,
+      '주소': o.address,
+      '품목명': o.products[0] + (o.products.length > 1 ? ` 외 ${o.products.length - 1}건` : ''),
+      '수량': o.qty,
+      '배송메세지': o.message,
+    }))
+
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'CJ송장')
+    XLSX.writeFile(wb, `CJ송장_${activeBatch?.name ?? '배치'}_${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+
+  async function uploadTracking(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf)
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 })
+
+      // 헤더 행에서 주문번호/운송장 컬럼 찾기
+      let headerIdx = -1, orderCol = -1, trackCol = -1
+      for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const r = (rows[i] ?? []).map(c => String(c ?? ''))
+        const oc = r.findIndex(c => c.includes('주문번호'))
+        const tc = r.findIndex(c => /운송장|송장번호/.test(c))
+        if (oc >= 0 && tc >= 0) { headerIdx = i; orderCol = oc; trackCol = tc; break }
+      }
+      if (headerIdx < 0) {
+        alert('주문번호 / 운송장번호 컬럼을 찾을 수 없습니다.')
+        return
+      }
+
+      let updated = 0
+      const failed: string[] = []
+      for (const r of rows.slice(headerIdx + 1)) {
+        const orderNo = String(r?.[orderCol] ?? '').trim()
+        const tracking = String(r?.[trackCol] ?? '').trim().replace(/[-\s]/g, '')
+        if (!orderNo || !tracking) continue
+        const { error, count } = await supabase
+          .from('orders')
+          .update({ tracking_number: tracking }, { count: 'exact' })
+          .eq('cafe24_order_no', orderNo)
+        if (error || !count) failed.push(orderNo)
+        else updated += count
+      }
+      alert(`운송장 ${updated}건 등록 완료${failed.length ? `\n미매칭 ${failed.length}건: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? ' ...' : ''}` : ''}`)
+      if (activeBatchId) selectBatch(activeBatchId)
+    } catch (err: any) {
+      alert(`파일 처리 실패: ${err.message}`)
+    } finally {
+      e.target.value = ''
+    }
+  }
 
   return (
     <div className="max-w-5xl">
@@ -168,16 +265,37 @@ export default function SoumBatch() {
               <span className="text-gray-400 font-normal ml-2 text-sm">상품 {items.length}개</span>
             </span>
             {items.length > 0 && (
-              <button
-                onClick={() => setShowPicking(v => !v)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-                  showPicking
-                    ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                    : 'bg-green-600 text-white hover:bg-green-700'
-                }`}
-              >
-                {showPicking ? '상품 목록' : '픽킹리스트'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={downloadCJ}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
+                >
+                  CJ 송장 다운로드
+                </button>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium bg-orange-500 text-white hover:bg-orange-600"
+                >
+                  운송장 업로드
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={uploadTracking}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => setShowPicking(v => !v)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
+                    showPicking
+                      ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                      : 'bg-green-600 text-white hover:bg-green-700'
+                  }`}
+                >
+                  {showPicking ? '상품 목록' : '픽킹리스트'}
+                </button>
+              </div>
             )}
           </div>
 
