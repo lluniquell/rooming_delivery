@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase'
 
 interface Order {
   id: string
-  cafe24_order_id: string
+  cafe24_order_no: string
   customer_name: string
   order_date: string | null
   item_count: number
@@ -60,14 +60,14 @@ export default function SoumOrders() {
   async function loadOrders() {
     const { data } = await supabase
       .from('orders')
-      .select('id, cafe24_order_id, customer_name, order_date, order_items(count)')
+      .select('id, cafe24_order_no, customer_name, order_date, order_items(count)')
       .eq('status', 'collected')
       .is('batch_id', null)
       .order('order_date', { ascending: false })
     setOrders(
       (data ?? []).map((o: any) => ({
         id: o.id,
-        cafe24_order_id: o.cafe24_order_id,
+        cafe24_order_no: o.cafe24_order_no,
         customer_name: o.customer_name,
         order_date: o.order_date,
         item_count: o.order_items?.[0]?.count ?? 0,
@@ -235,7 +235,7 @@ export default function SoumOrders() {
                       className="rounded"
                     />
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500">{order.cafe24_order_id}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-500">{order.cafe24_order_no}</td>
                   <td className="px-4 py-3 font-medium text-gray-800">{order.customer_name}</td>
                   <td className="px-4 py-3 text-center text-gray-500">{order.item_count}종</td>
                   <td className="px-4 py-3 text-xs text-gray-400">

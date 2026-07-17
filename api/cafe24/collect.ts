@@ -46,8 +46,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const ids = cafe24Orders.map(o => o.order_id)
-    const { data: existing } = await supabase.from('orders').select('cafe24_order_id').in('cafe24_order_id', ids)
-    const existingSet = new Set((existing ?? []).map(e => e.cafe24_order_id))
+    const { data: existing } = await supabase.from('orders').select('cafe24_order_no').in('cafe24_order_no', ids)
+    const existingSet = new Set((existing ?? []).map(e => e.cafe24_order_no))
     const newOrders = cafe24Orders.filter(o => !existingSet.has(o.order_id))
 
     let collected = 0
@@ -56,7 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const order of newOrders) {
       try {
         const { data: saved, error } = await supabase.from('orders').insert({
-          cafe24_order_id: order.order_id,
+          cafe24_order_no: order.order_id,
           customer_name: order.billing_name,
           order_date: order.order_date,
           status: 'collected',

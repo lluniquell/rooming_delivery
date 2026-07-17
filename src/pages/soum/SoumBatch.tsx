@@ -20,7 +20,7 @@ interface OrderItem {
 
 interface Order {
   id: string
-  cafe24_order_id: string
+  cafe24_order_no: string
   customer_name: string
   delivery_method: string | null
   tracking_number: string | null
@@ -215,7 +215,7 @@ export default function SoumBatch() {
               <tbody>
                 {orders.map(order => (
                   <tr key={order.id} className="border-b last:border-0 hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs text-gray-500">{order.cafe24_order_id}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-gray-500">{order.cafe24_order_no}</td>
                     <td className="px-4 py-3 font-medium text-gray-800">{order.customer_name}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{order.delivery_method ?? '-'}</td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-400">{order.tracking_number ?? '-'}</td>
