@@ -193,11 +193,24 @@ export default function SoumOutgoing() {
   async function registerBarcode(item: InspectItem) {
     if (!modal) return
 
-    await supabase.from('barcodes').upsert({
-      barcode: modal.barcode,
-      product_code: item.product_code,
-      product_name: item.product_name,
-    }, { onConflict: 'barcode' })
+    // 같은 상품의 바코드 없는 행(로케이션 전용)이 있으면 그 행에 채움
+    const { data: existingRows } = await supabase
+      .from('barcodes')
+      .select('id, barcode')
+      .eq('product_code', item.product_code)
+    const emptyRow = existingRows?.find(r => !r.barcode)
+
+    if (emptyRow) {
+      await supabase.from('barcodes')
+        .update({ barcode: modal.barcode, product_name: item.product_name })
+        .eq('id', emptyRow.id)
+    } else {
+      await supabase.from('barcodes').upsert({
+        barcode: modal.barcode,
+        product_code: item.product_code,
+        product_name: item.product_name,
+      }, { onConflict: 'barcode' })
+    }
 
     setModal(null)
     await countUp(item.product_code)

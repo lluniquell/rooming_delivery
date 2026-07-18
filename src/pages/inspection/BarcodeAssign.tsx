@@ -105,19 +105,27 @@ export default function BarcodeAssign() {
       serial = parseInt(existing[0].barcode.slice(-5), 10) + 1
     }
 
-    // product_code 기존 바코드 여부 확인 (경고만, 중단 안 함)
+    // product_code 기존 행 확인
     const codes = items.map(i => i.product_code)
-    const { data: existing_codes } = await supabase
+    const { data: existingRows } = await supabase
       .from('barcodes')
-      .select('product_code')
+      .select('id, product_code, barcode')
       .in('product_code', codes)
 
-    if (existing_codes?.length) {
-      const dupeList = [...new Set(existing_codes.map(d => d.product_code))].join(', ')
+    // 바코드가 실제로 있는 행만 중복 경고 대상
+    const withBarcode = (existingRows ?? []).filter(r => r.barcode)
+    if (withBarcode.length) {
+      const dupeList = [...new Set(withBarcode.map(d => d.product_code))].join(', ')
       if (!confirm(`이미 바코드가 있는 품목코드:\n${dupeList}\n\n추가 채번할까요?`)) {
         setProcessing(false)
         return
       }
+    }
+
+    // 바코드 없는 행(로케이션 전용)은 그 행에 채움
+    const emptyByCode = new Map<string, string>()
+    for (const r of existingRows ?? []) {
+      if (!r.barcode && !emptyByCode.has(r.product_code)) emptyByCode.set(r.product_code, r.id)
     }
 
     const newRows = items.map(item => ({
@@ -126,11 +134,31 @@ export default function BarcodeAssign() {
       barcode: `${prefix}${String(serial++).padStart(5, '0')}`,
     }))
 
-    const { error } = await supabase.from('barcodes').insert(newRows)
-    if (error) {
-      setMessage(`오류: ${error.message}`)
-      setProcessing(false)
-      return
+    const insertRows: typeof newRows = []
+    for (const row of newRows) {
+      const emptyId = emptyByCode.get(row.product_code)
+      if (emptyId) {
+        const { error } = await supabase.from('barcodes')
+          .update({ barcode: row.barcode, product_name: row.product_name })
+          .eq('id', emptyId)
+        if (error) {
+          setMessage(`오류: ${error.message}`)
+          setProcessing(false)
+          return
+        }
+        emptyByCode.delete(row.product_code)
+      } else {
+        insertRows.push(row)
+      }
+    }
+
+    if (insertRows.length) {
+      const { error } = await supabase.from('barcodes').insert(insertRows)
+      if (error) {
+        setMessage(`오류: ${error.message}`)
+        setProcessing(false)
+        return
+      }
     }
 
     setResults(newRows)
