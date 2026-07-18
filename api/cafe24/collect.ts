@@ -58,16 +58,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = await getToken()
 
     const { start_date, end_date } = req.body ?? {}
-    const endDate = end_date ?? new Date().toISOString().slice(0, 10)
-    const startDate = start_date ?? new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+    // 기본값은 KST 기준 (서버는 UTC로 돌므로 +9h 보정)
+    const kstNow = (ms = 0) => new Date(Date.now() + 9 * 3600 * 1000 + ms).toISOString().slice(0, 10)
+    const endDate = end_date ?? kstNow()
+    const startDate = start_date ?? kstNow(-180 * 24 * 3600 * 1000)
 
-    const data = await cafe24Get(
-      `/api/v2/admin/orders?embed=items,receivers&limit=100&shop_no=1&start_date=${startDate}&end_date=${endDate}`,
-      token
-    )
-    if (data.error) return res.status(400).json(data)
-
-    const cafe24Orders: any[] = data.orders ?? []
+    // 100건씩 페이지네이션으로 전부 수집
+    const cafe24Orders: any[] = []
+    for (let offset = 0; offset < 5000; offset += 100) {
+      const data = await cafe24Get(
+        `/api/v2/admin/orders?embed=items,receivers&limit=100&offset=${offset}&shop_no=1&start_date=${startDate}&end_date=${endDate}`,
+        token
+      )
+      if (data.error) return res.status(400).json(data)
+      const page: any[] = data.orders ?? []
+      cafe24Orders.push(...page)
+      if (page.length < 100) break
+    }
     if (!cafe24Orders.length) {
       return res.status(200).json({ collected: 0, skipped: 0, total: 0, message: '수집할 주문이 없습니다.' })
     }

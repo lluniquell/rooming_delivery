@@ -18,7 +18,9 @@ interface Stop {
   items: StopItem[]
 }
 
-const fmt = (d: Date) => d.toISOString().slice(0, 10)
+// 로컬(KST) 기준 날짜 — toISOString은 UTC라 자정 기준 계산이 하루 밀림
+const fmt = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토']
 
 function mondayOf(d: Date) {

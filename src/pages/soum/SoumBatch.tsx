@@ -182,7 +182,9 @@ export default function SoumBatch() {
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'CJ송장')
-    XLSX.writeFile(wb, `CJ송장_${activeBatch?.name ?? '배치'}_${new Date().toISOString().slice(0, 10)}.xlsx`)
+    const d = new Date()
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    XLSX.writeFile(wb, `CJ송장_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
   }
 
   async function uploadTracking(e: React.ChangeEvent<HTMLInputElement>) {

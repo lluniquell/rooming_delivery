@@ -29,8 +29,11 @@ interface Batch {
 const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버']
 const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
 
-const today = () => new Date().toISOString().slice(0, 10)
-const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
+// 로컬(KST) 기준 날짜 — toISOString은 UTC라 오전 9시 전에 하루 밀림
+const fmtDate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const today = () => fmtDate(new Date())
+const daysAgo = (n: number) => fmtDate(new Date(Date.now() - n * 86400000))
 
 const PRESETS = [
   { label: '오늘', start: () => today() },
