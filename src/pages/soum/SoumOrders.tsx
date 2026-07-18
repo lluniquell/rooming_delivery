@@ -57,6 +57,7 @@ export default function SoumOrders() {
   const [endDate, setEndDate] = useState(today())
   const [activePreset, setActivePreset] = useState('오늘')
   const [shipStats, setShipStats] = useState<Record<string, Record<string, number>>>({})
+  const [assignWarn, setAssignWarn] = useState('')
 
   function applyPreset(preset: typeof PRESETS[0]) {
     setStartDate(preset.start())
@@ -178,25 +179,47 @@ export default function SoumOrders() {
     setSelected(selected.size === allItemIds.length ? new Set() : new Set(allItemIds))
   }
 
+  // 아직 미배정 상태인 상품만 업데이트 — 다른 사람이 먼저 배정한 상품은 건너뛰고 주문번호 반환
+  async function assignItems(ids: string[], fields: Record<string, string>) {
+    const { data: updatedRows } = await supabase.from('order_items')
+      .update(fields)
+      .in('id', ids)
+      .eq('status', 'collected')
+      .is('batch_id', null)
+      .select('id')
+    const updatedSet = new Set((updatedRows ?? []).map(r => r.id))
+    const failedIds = ids.filter(id => !updatedSet.has(id))
+    const orderNos = new Set<string>()
+    for (const g of groups) {
+      for (const it of g.items) {
+        if (failedIds.includes(it.id)) orderNos.add(g.cafe24_order_no)
+      }
+    }
+    setAssignWarn(
+      orderNos.size
+        ? `⚠️ 이미 배정된 상품이라 제외됨: ${[...orderNos].join(', ')}`
+        : ''
+    )
+    loadOrders()
+  }
+
   async function confirmAssign() {
-    await supabase.from('order_items').update({
+    await assignItems([...selected], {
       batch_id: assignBatchId,
       delivery_method: assignMethod,
       status: 'confirmed',
-    }).in('id', [...selected])
+    })
     setShowModal(false)
-    loadOrders()
   }
 
   async function quickAssign(group: OrderGroup, batchId: string) {
     // 이 주문에서 체크된 상품이 있으면 그 상품만, 없으면 주문 전체
     const checkedInGroup = group.items.filter(i => selected.has(i.id))
     const targets = checkedInGroup.length ? checkedInGroup : group.items
-    await supabase.from('order_items').update({
+    await assignItems(targets.map(i => i.id), {
       batch_id: batchId,
       status: 'confirmed',
-    }).in('id', targets.map(i => i.id))
-    loadOrders()
+    })
   }
 
   function locationOf(item: Item) {
@@ -250,6 +273,13 @@ export default function SoumOrders() {
           />
         </div>
       </div>
+
+      {assignWarn && (
+        <div className="bg-amber-50 border border-amber-300 text-amber-700 rounded-xl px-4 py-3 mb-4 text-sm flex items-center justify-between">
+          <span>{assignWarn}</span>
+          <button onClick={() => setAssignWarn('')} className="text-amber-400 hover:text-amber-600 text-xs ml-3">닫기</button>
+        </div>
+      )}
 
       {groups.length === 0 ? (
         <div className="bg-white rounded-xl border p-16 text-center text-gray-400 text-sm">
