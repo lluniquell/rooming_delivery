@@ -11,6 +11,10 @@ const orderItems = [
   { to: '/admin/soum/orders', label: '주문 수집' },
 ]
 
+const scheduleItems = [
+  { to: '/admin/schedule', label: '배송 스케줄' },
+]
+
 const deliveryItems = [
   { to: '/admin/dashboard', label: '배송 현황' },
   { to: '/admin/register', label: '주문 등록' },
@@ -82,6 +86,7 @@ export default function AdminLayout({ driver }: Props) {
           <span className="font-bold text-gray-800">루밍 관리</span>
           <nav className="flex gap-1">
             <NavGroup label="주문" items={orderItems} />
+            <NavGroup label="스케줄러" items={scheduleItems} />
             <NavGroup label="배송팀" items={deliveryItems} />
             <NavGroup label="소품팀" items={propItems} />
             <NavGroup label="테스트" items={devItems} />

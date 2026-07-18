@@ -19,6 +19,7 @@ import AdminTest from './pages/admin/AdminTest'
 import SoumOrders from './pages/soum/SoumOrders'
 import SoumBatch from './pages/soum/SoumBatch'
 import SoumOutgoing from './pages/soum/SoumOutgoing'
+import ScheduleBoard from './pages/schedule/ScheduleBoard'
 import DriverLayout from './pages/driver/DriverLayout'
 import DriverList from './pages/driver/DriverList'
 import DriverDetail from './pages/driver/DriverDetail'
@@ -68,6 +69,7 @@ function App() {
           <Route path="soum/orders" element={<SoumOrders />} />
           <Route path="soum/batches" element={<SoumBatch />} />
           <Route path="soum/outgoing" element={<SoumOutgoing />} />
+          <Route path="schedule" element={<ScheduleBoard />} />
           <Route path="inspection" element={<InspectionMain />} />
           <Route path="barcodes" element={<BarcodeDB />} />
           <Route path="barcode-assign" element={<BarcodeAssign />} />
