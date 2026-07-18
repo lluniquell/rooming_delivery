@@ -209,6 +209,7 @@ export default function SoumBatch() {
 
       let updated = 0
       const failed: string[] = []
+      const synced: { order_no: string; tracking_no: string }[] = []
       for (const r of rows.slice(headerIdx + 1)) {
         const orderNo = String(r?.[orderCol] ?? '').trim()
         const tracking = String(r?.[trackCol] ?? '').trim().replace(/[-\s]/g, '')
@@ -218,9 +219,32 @@ export default function SoumBatch() {
           .update({ tracking_number: tracking }, { count: 'exact' })
           .eq('cafe24_order_no', orderNo)
         if (error || !count) failed.push(orderNo)
-        else updated += count
+        else {
+          updated += count
+          synced.push({ order_no: orderNo, tracking_no: tracking })
+        }
       }
-      alert(`운송장 ${updated}건 등록 완료${failed.length ? `\n미매칭 ${failed.length}건: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? ' ...' : ''}` : ''}`)
+
+      // 카페24 배송대기 처리 (운송장 등록)
+      let cafe24Msg = ''
+      if (synced.length) {
+        try {
+          const res = await fetch('/api/cafe24/ship-standby', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orders: synced }),
+          })
+          const result = await res.json()
+          cafe24Msg = `\n카페24 배송대기 처리 ${result.updated ?? 0}건`
+          if (result.errors?.length) {
+            cafe24Msg += ` / 실패 ${result.errors.length}건\n${result.errors[0]}`
+          }
+        } catch {
+          cafe24Msg = '\n카페24 배송대기 처리 실패 (네트워크 오류)'
+        }
+      }
+
+      alert(`운송장 ${updated}건 등록 완료${failed.length ? `\n미매칭 ${failed.length}건: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? ' ...' : ''}` : ''}${cafe24Msg}`)
       if (activeBatchId) selectBatch(activeBatchId)
     } catch (err: any) {
       alert(`파일 처리 실패: ${err.message}`)
