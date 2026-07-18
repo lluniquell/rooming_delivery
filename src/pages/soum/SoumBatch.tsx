@@ -270,7 +270,7 @@ export default function SoumBatch() {
                   onClick={downloadCJ}
                   className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
                 >
-                  CJ 송장 다운로드
+                  CJ 송장 출력용 엑셀 다운로드
                 </button>
                 <button
                   onClick={() => fileInputRef.current?.click()}
