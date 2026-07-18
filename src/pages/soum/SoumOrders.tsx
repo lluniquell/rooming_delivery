@@ -60,7 +60,7 @@ export default function SoumOrders() {
   const [endDate, setEndDate] = useState(today())
   const [activePreset, setActivePreset] = useState('오늘')
   const [shipStats, setShipStats] = useState<Record<string, Record<string, number>>>({})
-  const [assignWarn, setAssignWarn] = useState('')
+  const [assignWarn, setAssignWarn] = useState<{ type: 'error' | 'conflict'; text: string } | null>(null)
 
   function applyPreset(preset: typeof PRESETS[0]) {
     setStartDate(preset.start())
@@ -68,10 +68,18 @@ export default function SoumOrders() {
     setActivePreset(preset.label)
   }
 
+  const [lastCollected, setLastCollected] = useState<string | null>(null)
+
   useEffect(() => {
     loadOrders()
     loadBatches()
+    loadMeta()
   }, [])
+
+  async function loadMeta() {
+    const { data } = await supabase.from('app_meta').select('value').eq('key', 'last_collected_at').maybeSingle()
+    setLastCollected(data?.value || null)
+  }
 
   async function loadOrders() {
     const { data } = await supabase
@@ -134,8 +142,15 @@ export default function SoumOrders() {
   }
 
   async function collect() {
+    // 다른 작업자가 수집 중인지 확인 (2분 이내 시작한 락이 있으면 경고)
+    const { data: lockRow } = await supabase.from('app_meta').select('value').eq('key', 'collect_lock').maybeSingle()
+    if (lockRow?.value && Date.now() - new Date(lockRow.value).getTime() < 2 * 60 * 1000) {
+      if (!confirm('⚠️ 다른 작업자가 이미 수집 중입니다 (2분 이내 시작).\n그래도 계속할까요?')) return
+    }
+
     setCollecting(true)
     setCollectMsg('')
+    await supabase.from('app_meta').upsert({ key: 'collect_lock', value: new Date().toISOString(), updated_at: new Date().toISOString() })
     try {
       const res = await fetch('/api/cafe24/collect', {
         method: 'POST',
@@ -154,6 +169,13 @@ export default function SoumOrders() {
     } catch {
       setCollectMsg('네트워크 오류')
     }
+    // 락 해제 + 최종 수집 시간 기록
+    const now = new Date().toISOString()
+    await supabase.from('app_meta').upsert([
+      { key: 'collect_lock', value: '', updated_at: now },
+      { key: 'last_collected_at', value: now, updated_at: now },
+    ])
+    setLastCollected(now)
     setCollecting(false)
   }
 
@@ -184,12 +206,19 @@ export default function SoumOrders() {
 
   // 아직 미배정 상태인 상품만 업데이트 — 다른 사람이 먼저 배정한 상품은 건너뛰고 주문번호 반환
   async function assignItems(ids: string[], fields: Record<string, string>) {
-    const { data: updatedRows } = await supabase.from('order_items')
+    const { data: updatedRows, error } = await supabase.from('order_items')
       .update(fields)
       .in('id', ids)
       .eq('status', 'collected')
       .is('batch_id', null)
       .select('id')
+
+    // 업데이트 자체가 실패한 경우 — 경합이 아니라 오류
+    if (error) {
+      setAssignWarn({ type: 'error', text: `배정 실패 — 네트워크/서버 오류입니다. 다시 시도해주세요. (${error.message})` })
+      return
+    }
+
     const updatedSet = new Set((updatedRows ?? []).map(r => r.id))
     const failedIds = ids.filter(id => !updatedSet.has(id))
     const orderNos = new Set<string>()
@@ -200,8 +229,8 @@ export default function SoumOrders() {
     }
     setAssignWarn(
       orderNos.size
-        ? `⚠️ 이미 배정된 상품이라 제외됨: ${[...orderNos].join(', ')}`
-        : ''
+        ? { type: 'conflict', text: `⚠️ 이미 배정된 상품이라 제외됨: ${[...orderNos].join(', ')}` }
+        : null
     )
     loadOrders()
   }
@@ -235,6 +264,11 @@ export default function SoumOrders() {
         <h2 className="text-xl font-bold text-gray-800">주문 수집</h2>
         <div className="flex items-center gap-3">
           {collectMsg && <span className="text-sm text-gray-500">{collectMsg}</span>}
+          {lastCollected && (
+            <span className="text-xs text-gray-400">
+              마지막 수집 {new Date(lastCollected).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
           <button
             onClick={collect}
             disabled={collecting}
@@ -278,9 +312,13 @@ export default function SoumOrders() {
       </div>
 
       {assignWarn && (
-        <div className="bg-amber-50 border border-amber-300 text-amber-700 rounded-xl px-4 py-3 mb-4 text-sm flex items-center justify-between">
-          <span>{assignWarn}</span>
-          <button onClick={() => setAssignWarn('')} className="text-amber-400 hover:text-amber-600 text-xs ml-3">닫기</button>
+        <div className={`rounded-xl px-4 py-3 mb-4 text-sm flex items-center justify-between border ${
+          assignWarn.type === 'error'
+            ? 'bg-red-50 border-red-300 text-red-700'
+            : 'bg-amber-50 border-amber-300 text-amber-700'
+        }`}>
+          <span>{assignWarn.text}</span>
+          <button onClick={() => setAssignWarn(null)} className="opacity-50 hover:opacity-100 text-xs ml-3">닫기</button>
         </div>
       )}
 
