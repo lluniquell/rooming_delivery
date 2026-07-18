@@ -7,6 +7,10 @@ interface Props {
   driver: Driver
 }
 
+const orderItems = [
+  { to: '/admin/soum/orders', label: '주문 수집' },
+]
+
 const deliveryItems = [
   { to: '/admin/dashboard', label: '배송 현황' },
   { to: '/admin/register', label: '주문 등록' },
@@ -16,7 +20,6 @@ const deliveryItems = [
 ]
 
 const propItems = [
-  { to: '/admin/soum/orders', label: '주문 수집' },
   { to: '/admin/soum/batches', label: '배치 현황' },
   { to: '/admin/inspection', label: '출고 검수 (카페24 엑셀)' },
   { to: '/admin/soum/outgoing', label: '출고 검수 1 (CJ 운송장)' },
@@ -78,6 +81,7 @@ export default function AdminLayout({ driver }: Props) {
         <div className="flex items-center gap-6">
           <span className="font-bold text-gray-800">루밍 관리</span>
           <nav className="flex gap-1">
+            <NavGroup label="주문" items={orderItems} />
             <NavGroup label="배송팀" items={deliveryItems} />
             <NavGroup label="소품팀" items={propItems} />
             <NavGroup label="테스트" items={devItems} />
