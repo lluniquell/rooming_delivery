@@ -227,22 +227,29 @@ export default function SoumBatch() {
         }
       }
 
-      // 카페24 배송대기 처리 (운송장 등록)
+      // 카페24 배송대기 처리 (운송장 등록) — 타임아웃 방지를 위해 50건씩 분할 호출
       let cafe24Msg = ''
       if (synced.length) {
-        try {
-          const res = await fetch('/api/cafe24/ship-standby', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ orders: synced }),
-          })
-          const result = await res.json()
-          cafe24Msg = `\n카페24 배송대기 처리 ${result.updated ?? 0}건`
-          if (result.errors?.length) {
-            cafe24Msg += ` / 실패 ${result.errors.length}건\n${result.errors[0]}`
+        let cafe24Updated = 0
+        const cafe24Errors: string[] = []
+        for (let i = 0; i < synced.length; i += 50) {
+          const chunk = synced.slice(i, i + 50)
+          try {
+            const res = await fetch('/api/cafe24/ship-standby', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ orders: chunk }),
+            })
+            const result = await res.json()
+            cafe24Updated += result.updated ?? 0
+            if (result.errors?.length) cafe24Errors.push(...result.errors)
+          } catch {
+            cafe24Errors.push(`${chunk[0].order_no} 외 ${chunk.length - 1}건: 네트워크 오류`)
           }
-        } catch {
-          cafe24Msg = '\n카페24 배송대기 처리 실패 (네트워크 오류)'
+        }
+        cafe24Msg = `\n카페24 배송대기 처리 ${cafe24Updated}건`
+        if (cafe24Errors.length) {
+          cafe24Msg += ` / 실패 ${cafe24Errors.length}건\n${cafe24Errors[0]}`
         }
       }
 
