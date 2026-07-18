@@ -26,7 +26,7 @@ interface Batch {
   type: string
 }
 
-const DELIVERY_METHODS = ['CJ', '배송팀', '문종철', '경동', '팀무버']
+const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버']
 const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -56,6 +56,7 @@ export default function SoumOrders() {
   const [startDate, setStartDate] = useState(today())
   const [endDate, setEndDate] = useState(today())
   const [activePreset, setActivePreset] = useState('오늘')
+  const [shipStats, setShipStats] = useState<Record<string, Record<string, number>>>({})
 
   function applyPreset(preset: typeof PRESETS[0]) {
     setStartDate(preset.start())
@@ -100,6 +101,22 @@ export default function SoumOrders() {
       Object.values(map).sort((a, b) => (b.order_date ?? '').localeCompare(a.order_date ?? ''))
     )
     setSelected(new Set())
+
+    // 상품별 배송방법 누적 카운트
+    const codes = [...new Set(((data ?? []) as any[]).map(r => r.product_code).filter(Boolean))]
+    if (codes.length) {
+      const { data: statData } = await supabase
+        .from('product_ship_stats')
+        .select('product_code, method, ship_count')
+        .in('product_code', codes)
+      const statMap: Record<string, Record<string, number>> = {}
+      for (const s of statData ?? []) {
+        ;(statMap[s.product_code] ??= {})[s.method] = s.ship_count
+      }
+      setShipStats(statMap)
+    } else {
+      setShipStats({})
+    }
   }
 
   async function loadBatches() {
@@ -314,6 +331,16 @@ export default function SoumOrders() {
                     <span className="text-sm text-gray-800 flex-1">
                       {item.product_name}
                       {item.option_info && <span className="text-gray-400 text-xs ml-2">{item.option_info}</span>}
+                    </span>
+                    <span className="flex gap-2 text-[11px] shrink-0">
+                      {DELIVERY_METHODS.map(m => {
+                        const c = shipStats[item.product_code]?.[m] ?? 0
+                        return (
+                          <span key={m} className={c > 0 ? 'text-blue-600 font-semibold' : 'text-gray-300'}>
+                            {m} {c}
+                          </span>
+                        )
+                      })}
                     </span>
                     <span className="font-mono text-xs text-indigo-600 shrink-0">{locationOf(item)}</span>
                     <span className="text-sm font-semibold text-gray-800 w-10 text-right shrink-0">×{item.quantity}</span>

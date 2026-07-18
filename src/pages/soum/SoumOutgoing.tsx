@@ -19,6 +19,7 @@ interface InspectItem {
   supplier_name: string | null
   quantity: number
   inspected_qty: number
+  delivery_method: string | null
 }
 
 interface UnregisteredModal {
@@ -83,7 +84,7 @@ export default function SoumOutgoing() {
 
     const { data: itemData } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method')
       .eq('order_id', order.id)
       .eq('status', 'confirmed')
 
@@ -108,6 +109,14 @@ export default function SoumOutgoing() {
 
   useEffect(() => {
     if (done && orderInfo) {
+      // 상품별 배송방법 카운트 (이 화면은 CJ 흐름이라 방법 미지정 시 CJ로 집계)
+      for (const i of items) {
+        supabase.rpc('increment_ship_count', {
+          p_code: i.product_code,
+          p_method: i.delivery_method ?? 'CJ',
+          p_qty: i.quantity,
+        }).then(() => {})
+      }
       // 검수 완료 → 상품 출고 처리 (TODO: 카페24 배송중 API 연동)
       supabase.from('order_items')
         .update({ status: 'in_transit' })
