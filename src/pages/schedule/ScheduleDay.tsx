@@ -574,9 +574,11 @@ export default function ScheduleDay() {
                     <div key={s.order_id} onClick={() => openAssignModal(s)} className="p-3 cursor-pointer hover:bg-blue-50">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium text-gray-800">{s.customer_name}</span>
-                        {s._dist !== undefined && s._dist < 10 && (
-                          <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium shrink-0">
-                            📍 {s._routeLabel ? `${s._routeLabel} 근처` : '근처'}
+                        {s._dist !== undefined && s._dist !== Infinity && s._routeLabel && (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium shrink-0 ${
+                            s._dist < 10 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                          }`}>
+                            📍 {s._routeLabel} · {s._dist.toFixed(1)}km
                           </span>
                         )}
                       </div>
