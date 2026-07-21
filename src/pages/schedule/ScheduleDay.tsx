@@ -232,7 +232,7 @@ export default function ScheduleDay() {
       mapObjRef.current.setBounds(bounds)
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [stops])
+  }, [stops, loading])
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
