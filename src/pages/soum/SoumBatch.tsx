@@ -147,7 +147,7 @@ export default function SoumBatch() {
   function downloadCJ() {
     // 주문 단위로 묶기 (한 주문 = 송장 1건)
     const byOrder: Record<string, {
-      orderNo: string; name: string; phone: string
+      orderNo: string; name: string; phone: string; zipcode: string
       address: string; message: string; products: string[]; qty: number
     }> = {}
     for (const item of items) {
@@ -157,7 +157,8 @@ export default function SoumBatch() {
           orderNo: key,
           name: item.receiver_name || item.customer_name,
           phone: item.receiver_phone ?? '',
-          address: [item.zipcode, item.address].filter(Boolean).join(' '),
+          zipcode: item.zipcode ?? '',
+          address: item.address ?? '',
           message: item.shipping_message ?? '',
           products: [],
           qty: 0,
@@ -167,23 +168,30 @@ export default function SoumBatch() {
       byOrder[key].qty += item.quantity
     }
 
-    // CJ 업로드 양식: 받는분성명 / 받는분전화번호 / 받는분주소(전체,분리안됨) / 배송메세지1 / 품목명 / 박스수량
-    // + 고객주문번호(운송장 발급 후 결과 파일에 그대로 돌아오는 컬럼) — 매칭용으로 맨 앞에 추가
-    const rows = Object.values(byOrder).map(o => ({
-      '고객주문번호': o.orderNo,
-      '받는분성명': o.name,
-      '받는분전화번호': o.phone,
-      '받는분주소(전체,분리안됨)': o.address,
-      '배송메세지1': o.message,
-      '품목명': o.products[0] + (o.products.length > 1 ? ` 외 ${o.products.length - 1}건` : ''),
-      '박스수량': o.qty,
-    }))
-
-    const ws = XLSX.utils.json_to_sheet(rows)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'CJ송장')
+    // CJ 표준 양식 (컬럼 순서 고정). 값이 없는 필드(예약구분/받는분기타연락처/운송장번호/
+    // 박스타입/기본운임/배송메세지2)는 CJ 시스템이 채우거나 우리가 안 쓰는 항목이라 공란.
+    const header = [
+      '예약구분', '집하예정일', '받는분성명', '받는분전화번호', '받는분기타연락처',
+      '받는분우편번호', '받는분주소(전체, 분할)', '운송장번호', '고객주문번호',
+      '품목명', '박스수량', '박스타입', '기본운임', '배송메세지1', '배송메세지2',
+      '품목명', '운임구분',
+    ]
     const d = new Date()
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+    const dataRows = Object.values(byOrder).map(o => {
+      const productSummary = o.products[0] + (o.products.length > 1 ? ` 외 ${o.products.length - 1}건` : '')
+      return [
+        '', dateStr, o.name, o.phone, '',
+        o.zipcode, o.address, '', o.orderNo,
+        productSummary, o.qty, '', '', o.message, '',
+        productSummary, '',
+      ]
+    })
+
+    const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'CJ송장')
     XLSX.writeFile(wb, `CJ송장_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
   }
 
