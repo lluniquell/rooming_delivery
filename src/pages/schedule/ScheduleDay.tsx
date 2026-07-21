@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors,
@@ -34,6 +34,33 @@ interface Stop {
   items: StopItem[]
 }
 
+interface PresetLocation {
+  key: string
+  name: string
+  address: string
+  lat: number | null
+  lng: number | null
+  type: 'start' | 'waypoint'
+}
+
+interface DayWaypoint {
+  preset_key: string
+  route_order: number
+}
+
+// 주문 배송건과 프리셋 경유지(NK빌딩 등)를 하나의 루트로 합친 표현
+interface RouteStop {
+  id: string
+  kind: 'order' | 'preset'
+  name: string
+  address: string | null
+  crew_size: number | null
+  lat: number | null
+  lng: number | null
+  items: StopItem[]
+  route_order: number
+}
+
 function regionOf(address: string | null) {
   if (!address) return ''
   return address.split(/\s+/).slice(0, 2).join(' ')
@@ -60,29 +87,34 @@ function loadKakaoSdk(): Promise<void> {
   })
 }
 
-function SortableStop({ stop, index, onUnschedule }: { stop: Stop; index: number; onUnschedule: (s: Stop) => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.order_id })
+function SortableStop({ stop, index, onRemove }: { stop: RouteStop; index: number; onRemove: (s: RouteStop) => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id })
   const style = { transform: CSS.Transform.toString(transform), transition }
+  const isPreset = stop.kind === 'preset'
 
   return (
-    <div ref={setNodeRef} style={style} className="flex items-center gap-2 border rounded-lg p-2.5 bg-white group">
+    <div ref={setNodeRef} style={style} className={`flex items-center gap-2 border rounded-lg p-2.5 group ${isPreset ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
       <span {...attributes} {...listeners} className="cursor-grab text-gray-300 text-lg leading-none px-1">⠿</span>
-      <span className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0">
+      <span className={`w-6 h-6 rounded-full text-white text-xs font-bold flex items-center justify-center shrink-0 ${isPreset ? 'bg-amber-500' : 'bg-blue-600'}`}>
         {index + 1}
       </span>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
-          <span className={`text-[10px] px-1 rounded font-bold shrink-0 ${
-            stop.crew_size === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-200 text-gray-600'
-          }`}>
-            {stop.crew_size === 2 ? '2인' : '1인'}
-          </span>
-          <span className="text-sm font-medium text-gray-800 truncate">{stop.customer_name}</span>
+          {isPreset ? (
+            <span className="text-[10px] px-1 rounded font-bold shrink-0 bg-amber-100 text-amber-700">경유지</span>
+          ) : (
+            <span className={`text-[10px] px-1 rounded font-bold shrink-0 ${
+              stop.crew_size === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-200 text-gray-600'
+            }`}>
+              {stop.crew_size === 2 ? '2인' : '1인'}
+            </span>
+          )}
+          <span className="text-sm font-medium text-gray-800 truncate">{stop.name}</span>
         </div>
         <div className="text-[11px] text-gray-400 truncate">{stop.address}</div>
       </div>
       <button
-        onClick={() => onUnschedule(stop)}
+        onClick={() => onRemove(stop)}
         className="text-gray-300 hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity"
       >✕</button>
     </div>
@@ -94,6 +126,8 @@ export default function ScheduleDay() {
   const [batchId, setBatchId] = useState<string | null>(null)
   const [stops, setStops] = useState<Stop[]>([])
   const [unscheduled, setUnscheduled] = useState<Stop[]>([])
+  const [presets, setPresets] = useState<PresetLocation[]>([])
+  const [dayWaypoints, setDayWaypoints] = useState<DayWaypoint[]>([])
   const [closed, setClosed] = useState(false)
   const [geocoding, setGeocoding] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -103,6 +137,41 @@ export default function ScheduleDay() {
   const markersRef = useRef<any[]>([])
   const sensors = useSensors(useSensor(PointerSensor))
 
+  const depot = presets.find(p => p.type === 'start')
+  const waypointPresets = presets.filter(p => p.type === 'waypoint')
+
+  const routeStops: RouteStop[] = useMemo(() => {
+    const orderPart: RouteStop[] = stops.map(s => ({
+      id: s.order_id,
+      kind: 'order',
+      name: s.customer_name,
+      address: s.address,
+      crew_size: s.crew_size,
+      lat: s.lat,
+      lng: s.lng,
+      items: s.items,
+      route_order: s.route_order ?? 999,
+    }))
+    const waypointPart: RouteStop[] = dayWaypoints
+      .map((w): RouteStop | null => {
+        const p = presets.find(p => p.key === w.preset_key)
+        if (!p) return null
+        return {
+          id: `preset:${p.key}`,
+          kind: 'preset',
+          name: p.name,
+          address: p.address,
+          crew_size: null,
+          lat: p.lat,
+          lng: p.lng,
+          items: [],
+          route_order: w.route_order,
+        }
+      })
+      .filter((x): x is RouteStop => x !== null)
+    return [...orderPart, ...waypointPart].sort((a, b) => a.route_order - b.route_order)
+  }, [stops, dayWaypoints, presets])
+
   useEffect(() => { init() }, [date])
 
   async function init() {
@@ -111,8 +180,17 @@ export default function ScheduleDay() {
     const jikbae = (batches ?? []).find(b => b.type === 'direct' || b.name?.includes('직배'))
     if (jikbae) setBatchId(jikbae.id)
 
+    const { data: presetData } = await supabase.from('preset_locations').select('*')
+    setPresets(presetData ?? [])
+
     const { data: dayRow } = await supabase.from('schedule_days').select('closed').eq('date', date).maybeSingle()
     setClosed(!!dayRow?.closed)
+
+    const { data: waypointData } = await supabase
+      .from('schedule_day_waypoints')
+      .select('preset_key, route_order')
+      .eq('date', date)
+    setDayWaypoints(waypointData ?? [])
 
     if (jikbae) await loadAll(jikbae.id)
     setLoading(false)
@@ -201,7 +279,7 @@ export default function ScheduleDay() {
     }
   }
 
-  // 지도 렌더링
+  // 지도 렌더링 — 출발지(고정) + 루트(주문/경유지 통합) 표시
   useEffect(() => {
     if (!mapRef.current || !KAKAO_JS_KEY) return
     let cancelled = false
@@ -216,36 +294,55 @@ export default function ScheduleDay() {
       markersRef.current.forEach(m => m.setMap(null))
       markersRef.current = []
 
-      const withCoords = stops.filter(s => s.lat && s.lng)
-      if (!withCoords.length) return
       const bounds = new window.kakao.maps.LatLngBounds()
-      withCoords.forEach(s => {
-        const pos = new window.kakao.maps.LatLng(s.lat!, s.lng!)
+      let hasAny = false
+
+      function addPin(lat: number, lng: number, label: string, color: string) {
+        const pos = new window.kakao.maps.LatLng(lat, lng)
         const content = document.createElement('div')
-        content.style.cssText = 'background:#2563eb;color:#fff;border-radius:9999px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)'
-        content.textContent = String(stops.findIndex(x => x.order_id === s.order_id) + 1)
+        content.style.cssText = `background:${color};color:#fff;border-radius:9999px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)`
+        content.textContent = label
         const overlay = new window.kakao.maps.CustomOverlay({ position: pos, content, yAnchor: 0.5 })
         overlay.setMap(mapObjRef.current)
         markersRef.current.push(overlay)
         bounds.extend(pos)
+        hasAny = true
+      }
+
+      if (depot?.lat && depot?.lng) addPin(depot.lat, depot.lng, '출', '#16a34a')
+      routeStops.forEach((s, i) => {
+        if (s.lat && s.lng) addPin(s.lat, s.lng, String(i + 1), s.kind === 'preset' ? '#d97706' : '#2563eb')
       })
-      mapObjRef.current.setBounds(bounds)
+
+      if (hasAny) mapObjRef.current.setBounds(bounds)
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [stops, loading])
+  }, [routeStops, depot, loading])
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
     if (!over || active.id === over.id) return
-    setStops(items => {
-      const oldIndex = items.findIndex(i => i.order_id === active.id)
-      const newIndex = items.findIndex(i => i.order_id === over.id)
-      const reordered = arrayMove(items, oldIndex, newIndex)
-      reordered.forEach((s, i) => {
-        supabase.from('orders').update({ route_order: i + 1 }).eq('id', s.order_id).then(() => {})
-      })
-      return reordered
+    const oldIndex = routeStops.findIndex(i => i.id === active.id)
+    const newIndex = routeStops.findIndex(i => i.id === over.id)
+    const reordered = arrayMove(routeStops, oldIndex, newIndex)
+
+    reordered.forEach((s, i) => {
+      if (s.kind === 'order') {
+        supabase.from('orders').update({ route_order: i + 1 }).eq('id', s.id).then(() => {})
+      } else {
+        const key = s.id.replace('preset:', '')
+        supabase.from('schedule_day_waypoints').update({ route_order: i + 1 }).eq('date', date).eq('preset_key', key).then(() => {})
+      }
     })
+
+    setStops(prev => prev.map(p => {
+      const idx = reordered.findIndex(r => r.id === p.order_id)
+      return idx >= 0 ? { ...p, route_order: idx + 1 } : p
+    }))
+    setDayWaypoints(prev => prev.map(w => {
+      const idx = reordered.findIndex(r => r.id === `preset:${w.preset_key}`)
+      return idx >= 0 ? { ...w, route_order: idx + 1 } : w
+    }))
   }
 
   async function assignToDay(stop: Stop) {
@@ -253,14 +350,32 @@ export default function ScheduleDay() {
     await supabase.from('orders').update({
       scheduled_date: date,
       crew_size: crew,
-      route_order: stops.length + 1,
+      route_order: routeStops.length + 1,
     }).eq('id', stop.order_id)
     if (batchId) loadAll(batchId)
   }
 
-  async function unschedule(stop: Stop) {
-    await supabase.from('orders').update({ scheduled_date: null, crew_size: null, route_order: null }).eq('id', stop.order_id)
-    if (batchId) loadAll(batchId)
+  async function removeStop(stop: RouteStop) {
+    if (stop.kind === 'order') {
+      await supabase.from('orders').update({ scheduled_date: null, crew_size: null, route_order: null }).eq('id', stop.id)
+      if (batchId) loadAll(batchId)
+    } else {
+      const key = stop.id.replace('preset:', '')
+      await supabase.from('schedule_day_waypoints').delete().eq('date', date).eq('preset_key', key)
+      setDayWaypoints(prev => prev.filter(w => w.preset_key !== key))
+    }
+  }
+
+  async function toggleWaypoint(preset: PresetLocation) {
+    const active = dayWaypoints.find(w => w.preset_key === preset.key)
+    if (active) {
+      await supabase.from('schedule_day_waypoints').delete().eq('date', date).eq('preset_key', preset.key)
+      setDayWaypoints(prev => prev.filter(w => w.preset_key !== preset.key))
+    } else {
+      const route_order = routeStops.length + 1
+      await supabase.from('schedule_day_waypoints').insert({ date, preset_key: preset.key, route_order })
+      setDayWaypoints(prev => [...prev, { preset_key: preset.key, route_order }])
+    }
   }
 
   async function toggleClosed() {
@@ -331,15 +446,48 @@ export default function ScheduleDay() {
 
           <div className="flex-1 grid grid-cols-2 gap-4 min-w-0">
             <div className="bg-white rounded-xl border p-2">
-              <div className="text-xs font-medium text-gray-500 px-1 pb-2">배송 루트 ({stops.length}건) — 드래그로 순서 변경</div>
-              {stops.length === 0 ? (
+              <div className="flex items-center justify-between px-1 pb-2">
+                <div className="text-xs font-medium text-gray-500">배송 루트 ({routeStops.length}건) — 드래그로 순서 변경</div>
+                {waypointPresets.length > 0 && (
+                  <div className="flex gap-1.5">
+                    {waypointPresets.map(p => {
+                      const active = dayWaypoints.some(w => w.preset_key === p.key)
+                      return (
+                        <button
+                          key={p.key}
+                          onClick={() => toggleWaypoint(p)}
+                          className={`px-2 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                            active
+                              ? 'bg-amber-500 text-white border-amber-500'
+                              : 'text-amber-600 border-amber-300 hover:bg-amber-50'
+                          }`}
+                        >
+                          {active ? `✓ ${p.name} 경유` : `+ ${p.name} 경유`}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {depot && (
+                <div className="flex items-center gap-2 border rounded-lg p-2.5 bg-green-50 border-green-200 mb-1.5">
+                  <span className="w-6 h-6 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center shrink-0">출</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-gray-800">{depot.name}</span>
+                    <div className="text-[11px] text-gray-400 truncate">{depot.address}</div>
+                  </div>
+                </div>
+              )}
+
+              {routeStops.length === 0 ? (
                 <div className="p-8 text-center text-xs text-gray-400">배정된 배송건이 없습니다</div>
               ) : (
                 <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                  <SortableContext items={stops.map(s => s.order_id)} strategy={verticalListSortingStrategy}>
-                    <div className="space-y-1.5 max-h-[calc(100vh-300px)] overflow-y-auto">
-                      {stops.map((s, i) => (
-                        <SortableStop key={s.order_id} stop={s} index={i} onUnschedule={unschedule} />
+                  <SortableContext items={routeStops.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                    <div className="space-y-1.5 max-h-[calc(100vh-340px)] overflow-y-auto">
+                      {routeStops.map((s, i) => (
+                        <SortableStop key={s.id} stop={s} index={i} onRemove={removeStop} />
                       ))}
                     </div>
                   </SortableContext>
