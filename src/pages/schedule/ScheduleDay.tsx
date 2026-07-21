@@ -37,6 +37,8 @@ interface Stop {
   lat: number | null
   lng: number | null
   items: StopItem[]
+  _dist?: number
+  _routeLabel?: string | null
 }
 
 interface PresetLocation {
@@ -147,7 +149,6 @@ export default function ScheduleDay() {
   const { date } = useParams<{ date: string }>()
   const [batchId, setBatchId] = useState<string | null>(null)
   const [stops, setStops] = useState<Stop[]>([])
-  const [unscheduled, setUnscheduled] = useState<Stop[]>([])
   const [presets, setPresets] = useState<PresetLocation[]>([])
   const [dayWaypoints, setDayWaypoints] = useState<DayWaypoint[]>([])
   const [routes, setRoutes] = useState<RouteLane[]>([])
@@ -155,8 +156,7 @@ export default function ScheduleDay() {
   const [closed, setClosed] = useState(false)
   const [geocoding, setGeocoding] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [assignModal, setAssignModal] = useState<{ stop: Stop; needsCrew: boolean } | null>(null)
-  const [modalCrew, setModalCrew] = useState<1 | 2>(1)
+  const [assignModal, setAssignModal] = useState<Stop | null>(null)
   const [modalRouteId, setModalRouteId] = useState('')
 
   const mapRef = useRef<HTMLDivElement>(null)
@@ -291,38 +291,39 @@ export default function ScheduleDay() {
       .in('status', ['confirmed', 'in_transit'])
       .eq('orders.scheduled_date', date)
     const scheduledStops = groupRows((scheduledData ?? []) as any[])
-    setStops(scheduledStops)
 
-    const { data: unschedData } = await supabase
-      .from('order_items')
-      .select(SELECT)
-      .eq('batch_id', bid)
-      .eq('status', 'confirmed')
-      .is('orders.scheduled_date', null)
-    let unschedStops = groupRows((unschedData ?? []) as any[])
-
-    // 이미 배정된(루트가 정해진) 배송건들을 전부 기준점으로 삼아 —
-    // 미배정 주문마다 "가장 가까운 배정건이 몇 호차인지" 표시 + 그 순서로 정렬
-    const anchors = scheduledStops.filter(s => s.lat && s.lng && s.route_id)
-    if (anchors.length) {
-      unschedStops = unschedStops
-        .map(s => {
-          if (!s.lat || !s.lng) return { ...s, _dist: Infinity, _routeLabel: null as string | null }
-          let bestDist = Infinity
-          let bestRouteId: string | null = null
-          for (const a of anchors) {
-            const d = distanceKm(a as any, s as any)
-            if (d < bestDist) { bestDist = d; bestRouteId = a.route_id }
-          }
-          const label = routesForDate.find(r => r.id === bestRouteId)?.label ?? null
-          return { ...s, _dist: bestDist, _routeLabel: label }
-        })
-        .sort((a: any, b: any) => a._dist - b._dist)
+    // 기준점 = 각 루트의 "마지막" 배송지 (다음 배송지를 그 뒤에 이어붙일 위치)
+    const routedStops = scheduledStops.filter(s => s.route_id)
+    const lastByRoute: Record<string, Stop> = {}
+    for (const s of routedStops) {
+      const rid = s.route_id!
+      if (!lastByRoute[rid] || (s.route_order ?? 0) > (lastByRoute[rid].route_order ?? 0)) {
+        lastByRoute[rid] = s
+      }
     }
-    setUnscheduled(unschedStops)
+    const anchors = Object.values(lastByRoute).filter(s => s.lat && s.lng)
+
+    function withNearest(list: Stop[]): Stop[] {
+      if (!anchors.length) return list
+      return list.map(s => {
+        if (!s.lat || !s.lng) return { ...s, _dist: Infinity, _routeLabel: null }
+        let bestDist = Infinity
+        let bestRouteId: string | null = null
+        for (const a of anchors) {
+          const d = distanceKm(a as any, s as any)
+          if (d < bestDist) { bestDist = d; bestRouteId = a.route_id }
+        }
+        const label = routesForDate.find(r => r.id === bestRouteId)?.label ?? null
+        return { ...s, _dist: bestDist, _routeLabel: label }
+      }).sort((a, b) => (a._dist ?? Infinity) - (b._dist ?? Infinity))
+    }
+
+    // 아직 라우트 없는(같은 날짜) 배송건만 가까운 순 계산
+    const unroutedStops = withNearest(scheduledStops.filter(s => !s.route_id))
+    setStops([...routedStops, ...unroutedStops])
 
     // 지오코딩은 백그라운드로 진행 — 완료된 항목만 로컬 state에 반영 (재조회 없음, 무한루프 방지)
-    geocodeMissing([...scheduledStops, ...unschedStops])
+    geocodeMissing(scheduledStops)
   }
 
   async function geocodeMissing(list: Stop[]) {
@@ -348,7 +349,6 @@ export default function ScheduleDay() {
     if (Object.keys(updates).length) {
       const apply = (arr: Stop[]) => arr.map(s => updates[s.order_id] ? { ...s, ...updates[s.order_id] } : s)
       setStops(prev => apply(prev))
-      setUnscheduled(prev => apply(prev))
     }
   }
 
@@ -511,10 +511,9 @@ export default function ScheduleDay() {
     setRoutes(prev => prev.map(r => r.id === route.id ? { ...r, crew_size: crew } : r))
   }
 
-  function openAssignModal(stop: Stop, needsCrew: boolean) {
+  function openAssignModal(stop: Stop) {
     if (!routes.length) { alert('먼저 루트를 추가해주세요.'); return }
-    setAssignModal({ stop, needsCrew })
-    setModalCrew((stop.crew_size as 1 | 2) ?? 1)
+    setAssignModal(stop)
     setModalRouteId(routes[0].id)
   }
 
@@ -522,11 +521,9 @@ export default function ScheduleDay() {
     if (!assignModal || !modalRouteId) return
     const targetLen = stopsForRoute(modalRouteId).length
     await supabase.from('orders').update({
-      scheduled_date: date,
-      crew_size: assignModal.needsCrew ? modalCrew : assignModal.stop.crew_size,
       route_id: modalRouteId,
       route_order: targetLen + 1,
-    }).eq('id', assignModal.stop.order_id)
+    }).eq('id', assignModal.order_id)
     setAssignModal(null)
     if (batchId) loadAll(batchId, routes)
   }
@@ -565,51 +562,25 @@ export default function ScheduleDay() {
         <div className="text-center text-gray-400 py-20 text-sm">불러오는 중...</div>
       ) : (
         <div className="flex gap-4">
-          {!closed && (
-            <div className="w-72 shrink-0 space-y-4">
-              {unrouted.length > 0 && (
-                <div className="bg-white rounded-xl border overflow-hidden">
-                  <div className="px-3 py-2.5 border-b bg-red-50 text-sm font-medium text-red-700">
-                    루트 미배정 <span className="font-bold">{unrouted.length}</span>건
-                  </div>
-                  <div className="divide-y max-h-52 overflow-y-auto">
-                    {unrouted.map(s => (
-                      <div key={s.order_id} onClick={() => openAssignModal(s, false)} className="p-3 cursor-pointer hover:bg-blue-50">
-                        <span className="text-sm font-medium text-gray-800">{s.customer_name}</span>
-                        <div className="text-[11px] text-gray-400">{regionOf(s.address)}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
+          {!closed && unrouted.length > 0 && (
+            <div className="w-72 shrink-0">
               <div className="bg-white rounded-xl border overflow-hidden">
-                <div className="px-3 py-2.5 border-b bg-gray-50 text-sm font-medium text-gray-700">
-                  미배정 <span className="text-indigo-600 font-bold">{unscheduled.length}</span>건
-                  <span className="block text-[11px] text-gray-400 font-normal mt-0.5">가까운 순 정렬</span>
+                <div className="px-3 py-2.5 border-b bg-red-50 text-sm font-medium text-red-700">
+                  루트 미배정 <span className="font-bold">{unrouted.length}</span>건
+                  <span className="block text-[11px] text-red-400 font-normal mt-0.5">가까운 순 정렬</span>
                 </div>
-                <div className="divide-y max-h-[calc(100vh-360px)] overflow-y-auto">
-                  {unscheduled.length === 0 && (
-                    <div className="p-6 text-center text-xs text-gray-400">미배정 주문이 없습니다</div>
-                  )}
-                  {unscheduled.map((s: any) => (
-                    <div key={s.order_id} onClick={() => openAssignModal(s, true)} className="p-3 cursor-pointer hover:bg-blue-50">
+                <div className="divide-y max-h-[calc(100vh-260px)] overflow-y-auto">
+                  {unrouted.map(s => (
+                    <div key={s.order_id} onClick={() => openAssignModal(s)} className="p-3 cursor-pointer hover:bg-blue-50">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium text-gray-800">{s.customer_name}</span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {s._dist < 10 && (
-                            <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
-                              📍 {s._routeLabel ? `${s._routeLabel} 근처` : '근처'}
-                            </span>
-                          )}
-                          <span className="text-[11px] text-indigo-600 font-medium">{regionOf(s.address)}</span>
-                        </div>
+                        {s._dist !== undefined && s._dist < 10 && (
+                          <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium shrink-0">
+                            📍 {s._routeLabel ? `${s._routeLabel} 근처` : '근처'}
+                          </span>
+                        )}
                       </div>
-                      <div className="mt-1 space-y-0.5">
-                        {s.items.map((it: StopItem) => (
-                          <div key={it.id} className="text-xs text-gray-600 truncate">{it.product_name} <span className="text-gray-400">×{it.quantity}</span></div>
-                        ))}
-                      </div>
+                      <div className="text-[11px] text-gray-400">{regionOf(s.address)}</div>
                     </div>
                   ))}
                 </div>
@@ -736,26 +707,7 @@ export default function ScheduleDay() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
             <h3 className="font-bold text-gray-800 mb-1">루트 배정</h3>
-            <p className="text-sm text-gray-500 mb-4">{assignModal.stop.customer_name}</p>
-
-            {assignModal.needsCrew && (
-              <div className="mb-4">
-                <p className="text-xs font-medium text-gray-500 mb-2">배송 인원</p>
-                <div className="flex gap-2">
-                  {([1, 2] as const).map(n => (
-                    <button
-                      key={n}
-                      onClick={() => setModalCrew(n)}
-                      className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                        modalCrew === n
-                          ? n === 2 ? 'bg-orange-500 text-white border-orange-500' : 'bg-gray-700 text-white border-gray-700'
-                          : 'text-gray-600 border-gray-300 hover:border-gray-400'
-                      }`}
-                    >{n}인 배송</button>
-                  ))}
-                </div>
-              </div>
-            )}
+            <p className="text-sm text-gray-500 mb-4">{assignModal.customer_name}</p>
 
             <div className="mb-6">
               <p className="text-xs font-medium text-gray-500 mb-2">루트 선택</p>
