@@ -15,8 +15,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { data: { user }, error: authError } = await supabase.auth.getUser(token)
   if (authError || !user) return res.status(401).json({ message: '인증에 실패했습니다.' })
 
-  const { data: caller } = await supabase.from('drivers').select('is_superadmin').eq('id', user.id).single()
-  if (!caller?.is_superadmin) return res.status(403).json({ message: '계정 관리 권한이 없습니다.' })
+  const { data: caller } = await supabase.from('drivers').select('is_superadmin, permissions').eq('id', user.id).single()
+  if (!caller?.is_superadmin && !caller?.permissions?.includes('admin')) {
+    return res.status(403).json({ message: '계정 관리 권한이 없습니다.' })
+  }
 
   const { name, email, password, permissions } = req.body ?? {}
   if (!name || !email || !password) {

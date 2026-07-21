@@ -1,6 +1,6 @@
 export type Role = 'admin' | 'driver'
 export type DeliveryStatus = 'pending' | 'done' | 'failed'
-export type Permission = 'orders' | 'schedule' | 'delivery' | 'soum'
+export type Permission = 'admin' | 'orders' | 'schedule' | 'delivery' | 'soum'
 
 export interface Driver {
   id: string

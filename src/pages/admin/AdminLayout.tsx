@@ -42,6 +42,22 @@ export const PERMISSION_GROUPS: { key: Permission; label: string; items: { to: s
   { key: 'soum', label: '소품팀', items: propItems },
 ]
 
+// 계정 관리 화면에서 고를 수 있는 권한 목록 — '관리자'는 실제 메뉴가 아니라
+// PERMISSION_GROUPS 전체를 한 번에 부여하는 상위 권한
+export const ASSIGNABLE_PERMISSIONS: { key: Permission; label: string }[] = [
+  { key: 'admin', label: '관리자 (전체 메뉴)' },
+  ...PERMISSION_GROUPS.map(g => ({ key: g.key, label: g.label })),
+]
+
+export function hasPermission(driver: Driver, key: Permission) {
+  return driver.is_superadmin || driver.permissions?.includes('admin') || driver.permissions?.includes(key)
+}
+
+// '관리자' 권한 보유자는 슈퍼관리자와 마찬가지로 계정 관리 접근 가능 (테스트 메뉴는 제외)
+export function canManageAccounts(driver: Driver) {
+  return driver.is_superadmin || driver.permissions?.includes('admin')
+}
+
 function NavGroup({ label, items }: { label: string; items: { to: string; label: string }[] }) {
   const [open, setOpen] = useState(false)
   const location = useLocation()
@@ -86,7 +102,7 @@ function NavGroup({ label, items }: { label: string; items: { to: string; label:
 }
 
 export default function AdminLayout({ driver }: Props) {
-  const canSee = (key: Permission) => driver.is_superadmin || driver.permissions?.includes(key)
+  const canSee = (key: Permission) => hasPermission(driver, key)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -97,18 +113,16 @@ export default function AdminLayout({ driver }: Props) {
             {PERMISSION_GROUPS.filter(g => canSee(g.key)).map(g => (
               <NavGroup key={g.key} label={g.label} items={g.items} />
             ))}
-            {driver.is_superadmin && (
-              <>
-                <NavGroup label="테스트" items={devItems} />
-                <NavLink
-                  to="/admin/accounts"
-                  className={({ isActive }) =>
-                    `px-3 py-1.5 rounded text-sm font-semibold ${isActive ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`
-                  }
-                >
-                  계정 관리
-                </NavLink>
-              </>
+            {driver.is_superadmin && <NavGroup label="테스트" items={devItems} />}
+            {canManageAccounts(driver) && (
+              <NavLink
+                to="/admin/accounts"
+                className={({ isActive }) =>
+                  `px-3 py-1.5 rounded text-sm font-semibold ${isActive ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`
+                }
+              >
+                계정 관리
+              </NavLink>
             )}
           </nav>
         </div>

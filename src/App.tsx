@@ -5,7 +5,7 @@ import type { Driver, Permission } from './types'
 import { getCurrentDriver } from './lib/auth'
 
 import LoginPage from './pages/LoginPage'
-import AdminLayout, { PERMISSION_GROUPS } from './pages/admin/AdminLayout'
+import AdminLayout, { PERMISSION_GROUPS, hasPermission, canManageAccounts } from './pages/admin/AdminLayout'
 import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminRegister from './pages/admin/AdminRegister'
 import AdminAssign from './pages/admin/AdminAssign'
@@ -27,7 +27,7 @@ import DriverList from './pages/driver/DriverList'
 import DriverDetail from './pages/driver/DriverDetail'
 
 function RequirePermission({ perm, driver, children }: { perm: Permission; driver: Driver; children: React.ReactNode }) {
-  if (driver.is_superadmin || driver.permissions?.includes(perm)) return <>{children}</>
+  if (hasPermission(driver, perm)) return <>{children}</>
   return <Navigate to="/admin" replace />
 }
 
@@ -36,8 +36,13 @@ function RequireSuperadmin({ driver, children }: { driver: Driver; children: Rea
   return <Navigate to="/admin" replace />
 }
 
+function RequireAccountManage({ driver, children }: { driver: Driver; children: React.ReactNode }) {
+  if (canManageAccounts(driver)) return <>{children}</>
+  return <Navigate to="/admin" replace />
+}
+
 function defaultAdminPath(driver: Driver) {
-  if (driver.is_superadmin) return '/admin/dashboard'
+  if (driver.is_superadmin || driver.permissions?.includes('admin')) return '/admin/dashboard'
   const firstGroup = PERMISSION_GROUPS.find(g => driver.permissions?.includes(g.key))
   return firstGroup ? firstGroup.items[0].to : '/login'
 }
@@ -93,7 +98,7 @@ function App() {
           <Route path="barcodes" element={driver && <RequirePermission perm="soum" driver={driver}><BarcodeDB /></RequirePermission>} />
           <Route path="barcode-assign" element={driver && <RequirePermission perm="soum" driver={driver}><BarcodeAssign /></RequirePermission>} />
           <Route path="test" element={driver && <RequireSuperadmin driver={driver}><AdminTest /></RequireSuperadmin>} />
-          <Route path="accounts" element={driver && <RequireSuperadmin driver={driver}><AdminAccounts /></RequireSuperadmin>} />
+          <Route path="accounts" element={driver && <RequireAccountManage driver={driver}><AdminAccounts /></RequireAccountManage>} />
         </Route>
 
         {/* 배송원 */}

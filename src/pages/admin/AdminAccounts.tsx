@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Driver, Permission } from '../../types'
-import { PERMISSION_GROUPS } from './AdminLayout'
+import { ASSIGNABLE_PERMISSIONS } from './AdminLayout'
 
 export default function AdminAccounts() {
   const [accounts, setAccounts] = useState<Driver[]>([])
@@ -102,7 +102,7 @@ export default function AdminAccounts() {
           <div className="mb-4">
             <p className="text-xs font-medium text-gray-500 mb-2">메뉴 권한</p>
             <div className="flex flex-wrap gap-2">
-              {PERMISSION_GROUPS.map(g => (
+              {ASSIGNABLE_PERMISSIONS.map(g => (
                 <button
                   type="button"
                   key={g.key}
@@ -150,7 +150,7 @@ export default function AdminAccounts() {
                 <td className="px-4 py-3 text-gray-500">{a.email}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-1">
-                    {PERMISSION_GROUPS.map(g => (
+                    {ASSIGNABLE_PERMISSIONS.map(g => (
                       <button
                         key={g.key}
                         onClick={() => updatePermissions(a, g.key)}
