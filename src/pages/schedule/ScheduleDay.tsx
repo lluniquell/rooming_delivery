@@ -137,12 +137,17 @@ export default function ScheduleDay() {
   const markersRef = useRef<any[]>([])
   const sensors = useSensors(useSensor(PointerSensor))
 
-  const depot = presets.find(p => p.type === 'start')
+  // '선진'(depot 키)은 항상 루트 맨 위에 고정 — 드래그 목록/정렬에서 제외
+  const PINNED_KEY = 'depot'
   const WAYPOINT_ORDER = ['depot', 'nk']
   const WAYPOINT_VERB: Record<string, string> = { depot: '출발' }
   const waypointPresets = presets
     .filter(p => p.type === 'waypoint')
     .sort((a, b) => WAYPOINT_ORDER.indexOf(a.key) - WAYPOINT_ORDER.indexOf(b.key))
+
+  const pinnedPreset = presets.find(p => p.key === PINNED_KEY)
+  const pinnedActive = dayWaypoints.some(w => w.preset_key === PINNED_KEY)
+  const sortableDayWaypoints = dayWaypoints.filter(w => w.preset_key !== PINNED_KEY)
 
   const routeStops: RouteStop[] = useMemo(() => {
     const orderPart: RouteStop[] = stops.map(s => ({
@@ -156,7 +161,7 @@ export default function ScheduleDay() {
       items: s.items,
       route_order: s.route_order ?? 999,
     }))
-    const waypointPart: RouteStop[] = dayWaypoints
+    const waypointPart: RouteStop[] = sortableDayWaypoints
       .map((w): RouteStop | null => {
         const p = presets.find(p => p.key === w.preset_key)
         if (!p) return null
@@ -174,7 +179,7 @@ export default function ScheduleDay() {
       })
       .filter((x): x is RouteStop => x !== null)
     return [...orderPart, ...waypointPart].sort((a, b) => a.route_order - b.route_order)
-  }, [stops, dayWaypoints, presets])
+  }, [stops, sortableDayWaypoints, presets])
 
   useEffect(() => { init() }, [date])
 
@@ -313,15 +318,17 @@ export default function ScheduleDay() {
         hasAny = true
       }
 
-      if (depot?.lat && depot?.lng) addPin(depot.lat, depot.lng, '출', '#16a34a')
+      if (pinnedActive && pinnedPreset?.lat && pinnedPreset?.lng) {
+        addPin(pinnedPreset.lat, pinnedPreset.lng, '1', '#16a34a')
+      }
       routeStops.forEach((s, i) => {
-        if (s.lat && s.lng) addPin(s.lat, s.lng, String(i + 1), s.kind === 'preset' ? '#d97706' : '#2563eb')
+        if (s.lat && s.lng) addPin(s.lat, s.lng, String(pinnedActive ? i + 2 : i + 1), s.kind === 'preset' ? '#d97706' : '#2563eb')
       })
 
       if (hasAny) mapObjRef.current.setBounds(bounds)
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [routeStops, depot, loading])
+  }, [routeStops, pinnedActive, pinnedPreset, loading])
 
   function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event
@@ -477,12 +484,12 @@ export default function ScheduleDay() {
                 )}
               </div>
 
-              {depot && (
+              {pinnedActive && pinnedPreset && (
                 <div className="flex items-center gap-2 border rounded-lg p-2.5 bg-green-50 border-green-200 mb-1.5">
-                  <span className="w-6 h-6 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center shrink-0">출</span>
+                  <span className="w-6 h-6 rounded-full bg-green-600 text-white text-xs font-bold flex items-center justify-center shrink-0">1</span>
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-gray-800">{depot.name}</span>
-                    <div className="text-[11px] text-gray-400 truncate">{depot.address}</div>
+                    <span className="text-sm font-medium text-gray-800">{pinnedPreset.name} 출발</span>
+                    <div className="text-[11px] text-gray-400 truncate">{pinnedPreset.address}</div>
                   </div>
                 </div>
               )}
@@ -494,7 +501,7 @@ export default function ScheduleDay() {
                   <SortableContext items={routeStops.map(s => s.id)} strategy={verticalListSortingStrategy}>
                     <div className="space-y-1.5 max-h-[calc(100vh-340px)] overflow-y-auto">
                       {routeStops.map((s, i) => (
-                        <SortableStop key={s.id} stop={s} index={i} onRemove={removeStop} />
+                        <SortableStop key={s.id} stop={s} index={pinnedActive ? i + 1 : i} onRemove={removeStop} />
                       ))}
                     </div>
                   </SortableContext>
