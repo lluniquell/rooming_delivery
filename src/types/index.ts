@@ -1,5 +1,6 @@
 export type Role = 'admin' | 'driver'
 export type DeliveryStatus = 'pending' | 'done' | 'failed'
+export type Permission = 'orders' | 'schedule' | 'delivery' | 'soum'
 
 export interface Driver {
   id: string
@@ -7,6 +8,8 @@ export interface Driver {
   email: string
   role: Role
   is_active: boolean
+  is_superadmin: boolean
+  permissions: Permission[]
   created_at: string
 }
 

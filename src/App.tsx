@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { supabase } from './lib/supabase'
-import type { Driver } from './types'
+import type { Driver, Permission } from './types'
 import { getCurrentDriver } from './lib/auth'
 
 import LoginPage from './pages/LoginPage'
-import AdminLayout from './pages/admin/AdminLayout'
+import AdminLayout, { PERMISSION_GROUPS } from './pages/admin/AdminLayout'
 import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminRegister from './pages/admin/AdminRegister'
 import AdminAssign from './pages/admin/AdminAssign'
 import AdminDrivers from './pages/admin/AdminDrivers'
 import AdminStorage from './pages/admin/AdminStorage'
+import AdminAccounts from './pages/admin/AdminAccounts'
 import InspectionMain from './pages/inspection/InspectionMain'
 import BarcodeDB from './pages/inspection/BarcodeDB'
 import BarcodeAssign from './pages/inspection/BarcodeAssign'
@@ -24,6 +25,22 @@ import ScheduleDay from './pages/schedule/ScheduleDay'
 import DriverLayout from './pages/driver/DriverLayout'
 import DriverList from './pages/driver/DriverList'
 import DriverDetail from './pages/driver/DriverDetail'
+
+function RequirePermission({ perm, driver, children }: { perm: Permission; driver: Driver; children: React.ReactNode }) {
+  if (driver.is_superadmin || driver.permissions?.includes(perm)) return <>{children}</>
+  return <Navigate to="/admin" replace />
+}
+
+function RequireSuperadmin({ driver, children }: { driver: Driver; children: React.ReactNode }) {
+  if (driver.is_superadmin) return <>{children}</>
+  return <Navigate to="/admin" replace />
+}
+
+function defaultAdminPath(driver: Driver) {
+  if (driver.is_superadmin) return '/admin/dashboard'
+  const firstGroup = PERMISSION_GROUPS.find(g => driver.permissions?.includes(g.key))
+  return firstGroup ? firstGroup.items[0].to : '/login'
+}
 
 function App() {
   const [driver, setDriver] = useState<Driver | null>(null)
@@ -61,27 +78,28 @@ function App() {
           path="/admin"
           element={driver?.role === 'admin' ? <AdminLayout driver={driver} /> : <Navigate to="/login" />}
         >
-          <Route index element={<Navigate to="/admin/dashboard" />} />
-          <Route path="dashboard" element={<AdminDashboard />} />
-          <Route path="register" element={<AdminRegister />} />
-          <Route path="assign" element={<AdminAssign />} />
-          <Route path="drivers" element={<AdminDrivers />} />
-          <Route path="storage" element={<AdminStorage />} />
-          <Route path="soum/orders" element={<SoumOrders />} />
-          <Route path="soum/batches" element={<SoumBatch />} />
-          <Route path="soum/outgoing" element={<SoumOutgoing />} />
-          <Route path="schedule" element={<ScheduleBoard />} />
-          <Route path="schedule/day/:date" element={<ScheduleDay />} />
-          <Route path="inspection" element={<InspectionMain />} />
-          <Route path="barcodes" element={<BarcodeDB />} />
-          <Route path="barcode-assign" element={<BarcodeAssign />} />
-          <Route path="test" element={<AdminTest />} />
+          <Route index element={driver && <Navigate to={defaultAdminPath(driver)} replace />} />
+          <Route path="dashboard" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminDashboard /></RequirePermission>} />
+          <Route path="register" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminRegister /></RequirePermission>} />
+          <Route path="assign" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminAssign /></RequirePermission>} />
+          <Route path="drivers" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminDrivers /></RequirePermission>} />
+          <Route path="storage" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminStorage /></RequirePermission>} />
+          <Route path="soum/orders" element={driver && <RequirePermission perm="orders" driver={driver}><SoumOrders /></RequirePermission>} />
+          <Route path="soum/batches" element={driver && <RequirePermission perm="soum" driver={driver}><SoumBatch /></RequirePermission>} />
+          <Route path="soum/outgoing" element={driver && <RequirePermission perm="soum" driver={driver}><SoumOutgoing /></RequirePermission>} />
+          <Route path="schedule" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleBoard /></RequirePermission>} />
+          <Route path="schedule/day/:date" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleDay /></RequirePermission>} />
+          <Route path="inspection" element={driver && <RequirePermission perm="soum" driver={driver}><InspectionMain /></RequirePermission>} />
+          <Route path="barcodes" element={driver && <RequirePermission perm="soum" driver={driver}><BarcodeDB /></RequirePermission>} />
+          <Route path="barcode-assign" element={driver && <RequirePermission perm="soum" driver={driver}><BarcodeAssign /></RequirePermission>} />
+          <Route path="test" element={driver && <RequireSuperadmin driver={driver}><AdminTest /></RequireSuperadmin>} />
+          <Route path="accounts" element={driver && <RequireSuperadmin driver={driver}><AdminAccounts /></RequireSuperadmin>} />
         </Route>
 
         {/* 배송원 */}
         <Route
           path="/"
-          element={driver?.role === 'driver' ? <DriverLayout driver={driver} /> : driver?.role === 'admin' ? <Navigate to="/admin/dashboard" /> : <Navigate to="/login" />}
+          element={driver?.role === 'driver' ? <DriverLayout driver={driver} /> : driver?.role === 'admin' ? <Navigate to={defaultAdminPath(driver)} /> : <Navigate to="/login" />}
         >
           <Route index element={<DriverList />} />
           <Route path="delivery/:id" element={<DriverDetail />} />

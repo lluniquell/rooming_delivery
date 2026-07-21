@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
-import type { Driver } from '../../types'
+import type { Driver, Permission } from '../../types'
 import { signOut } from '../../lib/auth'
 
 interface Props {
@@ -33,6 +33,13 @@ const propItems = [
 
 const devItems = [
   { to: '/admin/test', label: '카페24 테스트' },
+]
+
+export const PERMISSION_GROUPS: { key: Permission; label: string; items: { to: string; label: string }[] }[] = [
+  { key: 'orders', label: '주문', items: orderItems },
+  { key: 'schedule', label: '스케줄러', items: scheduleItems },
+  { key: 'delivery', label: '배송팀', items: deliveryItems },
+  { key: 'soum', label: '소품팀', items: propItems },
 ]
 
 function NavGroup({ label, items }: { label: string; items: { to: string; label: string }[] }) {
@@ -79,17 +86,30 @@ function NavGroup({ label, items }: { label: string; items: { to: string; label:
 }
 
 export default function AdminLayout({ driver }: Props) {
+  const canSee = (key: Permission) => driver.is_superadmin || driver.permissions?.includes(key)
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-6">
           <span className="font-bold text-gray-800">루밍 관리</span>
           <nav className="flex gap-1">
-            <NavGroup label="주문" items={orderItems} />
-            <NavGroup label="스케줄러" items={scheduleItems} />
-            <NavGroup label="배송팀" items={deliveryItems} />
-            <NavGroup label="소품팀" items={propItems} />
-            <NavGroup label="테스트" items={devItems} />
+            {PERMISSION_GROUPS.filter(g => canSee(g.key)).map(g => (
+              <NavGroup key={g.key} label={g.label} items={g.items} />
+            ))}
+            {driver.is_superadmin && (
+              <>
+                <NavGroup label="테스트" items={devItems} />
+                <NavLink
+                  to="/admin/accounts"
+                  className={({ isActive }) =>
+                    `px-3 py-1.5 rounded text-sm font-semibold ${isActive ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`
+                  }
+                >
+                  계정 관리
+                </NavLink>
+              </>
+            )}
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm text-gray-500">
