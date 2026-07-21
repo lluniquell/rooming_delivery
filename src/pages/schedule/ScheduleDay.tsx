@@ -138,7 +138,11 @@ export default function ScheduleDay() {
   const sensors = useSensors(useSensor(PointerSensor))
 
   const depot = presets.find(p => p.type === 'start')
-  const waypointPresets = presets.filter(p => p.type === 'waypoint')
+  const WAYPOINT_ORDER = ['depot', 'nk']
+  const WAYPOINT_VERB: Record<string, string> = { depot: '출발' }
+  const waypointPresets = presets
+    .filter(p => p.type === 'waypoint')
+    .sort((a, b) => WAYPOINT_ORDER.indexOf(a.key) - WAYPOINT_ORDER.indexOf(b.key))
 
   const routeStops: RouteStop[] = useMemo(() => {
     const orderPart: RouteStop[] = stops.map(s => ({
@@ -462,7 +466,10 @@ export default function ScheduleDay() {
                               : 'text-amber-600 border-amber-300 hover:bg-amber-50'
                           }`}
                         >
-                          {active ? `✓ ${p.name} 경유` : `+ ${p.name} 경유`}
+                          {(() => {
+                            const verb = WAYPOINT_VERB[p.key] ?? '경유'
+                            return active ? `✓ ${p.name} ${verb}` : `+ ${p.name} ${verb}`
+                          })()}
                         </button>
                       )
                     })}
