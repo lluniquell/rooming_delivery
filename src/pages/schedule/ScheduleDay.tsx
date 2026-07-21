@@ -170,13 +170,15 @@ export default function ScheduleDay() {
     }
     setUnscheduled(unschedStops)
 
-    await geocodeMissing([...scheduledStops, ...unschedStops])
+    // 지오코딩은 백그라운드로 진행 — 완료된 항목만 로컬 state에 반영 (재조회 없음, 무한루프 방지)
+    geocodeMissing([...scheduledStops, ...unschedStops])
   }
 
   async function geocodeMissing(list: Stop[]) {
     const missing = list.filter(s => s.address && (!s.lat || !s.lng))
     if (!missing.length) return
     setGeocoding(true)
+    const updates: Record<string, { lat: number; lng: number }> = {}
     for (const s of missing) {
       try {
         const res = await fetch('/api/kakao/geocode', {
@@ -187,11 +189,16 @@ export default function ScheduleDay() {
         const { lat, lng } = await res.json()
         if (lat && lng) {
           await supabase.from('orders').update({ lat, lng }).eq('id', s.order_id)
+          updates[s.order_id] = { lat, lng }
         }
-      } catch { /* 실패한 주소는 다음 로드 때 재시도 */ }
+      } catch { /* 실패한 주소는 다음 페이지 진입 때 재시도 — 이 세션에서는 재시도하지 않음 */ }
     }
     setGeocoding(false)
-    if (batchId) loadAll(batchId)
+    if (Object.keys(updates).length) {
+      const apply = (arr: Stop[]) => arr.map(s => updates[s.order_id] ? { ...s, ...updates[s.order_id] } : s)
+      setStops(prev => apply(prev))
+      setUnscheduled(prev => apply(prev))
+    }
   }
 
   // 지도 렌더링
