@@ -147,7 +147,7 @@ export default function SoumBatch() {
   function downloadCJ() {
     // 주문 단위로 묶기 (한 주문 = 송장 1건)
     const byOrder: Record<string, {
-      orderNo: string; name: string; phone: string; zipcode: string
+      orderNo: string; name: string; phone: string
       address: string; message: string; products: string[]; qty: number
     }> = {}
     for (const item of items) {
@@ -157,8 +157,7 @@ export default function SoumBatch() {
           orderNo: key,
           name: item.receiver_name || item.customer_name,
           phone: item.receiver_phone ?? '',
-          zipcode: item.zipcode ?? '',
-          address: item.address ?? '',
+          address: [item.zipcode, item.address].filter(Boolean).join(' '),
           message: item.shipping_message ?? '',
           products: [],
           qty: 0,
@@ -168,15 +167,16 @@ export default function SoumBatch() {
       byOrder[key].qty += item.quantity
     }
 
+    // CJ 업로드 양식: 받는분성명 / 받는분전화번호 / 받는분주소(전체,분리안됨) / 배송메세지1 / 품목명 / 박스수량
+    // + 고객주문번호(운송장 발급 후 결과 파일에 그대로 돌아오는 컬럼) — 매칭용으로 맨 앞에 추가
     const rows = Object.values(byOrder).map(o => ({
-      '주문번호': o.orderNo,
+      '고객주문번호': o.orderNo,
       '받는분성명': o.name,
       '받는분전화번호': o.phone,
-      '우편번호': o.zipcode,
-      '주소': o.address,
+      '받는분주소(전체,분리안됨)': o.address,
+      '배송메세지1': o.message,
       '품목명': o.products[0] + (o.products.length > 1 ? ` 외 ${o.products.length - 1}건` : ''),
-      '수량': o.qty,
-      '배송메세지': o.message,
+      '박스수량': o.qty,
     }))
 
     const ws = XLSX.utils.json_to_sheet(rows)
