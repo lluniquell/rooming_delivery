@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>Kakao Map Test</title>
+</head>
+<body>
+  <div id="status" style="font-family:sans-serif;padding:12px;">로딩 중...</div>
+  <div id="map" style="width:600px;height:400px;border:1px solid #ccc;"></div>
+  <script>
+    window.onerror = function (msg) {
+      document.getElementById('status').textContent = 'JS 에러: ' + msg
+    }
+    var s = document.createElement('script')
+    s.src = '//dapi.kakao.com/v2/maps/sdk.js?appkey=d8f810abc7d8fccbe716cc17c4ea2b72&autoload=false'
+    s.onload = function () {
+      try {
+        kakao.maps.load(function () {
+          var map = new kakao.maps.Map(document.getElementById('map'), {
+            center: new kakao.maps.LatLng(37.5665, 126.9780),
+            level: 8,
+          })
+          document.getElementById('status').textContent = '✅ 지도 생성 성공'
+        })
+      } catch (e) {
+        document.getElementById('status').textContent = '❌ 지도 생성 실패: ' + e.message
+      }
+    }
+    s.onerror = function () {
+      document.getElementById('status').textContent = '❌ SDK 스크립트 로드 실패'
+    }
+    document.head.appendChild(s)
+  </script>
+</body>
+</html>
