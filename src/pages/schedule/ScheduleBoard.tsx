@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 
 interface StopItem {
@@ -219,7 +220,10 @@ export default function ScheduleBoard() {
                   isToday ? 'border-blue-400 ring-1 ring-blue-200' : ''
                 }`}
               >
-                <div className={`px-2 py-2 border-b text-center ${isToday ? 'bg-blue-50' : 'bg-gray-50'} rounded-t-xl`}>
+                <Link
+                  to={`/admin/schedule/day/${dateStr}`}
+                  className={`block px-2 py-2 border-b text-center ${isToday ? 'bg-blue-50' : 'bg-gray-50'} rounded-t-xl hover:brightness-95 transition`}
+                >
                   <div className={`text-xs font-bold ${isSunday ? 'text-red-500' : isToday ? 'text-blue-700' : 'text-gray-700'}`}>
                     {d.getMonth() + 1}/{d.getDate()} ({DAY_LABELS[d.getDay()]})
                   </div>
@@ -234,7 +238,7 @@ export default function ScheduleBoard() {
                       <span className="text-gray-300">-</span>
                     )}
                   </div>
-                </div>
+                </Link>
                 <div className="flex-1 p-1.5 space-y-1.5 overflow-y-auto">
                   {stops.map(stop => (
                     <div key={stop.order_id} className="border rounded-lg p-2 bg-gray-50/50 group relative">
