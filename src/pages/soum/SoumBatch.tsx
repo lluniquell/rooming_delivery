@@ -145,27 +145,23 @@ export default function SoumBatch() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   function downloadCJ() {
-    // 주문 단위로 묶기 (한 주문 = 송장 1건)
-    const byOrder: Record<string, {
+    // 주문 단위 수령인 정보만 취합 (품목은 합치지 않고 아래에서 상품별로 줄을 나눔)
+    const orderInfo: Record<string, {
       orderNo: string; name: string; phone: string; zipcode: string
-      address: string; message: string; products: string[]; qty: number
+      address: string; message: string
     }> = {}
     for (const item of items) {
       const key = item.cafe24_order_no
-      if (!byOrder[key]) {
-        byOrder[key] = {
+      if (!orderInfo[key]) {
+        orderInfo[key] = {
           orderNo: key,
           name: item.receiver_name || item.customer_name,
           phone: item.receiver_phone ?? '',
           zipcode: item.zipcode ?? '',
           address: item.address ?? '',
           message: item.shipping_message ?? '',
-          products: [],
-          qty: 0,
         }
       }
-      byOrder[key].products.push(item.product_name)
-      byOrder[key].qty += item.quantity
     }
 
     // CJ 표준 양식 (컬럼 순서 고정). 값이 없는 필드(예약구분/받는분기타연락처/운송장번호/
@@ -179,13 +175,14 @@ export default function SoumBatch() {
     const d = new Date()
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-    const dataRows = Object.values(byOrder).map(o => {
-      const productSummary = o.products[0] + (o.products.length > 1 ? ` 외 ${o.products.length - 1}건` : '')
+    // 상품마다 한 줄씩 — 같은 주문번호가 여러 줄에 반복됨, 박스수량은 항상 1
+    const dataRows = items.map(item => {
+      const o = orderInfo[item.cafe24_order_no]
       return [
         '', dateStr, o.name, o.phone, '',
         o.zipcode, o.address, '', o.orderNo,
-        productSummary, o.qty, '', '', o.message, '',
-        productSummary, '',
+        item.product_name, 1, '', '', o.message, '',
+        item.product_name, '',
       ]
     })
 
