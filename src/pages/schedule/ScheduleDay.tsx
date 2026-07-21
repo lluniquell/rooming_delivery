@@ -254,7 +254,7 @@ export default function ScheduleDay() {
       .eq('date', date)
     setDayWaypoints(waypointData ?? [])
 
-    if (jikbae) await loadAll(jikbae.id)
+    if (jikbae) await loadAll(jikbae.id, routeData ?? [])
     setLoading(false)
   }
 
@@ -281,7 +281,7 @@ export default function ScheduleDay() {
     return Object.values(map)
   }
 
-  async function loadAll(bid: string) {
+  async function loadAll(bid: string, routesForDate: RouteLane[]) {
     const SELECT = 'id, product_name, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, crew_size, route_order, route_id, lat, lng, scheduled_date)'
 
     const { data: scheduledData } = await supabase
@@ -301,11 +301,22 @@ export default function ScheduleDay() {
       .is('orders.scheduled_date', null)
     let unschedStops = groupRows((unschedData ?? []) as any[])
 
-    // 이미 배정된 좌표가 있으면 거리순 정렬 + 근처 표시
-    const anchor = scheduledStops.find(s => s.lat && s.lng)
-    if (anchor) {
+    // 이미 배정된(루트가 정해진) 배송건들을 전부 기준점으로 삼아 —
+    // 미배정 주문마다 "가장 가까운 배정건이 몇 호차인지" 표시 + 그 순서로 정렬
+    const anchors = scheduledStops.filter(s => s.lat && s.lng && s.route_id)
+    if (anchors.length) {
       unschedStops = unschedStops
-        .map(s => ({ ...s, _dist: (s.lat && s.lng) ? distanceKm(anchor as any, s as any) : Infinity }))
+        .map(s => {
+          if (!s.lat || !s.lng) return { ...s, _dist: Infinity, _routeLabel: null as string | null }
+          let bestDist = Infinity
+          let bestRouteId: string | null = null
+          for (const a of anchors) {
+            const d = distanceKm(a as any, s as any)
+            if (d < bestDist) { bestDist = d; bestRouteId = a.route_id }
+          }
+          const label = routesForDate.find(r => r.id === bestRouteId)?.label ?? null
+          return { ...s, _dist: bestDist, _routeLabel: label }
+        })
         .sort((a: any, b: any) => a._dist - b._dist)
     }
     setUnscheduled(unschedStops)
@@ -443,7 +454,7 @@ export default function ScheduleDay() {
   async function removeStop(stop: RouteStop) {
     if (stop.kind === 'order') {
       await supabase.from('orders').update({ scheduled_date: null, crew_size: null, route_order: null, route_id: null }).eq('id', stop.id)
-      if (batchId) loadAll(batchId)
+      if (batchId) loadAll(batchId, routes)
     } else {
       const [, routeId, key] = stop.id.split(':')
       await supabase.from('schedule_day_waypoints').delete().eq('route_id', routeId).eq('preset_key', key)
@@ -517,7 +528,7 @@ export default function ScheduleDay() {
       route_order: targetLen + 1,
     }).eq('id', assignModal.stop.order_id)
     setAssignModal(null)
-    if (batchId) loadAll(batchId)
+    if (batchId) loadAll(batchId, routes)
   }
 
   async function toggleClosed() {
@@ -586,7 +597,11 @@ export default function ScheduleDay() {
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium text-gray-800">{s.customer_name}</span>
                         <div className="flex items-center gap-1 shrink-0">
-                          {s._dist < 10 && <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">📍 근처</span>}
+                          {s._dist < 10 && (
+                            <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full font-medium">
+                              📍 {s._routeLabel ? `${s._routeLabel} 근처` : '근처'}
+                            </span>
+                          )}
                           <span className="text-[11px] text-indigo-600 font-medium">{regionOf(s.address)}</span>
                         </div>
                       </div>
