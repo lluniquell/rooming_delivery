@@ -47,7 +47,7 @@ export default function AdminAssign() {
   const sensors = useSensors(useSensor(PointerSensor))
 
   useEffect(() => {
-    supabase.from('drivers').select('*').eq('is_active', true).then(({ data }) => setDrivers(data ?? []))
+    supabase.from('drivers').select('*').eq('is_active', true).eq('role', 'driver').then(({ data }) => setDrivers(data ?? []))
   }, [])
 
   useEffect(() => {
