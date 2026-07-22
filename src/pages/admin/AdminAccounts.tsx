@@ -3,15 +3,21 @@ import { supabase } from '../../lib/supabase'
 import type { Driver, Permission } from '../../types'
 import { ASSIGNABLE_PERMISSIONS } from './AdminLayout'
 
-type NewAccountRole = 'admin' | 'driver'
+// '배송원'은 실제 Permission 타입이 아니라 이 화면에서만 쓰는 선택지 —
+// 고르면 모바일 배송원 계정(role='driver')으로 생성되고, 다른 메뉴 권한과는 배타적
+const DRIVER_KEY = 'driver' as const
+type SelectableKey = Permission | typeof DRIVER_KEY
+const ACCOUNT_OPTIONS: { key: SelectableKey; label: string }[] = [
+  ...ASSIGNABLE_PERMISSIONS,
+  { key: DRIVER_KEY, label: '배송원 (모바일 앱)' },
+]
 
 export default function AdminAccounts() {
   const [accounts, setAccounts] = useState<Driver[]>([])
-  const [role, setRole] = useState<NewAccountRole>('admin')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [permissions, setPermissions] = useState<Permission[]>([])
+  const [selected, setSelected] = useState<SelectableKey[]>([])
   const [adding, setAdding] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -26,9 +32,16 @@ export default function AdminAccounts() {
 
   useEffect(() => { load() }, [])
 
-  function togglePerm(key: Permission) {
-    setPermissions(prev => prev.includes(key) ? prev.filter(p => p !== key) : [...prev, key])
+  function toggleSelection(key: SelectableKey) {
+    setSelected(prev => {
+      if (prev.includes(key)) return prev.filter(k => k !== key)
+      // 배송원을 고르면 다른 메뉴 권한은 무의미하므로 비움, 반대로 메뉴 권한을 고르면 배송원 해제
+      if (key === DRIVER_KEY) return [DRIVER_KEY]
+      return [...prev.filter(k => k !== DRIVER_KEY), key]
+    })
   }
+
+  const isDriver = selected.includes(DRIVER_KEY)
 
   async function addAccount(e: React.FormEvent) {
     e.preventDefault()
@@ -36,10 +49,10 @@ export default function AdminAccounts() {
     setMessage('')
 
     const { data: { session } } = await supabase.auth.getSession()
-    const endpoint = role === 'driver' ? '/api/admin/create-driver' : '/api/admin/create-user'
-    const body = role === 'driver'
+    const endpoint = isDriver ? '/api/admin/create-driver' : '/api/admin/create-user'
+    const body = isDriver
       ? { name, email, password }
-      : { name, email, password, permissions }
+      : { name, email, password, permissions: selected as Permission[] }
 
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -52,7 +65,7 @@ export default function AdminAccounts() {
 
     if (res.ok) {
       setMessage('계정 추가 완료!')
-      setName(''); setEmail(''); setPassword(''); setPermissions([])
+      setName(''); setEmail(''); setPassword(''); setSelected([])
       load()
     } else {
       const err = await res.json()
@@ -81,29 +94,6 @@ export default function AdminAccounts() {
       <div className="bg-white rounded-xl border p-6 mb-6">
         <h3 className="font-medium text-gray-800 mb-4">계정 추가</h3>
         <form onSubmit={addAccount}>
-          <div className="mb-4">
-            <p className="text-xs font-medium text-gray-500 mb-2">역할</p>
-            <div className="flex gap-2">
-              {([
-                { key: 'admin' as const, label: '관리자 (관리자 패널 접근)' },
-                { key: 'driver' as const, label: '배송원 (모바일 앱)' },
-              ]).map(r => (
-                <button
-                  key={r.key}
-                  type="button"
-                  onClick={() => setRole(r.key)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                    role === r.key
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'text-gray-600 border-gray-300 hover:border-indigo-400'
-                  }`}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <div className="flex gap-3 flex-wrap mb-4">
             <input
               placeholder="이름"
@@ -130,30 +120,29 @@ export default function AdminAccounts() {
             />
           </div>
 
-          {role === 'admin' && (
-            <div className="mb-4">
-              <p className="text-xs font-medium text-gray-500 mb-2">메뉴 권한</p>
-              <div className="flex flex-wrap gap-2">
-                {ASSIGNABLE_PERMISSIONS.map(g => (
-                  <button
-                    type="button"
-                    key={g.key}
-                    onClick={() => togglePerm(g.key)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                      permissions.includes(g.key)
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'text-gray-600 border-gray-300 hover:border-blue-400'
-                    }`}
-                  >
-                    {g.label}
-                  </button>
-                ))}
-              </div>
+          <div className="mb-4">
+            <p className="text-xs font-medium text-gray-500 mb-2">권한 (메뉴 접근 또는 배송원 모바일 앱)</p>
+            <div className="flex flex-wrap gap-2">
+              {ACCOUNT_OPTIONS.map(g => (
+                <button
+                  type="button"
+                  key={g.key}
+                  onClick={() => toggleSelection(g.key)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                    selected.includes(g.key)
+                      ? g.key === DRIVER_KEY ? 'bg-teal-600 text-white border-teal-600' : 'bg-blue-600 text-white border-blue-600'
+                      : 'text-gray-600 border-gray-300 hover:border-blue-400'
+                  }`}
+                >
+                  {g.label}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
 
           <p className="text-xs text-gray-400 mb-2">
-            {name || '이 계정'}을(를) <b className={role === 'driver' ? 'text-teal-600' : 'text-indigo-600'}>{role === 'driver' ? '배송원' : '관리자'}</b>로 추가합니다
+            {name || '이 계정'}을(를) <b className={isDriver ? 'text-teal-600' : 'text-indigo-600'}>{isDriver ? '배송원' : '관리자'}</b>로 추가합니다
+            {!isDriver && selected.length > 0 && ` (권한: ${selected.map(k => ACCOUNT_OPTIONS.find(o => o.key === k)?.label).join(', ')})`}
           </p>
           <button
             type="submit"
