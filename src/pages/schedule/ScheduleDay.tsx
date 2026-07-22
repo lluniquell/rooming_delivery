@@ -547,11 +547,6 @@ export default function ScheduleDay() {
     await supabase.from('schedule_routes').update({ label }).eq('id', route.id)
   }
 
-  async function setRouteCrew(route: RouteLane, crew: 1 | 2) {
-    await supabase.from('schedule_routes').update({ crew_size: crew }).eq('id', route.id)
-    setRoutes(prev => prev.map(r => r.id === route.id ? { ...r, crew_size: crew } : r))
-  }
-
   function openAssignModal(stop: Stop) {
     if (!routes.length) { alert('먼저 루트를 추가해주세요.'); return }
     setAssignModal(stop)
@@ -692,19 +687,6 @@ export default function ScheduleDay() {
                             onChange={e => renameRoute(route, e.target.value)}
                             className="text-sm font-semibold text-gray-800 border-none focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 w-20"
                           />
-                          <div className="flex gap-1">
-                            {([1, 2] as const).map(n => (
-                              <button
-                                key={n}
-                                onClick={() => setRouteCrew(route, n)}
-                                className={`px-2 py-0.5 rounded text-xs font-medium border ${
-                                  route.crew_size === n
-                                    ? n === 2 ? 'bg-orange-500 text-white border-orange-500' : 'bg-gray-700 text-white border-gray-700'
-                                    : 'text-gray-500 border-gray-300'
-                                }`}
-                              >{n}인</button>
-                            ))}
-                          </div>
                           <div className="flex gap-1 ml-auto">
                             {waypointPresets.map(p => {
                               const active = dayWaypoints.some(w => w.route_id === route.id && w.preset_key === p.key)
