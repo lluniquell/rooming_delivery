@@ -62,6 +62,12 @@ interface RouteLane {
   label: string
   crew_size: 1 | 2
   sort_order: number
+  driver_ids: string[]
+}
+
+interface DriverInfo {
+  id: string
+  name: string
 }
 
 // 주문 배송건과 프리셋 경유지(NK빌딩 등)를 하나의 루트로 합친 표현
@@ -153,6 +159,7 @@ export default function ScheduleDay() {
   const [dayWaypoints, setDayWaypoints] = useState<DayWaypoint[]>([])
   const [routes, setRoutes] = useState<RouteLane[]>([])
   const [routeVisibility, setRouteVisibility] = useState<Record<string, boolean>>({})
+  const [drivers, setDrivers] = useState<DriverInfo[]>([])
   const [closed, setClosed] = useState(false)
   const [geocoding, setGeocoding] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -167,6 +174,9 @@ export default function ScheduleDay() {
   const waypointPresets = presets
     .filter(p => p.type === 'waypoint')
     .sort((a, b) => WAYPOINT_ORDER.indexOf(a.key) - WAYPOINT_ORDER.indexOf(b.key))
+
+  const assignedDriverIds = new Set(routes.flatMap(r => r.driver_ids))
+  const availableDrivers = drivers.filter(d => !assignedDriverIds.has(d.id))
 
   function colorForRoute(routeId: string) {
     const idx = routes.findIndex(r => r.id === routeId)
@@ -232,6 +242,14 @@ export default function ScheduleDay() {
 
     const { data: presetData } = await supabase.from('preset_locations').select('*')
     setPresets(presetData ?? [])
+
+    const { data: driverData } = await supabase
+      .from('drivers')
+      .select('id, name')
+      .eq('role', 'driver')
+      .eq('is_active', true)
+      .order('name')
+    setDrivers(driverData ?? [])
 
     const { data: dayRow } = await supabase.from('schedule_days').select('closed').eq('date', date).maybeSingle()
     setClosed(!!dayRow?.closed)
@@ -478,17 +496,40 @@ export default function ScheduleDay() {
   }
 
   async function addRoute() {
-    const crew: 1 | 2 = confirm('2인 배송 루트인가요? (확인=2인, 취소=1인)') ? 2 : 1
     const label = `${routes.length + 1}호차`
     const sort_order = routes.length
     const { data } = await supabase.from('schedule_routes')
-      .insert({ date, label, crew_size: crew, sort_order })
+      .insert({ date, label, crew_size: 1, sort_order, driver_ids: [] })
       .select('*')
       .single()
     if (data) {
       setRoutes(prev => [...prev, data])
       setRouteVisibility(prev => ({ ...prev, [data.id]: true }))
     }
+  }
+
+  // 배송원 배정 — 한 배송원은 하루에 한 루트에만, 다른 루트에 있었으면 자동으로 빠짐
+  async function assignDriver(route: RouteLane, driverId: string) {
+    if (route.driver_ids.includes(driverId)) return
+    const updates: { id: string; driver_ids: string[] }[] = []
+    for (const r of routes) {
+      if (r.id === route.id) {
+        updates.push({ id: r.id, driver_ids: [...r.driver_ids, driverId] })
+      } else if (r.driver_ids.includes(driverId)) {
+        updates.push({ id: r.id, driver_ids: r.driver_ids.filter(id => id !== driverId) })
+      }
+    }
+    await Promise.all(updates.map(u => supabase.from('schedule_routes').update({ driver_ids: u.driver_ids }).eq('id', u.id)))
+    setRoutes(prev => prev.map(r => {
+      const u = updates.find(u => u.id === r.id)
+      return u ? { ...r, driver_ids: u.driver_ids } : r
+    }))
+  }
+
+  async function unassignDriver(route: RouteLane, driverId: string) {
+    const driver_ids = route.driver_ids.filter(id => id !== driverId)
+    await supabase.from('schedule_routes').update({ driver_ids }).eq('id', route.id)
+    setRoutes(prev => prev.map(r => r.id === route.id ? { ...r, driver_ids } : r))
   }
 
   async function removeRoute(route: RouteLane) {
@@ -592,12 +633,27 @@ export default function ScheduleDay() {
 
           <div className="flex-1 grid grid-cols-2 gap-4 min-w-0">
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-700">루트 {routes.length}개</span>
-                <button
-                  onClick={addRoute}
-                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700"
-                >+ 루트 추가</button>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-semibold text-gray-700 shrink-0">루트 {routes.length}개</span>
+                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                  {availableDrivers.length > 0 && (
+                    <>
+                      <span className="text-[11px] text-gray-400">가용 배송원</span>
+                      {availableDrivers.map(d => (
+                        <div
+                          key={d.id}
+                          draggable
+                          onDragStart={e => e.dataTransfer.setData('text/driver-id', d.id)}
+                          className="px-2 py-1 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-grab hover:bg-gray-200"
+                        >{d.name}</div>
+                      ))}
+                    </>
+                  )}
+                  <button
+                    onClick={addRoute}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700"
+                  >+ 루트 추가</button>
+                </div>
               </div>
 
               {routes.length === 0 && (
@@ -614,7 +670,15 @@ export default function ScheduleDay() {
                     const color = colorForRoute(route.id)
                     const visible = routeVisibility[route.id] !== false
                     return (
-                      <div key={route.id} className="bg-white rounded-xl border p-2.5">
+                      <div
+                        key={route.id}
+                        className="bg-white rounded-xl border p-2.5"
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={e => {
+                          const driverId = e.dataTransfer.getData('text/driver-id')
+                          if (driverId) assignDriver(route, driverId)
+                        }}
+                      >
                         <div className="flex items-center gap-2 mb-2">
                           <input
                             type="checkbox"
@@ -662,6 +726,22 @@ export default function ScheduleDay() {
                             onClick={() => removeRoute(route)}
                             className="text-gray-300 hover:text-red-400 text-xs px-1"
                           >삭제</button>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 flex-wrap mb-2 min-h-[22px]">
+                          {route.driver_ids.length === 0 ? (
+                            <span className="text-[11px] text-gray-300">배송원을 여기로 끌어넣으세요</span>
+                          ) : (
+                            route.driver_ids.map(id => {
+                              const driver = drivers.find(d => d.id === id)
+                              return (
+                                <span key={id} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">
+                                  {driver?.name ?? '알 수 없음'}
+                                  <button onClick={() => unassignDriver(route, id)} className="text-indigo-400 hover:text-indigo-700">✕</button>
+                                </span>
+                              )
+                            })
+                          )}
                         </div>
 
                         {pinned && (
