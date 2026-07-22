@@ -152,6 +152,9 @@ export default function AdminAccounts() {
             </div>
           )}
 
+          <p className="text-xs text-gray-400 mb-2">
+            {name || '이 계정'}을(를) <b className={role === 'driver' ? 'text-teal-600' : 'text-indigo-600'}>{role === 'driver' ? '배송원' : '관리자'}</b>로 추가합니다
+          </p>
           <button
             type="submit"
             disabled={adding}
