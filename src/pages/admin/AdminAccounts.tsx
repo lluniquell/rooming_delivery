@@ -4,12 +4,13 @@ import type { Driver, Permission } from '../../types'
 import { ASSIGNABLE_PERMISSIONS } from './AdminLayout'
 
 // '배송원'은 실제 Permission 타입이 아니라 이 화면에서만 쓰는 선택지 —
-// 고르면 모바일 배송원 계정(role='driver')으로 생성되고, 다른 메뉴 권한과는 배타적
+// 고르면 모바일 배송원 계정(role='driver')으로 생성되고, 다른 메뉴 권한과는 배타적.
+// '배송팀'(delivery 메뉴 권한)과 당분간 하나로 합쳐서 노출 — 세부 구분은 추후 정리 예정
 const DRIVER_KEY = 'driver' as const
 type SelectableKey = Permission | typeof DRIVER_KEY
 const ACCOUNT_OPTIONS: { key: SelectableKey; label: string }[] = [
-  ...ASSIGNABLE_PERMISSIONS,
-  { key: DRIVER_KEY, label: '배송원 (모바일 앱)' },
+  ...ASSIGNABLE_PERMISSIONS.filter(p => p.key !== 'delivery'),
+  { key: DRIVER_KEY, label: '배송팀' },
 ]
 
 export default function AdminAccounts() {
@@ -121,7 +122,7 @@ export default function AdminAccounts() {
           </div>
 
           <div className="mb-4">
-            <p className="text-xs font-medium text-gray-500 mb-2">권한 (메뉴 접근 또는 배송원 모바일 앱)</p>
+            <p className="text-xs font-medium text-gray-500 mb-2">권한 (메뉴 접근 또는 배송팀 모바일 앱)</p>
             <div className="flex flex-wrap gap-2">
               {ACCOUNT_OPTIONS.map(g => (
                 <button
@@ -141,7 +142,7 @@ export default function AdminAccounts() {
           </div>
 
           <p className="text-xs text-gray-400 mb-2">
-            {name || '이 계정'}을(를) <b className={isDriver ? 'text-teal-600' : 'text-indigo-600'}>{isDriver ? '배송원' : '관리자'}</b>로 추가합니다
+            {name || '이 계정'}을(를) <b className={isDriver ? 'text-teal-600' : 'text-indigo-600'}>{isDriver ? '배송팀(모바일)' : '관리자'}</b>로 추가합니다
             {!isDriver && selected.length > 0 && ` (권한: ${selected.map(k => ACCOUNT_OPTIONS.find(o => o.key === k)?.label).join(', ')})`}
           </p>
           <button
