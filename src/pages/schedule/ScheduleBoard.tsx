@@ -43,7 +43,6 @@ export default function ScheduleBoard() {
   const [unscheduled, setUnscheduled] = useState<Stop[]>([])
   const [scheduled, setScheduled] = useState<Stop[]>([])
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()))
-  const [modal, setModal] = useState<{ stop: Stop; date: string; crew: number } | null>(null)
   const [error, setError] = useState('')
 
   const weekDates = Array.from({ length: 7 }, (_, i) => {
@@ -113,12 +112,10 @@ export default function ScheduleBoard() {
     setScheduled(groupRows((data ?? []) as any[]))
   }
 
-  async function confirmSchedule() {
-    if (!modal) return
+  async function assignDate(stop: Stop, dateStr: string) {
     await supabase.from('orders')
-      .update({ scheduled_date: modal.date, crew_size: modal.crew })
-      .eq('id', modal.stop.order_id)
-    setModal(null)
+      .update({ scheduled_date: dateStr })
+      .eq('id', stop.order_id)
     if (batchId) { loadUnscheduled(batchId); loadScheduled(batchId) }
   }
 
@@ -177,7 +174,7 @@ export default function ScheduleBoard() {
                   key={stop.order_id}
                   draggable
                   onDragStart={e => e.dataTransfer.setData('text/plain', stop.order_id)}
-                  onClick={() => setModal({ stop, date: todayStr, crew: stop.crew_size ?? 1 })}
+                  onClick={() => assignDate(stop, todayStr)}
                   className="p-3 cursor-pointer hover:bg-blue-50"
                 >
                   <div className="flex items-center justify-between">
@@ -203,8 +200,6 @@ export default function ScheduleBoard() {
           {weekDates.map(d => {
             const dateStr = fmt(d)
             const stops = stopsByDate[dateStr] ?? []
-            const crew1 = stops.filter(s => s.crew_size === 1).length
-            const crew2 = stops.filter(s => s.crew_size === 2).length
             const isToday = dateStr === todayStr
             const isSunday = d.getDay() === 0
             return (
@@ -214,7 +209,7 @@ export default function ScheduleBoard() {
                 onDrop={e => {
                   const orderId = e.dataTransfer.getData('text/plain')
                   const stop = unscheduled.find(s => s.order_id === orderId)
-                  if (stop) setModal({ stop, date: dateStr, crew: stop.crew_size ?? 1 })
+                  if (stop) assignDate(stop, dateStr)
                 }}
                 className={`bg-white rounded-xl border flex flex-col min-h-[300px] ${
                   isToday ? 'border-blue-400 ring-1 ring-blue-200' : ''
@@ -228,26 +223,13 @@ export default function ScheduleBoard() {
                     {d.getMonth() + 1}/{d.getDate()} ({DAY_LABELS[d.getDay()]})
                   </div>
                   <div className="text-[11px] mt-0.5 text-gray-500">
-                    {stops.length > 0 ? (
-                      <>
-                        <span className={crew1 ? 'text-gray-700 font-medium' : 'text-gray-300'}>1인 {crew1}</span>
-                        <span className="mx-1 text-gray-300">·</span>
-                        <span className={crew2 ? 'text-orange-600 font-medium' : 'text-gray-300'}>2인 {crew2}</span>
-                      </>
-                    ) : (
-                      <span className="text-gray-300">-</span>
-                    )}
+                    {stops.length > 0 ? `${stops.length}건` : <span className="text-gray-300">-</span>}
                   </div>
                 </Link>
                 <div className="flex-1 p-1.5 space-y-1.5 overflow-y-auto">
                   {stops.map(stop => (
                     <div key={stop.order_id} className="border rounded-lg p-2 bg-gray-50/50 group relative">
                       <div className="flex items-center gap-1">
-                        <span className={`text-[10px] px-1 rounded font-bold ${
-                          stop.crew_size === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-200 text-gray-600'
-                        }`}>
-                          {stop.crew_size === 2 ? '2인' : '1인'}
-                        </span>
                         <span className="text-xs font-medium text-gray-800 truncate">{stop.customer_name}</span>
                       </div>
                       <div className="text-[10px] text-indigo-600 mt-0.5">{regionOf(stop.address)}</div>
@@ -267,59 +249,6 @@ export default function ScheduleBoard() {
           })}
         </div>
       </div>
-
-      {/* 배정 모달 */}
-      {modal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
-            <h3 className="font-bold text-gray-800 mb-1">배송일 지정</h3>
-            <p className="text-sm text-gray-500 mb-4">
-              {modal.stop.customer_name}
-              <span className="text-xs text-indigo-500 ml-2">{regionOf(modal.stop.address)}</span>
-            </p>
-
-            <div className="mb-4">
-              <p className="text-xs font-medium text-gray-500 mb-2">배송예정일</p>
-              <input
-                type="date"
-                value={modal.date}
-                onChange={e => setModal({ ...modal, date: e.target.value })}
-                className="border rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div className="mb-6">
-              <p className="text-xs font-medium text-gray-500 mb-2">배송 인원</p>
-              <div className="flex gap-2">
-                {[1, 2].map(n => (
-                  <button
-                    key={n}
-                    onClick={() => setModal({ ...modal, crew: n })}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                      modal.crew === n
-                        ? n === 2 ? 'bg-orange-500 text-white border-orange-500' : 'bg-gray-700 text-white border-gray-700'
-                        : 'text-gray-600 border-gray-300 hover:border-gray-400'
-                    }`}
-                  >
-                    {n}인 배송
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => setModal(null)}
-                className="flex-1 py-2 text-sm text-gray-500 border rounded-lg hover:bg-gray-50"
-              >취소</button>
-              <button
-                onClick={confirmSchedule}
-                className="flex-1 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 font-medium"
-              >확정</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
