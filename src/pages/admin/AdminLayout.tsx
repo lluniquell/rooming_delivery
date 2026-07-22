@@ -19,7 +19,6 @@ const deliveryItems = [
   { to: '/admin/dashboard', label: '배송 현황' },
   { to: '/admin/register', label: '주문 등록' },
   { to: '/admin/assign', label: '배송원 배정' },
-  { to: '/admin/drivers', label: '배송원 관리' },
   { to: '/admin/storage', label: '스토리지' },
 ]
 

@@ -9,7 +9,6 @@ import AdminLayout, { PERMISSION_GROUPS, hasPermission, canManageAccounts } from
 import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminRegister from './pages/admin/AdminRegister'
 import AdminAssign from './pages/admin/AdminAssign'
-import AdminDrivers from './pages/admin/AdminDrivers'
 import AdminStorage from './pages/admin/AdminStorage'
 import AdminAccounts from './pages/admin/AdminAccounts'
 import InspectionMain from './pages/inspection/InspectionMain'
@@ -87,7 +86,6 @@ function App() {
           <Route path="dashboard" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminDashboard /></RequirePermission>} />
           <Route path="register" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminRegister /></RequirePermission>} />
           <Route path="assign" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminAssign /></RequirePermission>} />
-          <Route path="drivers" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminDrivers /></RequirePermission>} />
           <Route path="storage" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminStorage /></RequirePermission>} />
           <Route path="soum/orders" element={driver && <RequirePermission perm="orders" driver={driver}><SoumOrders /></RequirePermission>} />
           <Route path="soum/batches" element={driver && <RequirePermission perm="soum" driver={driver}><SoumBatch /></RequirePermission>} />

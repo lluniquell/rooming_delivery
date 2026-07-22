@@ -3,8 +3,11 @@ import { supabase } from '../../lib/supabase'
 import type { Driver, Permission } from '../../types'
 import { ASSIGNABLE_PERMISSIONS } from './AdminLayout'
 
+type NewAccountRole = 'admin' | 'driver'
+
 export default function AdminAccounts() {
   const [accounts, setAccounts] = useState<Driver[]>([])
+  const [role, setRole] = useState<NewAccountRole>('admin')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -16,7 +19,6 @@ export default function AdminAccounts() {
     const { data } = await supabase
       .from('drivers')
       .select('*')
-      .eq('role', 'admin')
       .eq('is_superadmin', false)
       .order('created_at')
     setAccounts(data ?? [])
@@ -34,13 +36,18 @@ export default function AdminAccounts() {
     setMessage('')
 
     const { data: { session } } = await supabase.auth.getSession()
-    const res = await fetch('/api/admin/create-user', {
+    const endpoint = role === 'driver' ? '/api/admin/create-driver' : '/api/admin/create-user'
+    const body = role === 'driver'
+      ? { name, email, password }
+      : { name, email, password, permissions }
+
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${session?.access_token}`,
       },
-      body: JSON.stringify({ name, email, password, permissions }),
+      body: JSON.stringify(body),
     })
 
     if (res.ok) {
@@ -72,8 +79,31 @@ export default function AdminAccounts() {
       <h2 className="text-xl font-bold text-gray-800 mb-6">계정 관리</h2>
 
       <div className="bg-white rounded-xl border p-6 mb-6">
-        <h3 className="font-medium text-gray-800 mb-4">이용자 계정 추가</h3>
+        <h3 className="font-medium text-gray-800 mb-4">계정 추가</h3>
         <form onSubmit={addAccount}>
+          <div className="mb-4">
+            <p className="text-xs font-medium text-gray-500 mb-2">역할</p>
+            <div className="flex gap-2">
+              {([
+                { key: 'admin' as const, label: '관리자 (관리자 패널 접근)' },
+                { key: 'driver' as const, label: '배송원 (모바일 앱)' },
+              ]).map(r => (
+                <button
+                  key={r.key}
+                  type="button"
+                  onClick={() => setRole(r.key)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                    role === r.key
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'text-gray-600 border-gray-300 hover:border-indigo-400'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="flex gap-3 flex-wrap mb-4">
             <input
               placeholder="이름"
@@ -99,25 +129,29 @@ export default function AdminAccounts() {
               required
             />
           </div>
-          <div className="mb-4">
-            <p className="text-xs font-medium text-gray-500 mb-2">메뉴 권한</p>
-            <div className="flex flex-wrap gap-2">
-              {ASSIGNABLE_PERMISSIONS.map(g => (
-                <button
-                  type="button"
-                  key={g.key}
-                  onClick={() => togglePerm(g.key)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                    permissions.includes(g.key)
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'text-gray-600 border-gray-300 hover:border-blue-400'
-                  }`}
-                >
-                  {g.label}
-                </button>
-              ))}
+
+          {role === 'admin' && (
+            <div className="mb-4">
+              <p className="text-xs font-medium text-gray-500 mb-2">메뉴 권한</p>
+              <div className="flex flex-wrap gap-2">
+                {ASSIGNABLE_PERMISSIONS.map(g => (
+                  <button
+                    type="button"
+                    key={g.key}
+                    onClick={() => togglePerm(g.key)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                      permissions.includes(g.key)
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'text-gray-600 border-gray-300 hover:border-blue-400'
+                    }`}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
+
           <button
             type="submit"
             disabled={adding}
@@ -135,6 +169,7 @@ export default function AdminAccounts() {
             <tr>
               <th className="text-left px-4 py-3 font-medium text-gray-600">이름</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">이메일</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-600">역할</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">권한</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">상태</th>
               <th className="px-4 py-3" />
@@ -142,28 +177,39 @@ export default function AdminAccounts() {
           </thead>
           <tbody>
             {accounts.length === 0 && (
-              <tr><td colSpan={5} className="text-center py-12 text-gray-400">등록된 이용자 계정이 없습니다.</td></tr>
+              <tr><td colSpan={6} className="text-center py-12 text-gray-400">등록된 계정이 없습니다.</td></tr>
             )}
             {accounts.map(a => (
               <tr key={a.id} className="border-b last:border-0">
                 <td className="px-4 py-3 font-medium text-gray-800">{a.name}</td>
                 <td className="px-4 py-3 text-gray-500">{a.email}</td>
                 <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1">
-                    {ASSIGNABLE_PERMISSIONS.map(g => (
-                      <button
-                        key={g.key}
-                        onClick={() => updatePermissions(a, g.key)}
-                        className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
-                          a.permissions?.includes(g.key)
-                            ? 'bg-blue-100 text-blue-700 border-blue-200'
-                            : 'bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        {g.label}
-                      </button>
-                    ))}
-                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                    a.role === 'driver' ? 'bg-teal-100 text-teal-700' : 'bg-indigo-100 text-indigo-700'
+                  }`}>
+                    {a.role === 'driver' ? '배송원' : '관리자'}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  {a.role === 'driver' ? (
+                    <span className="text-xs text-gray-400">모바일 앱</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1">
+                      {ASSIGNABLE_PERMISSIONS.map(g => (
+                        <button
+                          key={g.key}
+                          onClick={() => updatePermissions(a, g.key)}
+                          className={`px-2 py-0.5 rounded-full text-xs font-medium border transition-colors ${
+                            a.permissions?.includes(g.key)
+                              ? 'bg-blue-100 text-blue-700 border-blue-200'
+                              : 'bg-gray-50 text-gray-400 border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          {g.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </td>
                 <td className="px-4 py-3">
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${a.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
