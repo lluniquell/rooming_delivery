@@ -203,11 +203,12 @@ export default function SoumBatch() {
       const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 })
 
       // 헤더 행에서 주문번호/운송장 컬럼 찾기
+      // (findIndex는 완전히 빈 셀로 생긴 배열 홀(hole)도 콜백을 호출하므로, 매번 String(c ?? '')로 안전하게 변환)
       let headerIdx = -1, orderCol = -1, trackCol = -1
       for (let i = 0; i < Math.min(rows.length, 10); i++) {
-        const r = (rows[i] ?? []).map(c => String(c ?? ''))
-        const oc = r.findIndex(c => c.includes('주문번호'))
-        const tc = r.findIndex(c => /운송장|송장번호/.test(c))
+        const r = rows[i] ?? []
+        const oc = r.findIndex(c => String(c ?? '').includes('주문번호'))
+        const tc = r.findIndex(c => /운송장|송장번호/.test(String(c ?? '')))
         if (oc >= 0 && tc >= 0) { headerIdx = i; orderCol = oc; trackCol = tc; break }
       }
       if (headerIdx < 0) {
