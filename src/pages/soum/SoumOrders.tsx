@@ -27,6 +27,7 @@ interface Batch {
 }
 
 const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버']
+const PAGE_SIZE = 500
 const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
 
 // 로컬(KST) 기준 날짜 — toISOString은 UTC라 오전 9시 전에 하루 밀림
@@ -61,6 +62,8 @@ export default function SoumOrders() {
   const [activePreset, setActivePreset] = useState('오늘')
   const [shipStats, setShipStats] = useState<Record<string, Record<string, number>>>({})
   const [assignWarn, setAssignWarn] = useState<{ type: 'error' | 'conflict'; text: string } | null>(null)
+  const [page, setPage] = useState(0)
+  const [totalCount, setTotalCount] = useState(0)
 
   function applyPreset(preset: typeof PRESETS[0]) {
     setStartDate(preset.start())
@@ -81,12 +84,18 @@ export default function SoumOrders() {
     setLastCollected(data?.value || null)
   }
 
-  async function loadOrders() {
-    const { data } = await supabase
+  async function loadOrders(pageNum = page) {
+    const from = pageNum * PAGE_SIZE
+    const to = from + PAGE_SIZE - 1
+    const { data, count } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, order_date)')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, order_date)', { count: 'exact' })
       .eq('status', 'collected')
       .is('batch_id', null)
+      .order('order_date', { referencedTable: 'orders', ascending: false })
+      .range(from, to)
+    setTotalCount(count ?? 0)
+    setPage(pageNum)
     const map: Record<string, OrderGroup> = {}
     for (const row of (data ?? []) as any[]) {
       const o = row.orders
@@ -164,7 +173,7 @@ export default function SoumOrders() {
         const errMsg = data.errors?.length ? ` | 실패: ${data.errors[0]}` : ''
         const backfillMsg = data.items_backfilled ? ` / 상품보충 ${data.items_backfilled}건` : ''
         setCollectMsg(`카페24 ${data.total ?? 0}건 조회 / 신규 ${data.collected ?? 0}건${backfillMsg}${errMsg}`)
-        if (data.collected > 0 || data.items_backfilled > 0) loadOrders()
+        if (data.collected > 0 || data.items_backfilled > 0) loadOrders(0)
       }
     } catch {
       setCollectMsg('네트워크 오류')
@@ -346,7 +355,7 @@ export default function SoumOrders() {
                 onChange={toggleAll}
                 className="rounded"
               />
-              전체 선택 (주문 {groups.length}건 / 상품 {allItemIds.length}개)
+              이 페이지 전체 선택 (주문 {groups.length}건 / 상품 {allItemIds.length}개)
             </label>
             {selected.size > 0 && (
               <button
@@ -430,6 +439,26 @@ export default function SoumOrders() {
               </div>
             )
           })}
+
+          {totalCount > PAGE_SIZE && (
+            <div className="px-4 py-3 border-t bg-gray-50 flex items-center justify-between text-sm">
+              <span className="text-gray-500">
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount)} / 전체 {totalCount}건
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => loadOrders(page - 1)}
+                  disabled={page === 0}
+                  className="px-3 py-1.5 rounded-lg border text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                >이전</button>
+                <button
+                  onClick={() => loadOrders(page + 1)}
+                  disabled={(page + 1) * PAGE_SIZE >= totalCount}
+                  className="px-3 py-1.5 rounded-lg border text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                >다음</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
