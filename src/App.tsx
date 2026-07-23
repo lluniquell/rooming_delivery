@@ -6,10 +6,6 @@ import { getCurrentDriver } from './lib/auth'
 
 import LoginPage from './pages/LoginPage'
 import AdminLayout, { PERMISSION_GROUPS, hasPermission, canManageAccounts, isDriverAccount } from './pages/admin/AdminLayout'
-import AdminDashboard from './pages/admin/AdminDashboard'
-import AdminRegister from './pages/admin/AdminRegister'
-import AdminAssign from './pages/admin/AdminAssign'
-import AdminStorage from './pages/admin/AdminStorage'
 import AdminAccounts from './pages/admin/AdminAccounts'
 import InspectionMain from './pages/inspection/InspectionMain'
 import BarcodeDB from './pages/inspection/BarcodeDB'
@@ -41,8 +37,9 @@ function RequireAccountManage({ driver, children }: { driver: Driver; children: 
 }
 
 function defaultAdminPath(driver: Driver) {
-  if (driver.is_superadmin || driver.permissions?.includes('admin')) return '/admin/dashboard'
-  const firstGroup = PERMISSION_GROUPS.find(g => driver.permissions?.includes(g.key))
+  if (driver.is_superadmin || driver.permissions?.includes('admin')) return '/admin/soum/orders'
+  // 메뉴 항목이 있는(아직 빈 메뉴가 아닌) 첫 권한 그룹으로 이동
+  const firstGroup = PERMISSION_GROUPS.find(g => driver.permissions?.includes(g.key) && g.items.length > 0)
   // 권한이 하나도 없으면 /login으로 보내면 안 됨 — 이미 로그인된 상태라 / <-> /login 무한 리다이렉트 루프에 빠짐
   return firstGroup ? firstGroup.items[0].to : '/admin/no-access'
 }
@@ -97,12 +94,8 @@ function App() {
         >
           <Route index element={driver && <Navigate to={defaultAdminPath(driver)} replace />} />
           <Route path="no-access" element={driver && <NoAccess driver={driver} />} />
-          <Route path="dashboard" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminDashboard /></RequirePermission>} />
-          <Route path="register" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminRegister /></RequirePermission>} />
-          <Route path="assign" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminAssign /></RequirePermission>} />
-          <Route path="storage" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminStorage /></RequirePermission>} />
           <Route path="soum/orders" element={driver && <RequirePermission perm="orders" driver={driver}><SoumOrders /></RequirePermission>} />
-          <Route path="soum/batches" element={driver && <RequirePermission perm="soum" driver={driver}><SoumBatch /></RequirePermission>} />
+          <Route path="soum/batches" element={driver && <RequirePermission perm="orders" driver={driver}><SoumBatch /></RequirePermission>} />
           <Route path="soum/outgoing" element={driver && <RequirePermission perm="soum" driver={driver}><SoumOutgoing /></RequirePermission>} />
           <Route path="schedule" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleBoard /></RequirePermission>} />
           <Route path="schedule/day/:date" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleDay /></RequirePermission>} />

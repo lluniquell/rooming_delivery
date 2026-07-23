@@ -9,21 +9,17 @@ interface Props {
 
 const orderItems = [
   { to: '/admin/soum/orders', label: '주문 수집' },
+  { to: '/admin/soum/batches', label: '배치 현황' },
 ]
 
 const scheduleItems = [
   { to: '/admin/schedule', label: '배송 스케줄' },
 ]
 
-const deliveryItems = [
-  { to: '/admin/dashboard', label: '배송 현황' },
-  { to: '/admin/register', label: '주문 등록' },
-  { to: '/admin/assign', label: '배송원 배정' },
-  { to: '/admin/storage', label: '스토리지' },
-]
+// 물류팀 메뉴는 아직 페이지 없이 탭만 준비 — 추후 전날 픽킹리스트 + 준비완료 체크 기능 예정
+const logisticsItems: { to: string; label: string }[] = []
 
 const propItems = [
-  { to: '/admin/soum/batches', label: '배치 현황' },
   { to: '/admin/inspection', label: '출고 검수 (카페24 엑셀)' },
   { to: '/admin/soum/outgoing', label: '출고 검수 1 (CJ 운송장)' },
   { to: '/admin/barcodes', label: '바코드 DB' },
@@ -37,17 +33,18 @@ const devItems = [
 export const PERMISSION_GROUPS: { key: Permission; label: string; items: { to: string; label: string }[] }[] = [
   { key: 'orders', label: '주문', items: orderItems },
   { key: 'schedule', label: '스케줄러', items: scheduleItems },
-  { key: 'delivery', label: '배송팀', items: deliveryItems },
+  { key: 'logistics', label: '물류팀', items: logisticsItems },
   { key: 'soum', label: '소품팀', items: propItems },
 ]
 
 // 계정 관리 화면에서 고를 수 있는 권한 목록 — '관리자'는 실제 메뉴가 아니라
-// PERMISSION_GROUPS 전체를 한 번에 부여하는 상위 권한. '배송팀'은 관리자 패널의
-// delivery 메뉴 권한이 아니라 모바일 배송원 앱 접근(role 대체) — 서로 배타적으로 다룸
+// PERMISSION_GROUPS 전체를 한 번에 부여하는 상위 권한. '배송팀'(driver)은 관리자 패널의
+// 메뉴 권한이 아니라 모바일 배송원 앱 접근(role 대체) — 서로 배타적으로 다룸
 export const ASSIGNABLE_PERMISSIONS: { key: Permission; label: string }[] = [
   { key: 'admin', label: '관리자 (전체 메뉴)' },
   { key: 'orders', label: '주문' },
   { key: 'schedule', label: '스케줄러' },
+  { key: 'logistics', label: '물류팀' },
   { key: 'soum', label: '소품팀' },
   { key: 'driver', label: '배송팀' },
 ]
@@ -89,7 +86,12 @@ function NavGroup({ label, items }: { label: string; items: { to: string; label:
         {label}
         <svg className={`w-3 h-3 mt-0.5 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
       </button>
-      {open && (
+      {open && items.length === 0 && (
+        <div className="absolute left-0 top-full mt-1 bg-white border rounded-xl shadow-lg py-1 min-w-32 z-50 px-4 py-2 text-xs text-gray-400">
+          준비 중입니다
+        </div>
+      )}
+      {open && items.length > 0 && (
         <div className="absolute left-0 top-full mt-1 bg-white border rounded-xl shadow-lg py-1 min-w-32 z-50">
           {items.map(item => (
             <NavLink
