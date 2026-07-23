@@ -32,7 +32,7 @@ export default function AdminRegister() {
 
     const fetched: OrderResult[] = await Promise.all(
       nos.map(async (no) => {
-        const res = await fetch(`/api/cafe24/orders/${no}`)
+        const res = await fetch(`/api/cafe24/collect?order_no=${no}`)
         if (!res.ok) return { orderNo: no, customerName: '조회 실패', address: '', items: [] }
         const data = await res.json()
         return {

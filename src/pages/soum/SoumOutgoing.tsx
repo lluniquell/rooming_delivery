@@ -124,7 +124,7 @@ export default function SoumOutgoing() {
         .then(async () => {
           try {
             const itemCodes = items.map(i => i.cafe24_item_code).filter(Boolean) as string[]
-            const res = await fetch('/api/cafe24/ship-transit', {
+            const res = await fetch('/api/cafe24/shipments?action=transit', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ orders: [{ order_no: orderInfo.cafe24_order_no, item_codes: itemCodes }] }),

@@ -28,7 +28,7 @@ export default function AdminTest() {
     setError('')
     setResult(null)
 
-    const res = await fetch(`/api/cafe24/orders/${orderNo.trim()}`)
+    const res = await fetch(`/api/cafe24/collect?order_no=${orderNo.trim()}`)
     const text = await res.text()
     let data: any
     try { data = JSON.parse(text) } catch { data = text }

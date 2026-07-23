@@ -240,7 +240,7 @@ export default function SoumBatch() {
       for (let i = 0; i < parsed.length; i += 50) {
         const chunk = parsed.slice(i, i + 50)
         try {
-          const res = await fetch('/api/cafe24/ship-standby', {
+          const res = await fetch('/api/cafe24/shipments?action=standby', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ orders: chunk }),

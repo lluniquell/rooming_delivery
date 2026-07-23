@@ -2,16 +2,55 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 
 const MALL_ID = (process.env.VITE_CAFE24_MALL_ID ?? '').trim()
+const CLIENT_ID = (process.env.VITE_CAFE24_CLIENT_ID ?? '').trim()
+const CLIENT_SECRET = (process.env.CAFE24_CLIENT_SECRET ?? '').trim()
 
 const supabase = createClient(
   (process.env.VITE_SUPABASE_URL ?? '').trim(),
   (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim()
 )
 
+// 만료 10분 전이면 미리 갱신 (orders/[orderNo].ts에서 병합)
 async function getToken(): Promise<string> {
-  const { data } = await supabase.from('cafe24_tokens').select('access_token').eq('id', 1).single()
+  const { data } = await supabase.from('cafe24_tokens').select('*').eq('id', 1).single()
   if (!data) throw new Error('토큰 없음')
+
+  if (new Date(data.access_expires_at) < new Date(Date.now() + 10 * 60 * 1000)) {
+    const tokenRes = await fetch(`https://${MALL_ID}.cafe24api.com/api/v2/oauth/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')}`,
+      },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: data.refresh_token }),
+    })
+    const refreshed = await tokenRes.json()
+    await supabase.from('cafe24_tokens').upsert({
+      id: 1,
+      access_token: refreshed.access_token,
+      refresh_token: refreshed.refresh_token,
+      access_expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      refresh_expires_at: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' })
+    return refreshed.access_token
+  }
+
   return data.access_token
+}
+
+// 주문 1건 상세 조회 (orders/[orderNo].ts 병합) — GET ?order_no=xxx
+async function getOrder(orderNo: string, token: string) {
+  const url = `https://${MALL_ID}.cafe24api.com/api/v2/admin/orders/${orderNo}?shop_no=1`
+  const apiRes = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  })
+  const text = await apiRes.text()
+  let data: any
+  try { data = JSON.parse(text) } catch {
+    return { ok: false, status: apiRes.status, body: { error: `Cafe24 응답 파싱 실패 (${apiRes.status})`, raw: text.slice(0, 500), url } }
+  }
+  return { ok: apiRes.ok, status: apiRes.status, body: apiRes.ok ? (data.order ?? data) : data }
 }
 
 async function cafe24Get(path: string, token: string) {
@@ -53,6 +92,19 @@ function itemRowsOf(order: any, dbOrderId: string) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // 주문 1건 상세 조회 (orders/[orderNo].ts 병합) — GET ?order_no=xxx
+  if (req.method === 'GET') {
+    const { order_no } = req.query
+    if (!order_no || typeof order_no !== 'string') return res.status(400).json({ error: 'order_no 필요' })
+    try {
+      const token = await getToken()
+      const result = await getOrder(order_no, token)
+      return res.status(result.status).json(result.body)
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message })
+    }
+  }
+
   if (req.method !== 'POST') return res.status(405).end()
 
   try {
