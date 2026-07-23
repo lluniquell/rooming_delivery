@@ -14,7 +14,8 @@ interface Item {
 interface OrderGroup {
   order_id: string
   cafe24_order_no: string
-  customer_name: string
+  receiver_name: string
+  address: string | null
   order_date: string | null
   items: Item[]
 }
@@ -96,7 +97,7 @@ export default function SoumOrders() {
     const to = from + PAGE_SIZE - 1
     const { data, count } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, order_date, status)', { count: 'exact' })
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, status)', { count: 'exact' })
       .eq('status', 'collected')
       .is('batch_id', null)
       .eq('orders.status', 'N20')
@@ -111,7 +112,8 @@ export default function SoumOrders() {
         map[o.id] = {
           order_id: o.id,
           cafe24_order_no: o.cafe24_order_no,
-          customer_name: o.customer_name,
+          receiver_name: o.receiver_name || o.customer_name,
+          address: o.address,
           order_date: o.order_date,
           items: [],
         }
@@ -382,7 +384,10 @@ export default function SoumOrders() {
                     className="rounded"
                   />
                   <span className="font-mono text-xs text-gray-500">{group.cafe24_order_no}</span>
-                  <span className="font-medium text-gray-800 text-sm">{group.customer_name}</span>
+                  <span className="font-medium text-gray-800 text-sm">{group.receiver_name}</span>
+                  {group.address && (
+                    <span className="text-xs text-gray-400 truncate max-w-xs">{group.address}</span>
+                  )}
                   <span className="text-xs text-gray-400">
                     {group.order_date ? new Date(group.order_date).toLocaleDateString('ko-KR') : '-'}
                   </span>
