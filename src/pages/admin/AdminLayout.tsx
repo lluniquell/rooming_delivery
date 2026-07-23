@@ -42,10 +42,14 @@ export const PERMISSION_GROUPS: { key: Permission; label: string; items: { to: s
 ]
 
 // 계정 관리 화면에서 고를 수 있는 권한 목록 — '관리자'는 실제 메뉴가 아니라
-// PERMISSION_GROUPS 전체를 한 번에 부여하는 상위 권한
+// PERMISSION_GROUPS 전체를 한 번에 부여하는 상위 권한. '배송팀'은 관리자 패널의
+// delivery 메뉴 권한이 아니라 모바일 배송원 앱 접근(role 대체) — 서로 배타적으로 다룸
 export const ASSIGNABLE_PERMISSIONS: { key: Permission; label: string }[] = [
   { key: 'admin', label: '관리자 (전체 메뉴)' },
-  ...PERMISSION_GROUPS.map(g => ({ key: g.key, label: g.label })),
+  { key: 'orders', label: '주문' },
+  { key: 'schedule', label: '스케줄러' },
+  { key: 'soum', label: '소품팀' },
+  { key: 'driver', label: '배송팀' },
 ]
 
 export function hasPermission(driver: Driver, key: Permission) {
@@ -55,6 +59,11 @@ export function hasPermission(driver: Driver, key: Permission) {
 // '관리자' 권한 보유자는 슈퍼관리자와 마찬가지로 계정 관리 접근 가능 (테스트 메뉴는 제외)
 export function canManageAccounts(driver: Driver) {
   return driver.is_superadmin || driver.permissions?.includes('admin')
+}
+
+// 모바일 배송원 앱으로 갈지(관리자 패널 대신) — role 컬럼 대신 permissions만으로 판단
+export function isDriverAccount(driver: Driver) {
+  return driver.permissions?.includes('driver') ?? false
 }
 
 function NavGroup({ label, items }: { label: string; items: { to: string; label: string }[] }) {

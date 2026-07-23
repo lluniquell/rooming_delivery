@@ -17,7 +17,7 @@ export default function AdminDashboard() {
   const [filterDriver, setFilterDriver] = useState('')
 
   useEffect(() => {
-    supabase.from('drivers').select('*').eq('is_active', true).eq('role', 'driver').then(({ data }) => setDrivers(data ?? []))
+    supabase.from('drivers').select('*').eq('is_active', true).contains('permissions', ['driver']).then(({ data }) => setDrivers(data ?? []))
   }, [])
 
   useEffect(() => {

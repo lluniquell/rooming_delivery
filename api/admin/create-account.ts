@@ -25,6 +25,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ message: '이름, 이메일, 비밀번호를 모두 입력하세요.' })
   }
 
+  const perms: string[] = Array.isArray(permissions) ? permissions : []
+  // role 컬럼은 DB 호환용으로만 유지 — 실제 라우팅/권한 판단은 permissions만으로 이뤄짐
+  const role = perms.includes('driver') ? 'driver' : 'admin'
+
   const { data: created, error: createError } = await supabase.auth.admin.createUser({
     email,
     password,
@@ -38,10 +42,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     id: created.user.id,
     name,
     email,
-    role: 'admin',
+    role,
     is_active: true,
     is_superadmin: false,
-    permissions: Array.isArray(permissions) ? permissions : [],
+    permissions: perms,
   })
 
   if (insertError) {

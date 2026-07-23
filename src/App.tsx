@@ -5,7 +5,7 @@ import type { Driver, Permission } from './types'
 import { getCurrentDriver } from './lib/auth'
 
 import LoginPage from './pages/LoginPage'
-import AdminLayout, { PERMISSION_GROUPS, hasPermission, canManageAccounts } from './pages/admin/AdminLayout'
+import AdminLayout, { PERMISSION_GROUPS, hasPermission, canManageAccounts, isDriverAccount } from './pages/admin/AdminLayout'
 import AdminDashboard from './pages/admin/AdminDashboard'
 import AdminRegister from './pages/admin/AdminRegister'
 import AdminAssign from './pages/admin/AdminAssign'
@@ -90,10 +90,10 @@ function App() {
         <Route path="/login" element={!driver ? <LoginPage /> : <Navigate to="/" />} />
         <Route path="/auth/cafe24/callback" element={<Cafe24Callback />} />
 
-        {/* 관리자 */}
+        {/* 관리자 — role이 아니라 'driver' 권한 유무로 판단 */}
         <Route
           path="/admin"
-          element={driver?.role === 'admin' ? <AdminLayout driver={driver} /> : <Navigate to="/login" />}
+          element={driver && !isDriverAccount(driver) ? <AdminLayout driver={driver} /> : <Navigate to="/login" />}
         >
           <Route index element={driver && <Navigate to={defaultAdminPath(driver)} replace />} />
           <Route path="no-access" element={driver && <NoAccess driver={driver} />} />
@@ -116,7 +116,7 @@ function App() {
         {/* 배송원 */}
         <Route
           path="/"
-          element={driver?.role === 'driver' ? <DriverLayout driver={driver} /> : driver?.role === 'admin' ? <Navigate to={defaultAdminPath(driver)} /> : <Navigate to="/login" />}
+          element={driver && isDriverAccount(driver) ? <DriverLayout driver={driver} /> : driver ? <Navigate to={defaultAdminPath(driver)} /> : <Navigate to="/login" />}
         >
           <Route index element={<DriverList />} />
           <Route path="delivery/:id" element={<DriverDetail />} />

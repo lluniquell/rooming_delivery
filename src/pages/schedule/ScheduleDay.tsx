@@ -246,7 +246,7 @@ export default function ScheduleDay() {
     const { data: driverData } = await supabase
       .from('drivers')
       .select('id, name')
-      .eq('role', 'driver')
+      .contains('permissions', ['driver'])
       .eq('is_active', true)
       .order('name')
     setDrivers(driverData ?? [])
