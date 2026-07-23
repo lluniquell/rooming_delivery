@@ -78,8 +78,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cafe24Orders.push(...page)
       if (page.length < 100) break
     }
+
+    // orders.status에는 카페24의 실제 order_status 코드(N20, N10, C00 등)를 그대로 저장.
+    // 이미 수집됐지만 아직 배치 미배정인 주문들의 현재 상태를 다시 조회해서, N20이 아니게
+    // 바뀐 것들은 실제 값으로 갱신 — 주문 수집 화면은 status='N20'인 것만 보여주므로 자동으로 숨겨짐
+    let notReady = 0
+    {
+      const { data: pendingRows } = await supabase
+        .from('order_items')
+        .select('orders!inner(id, cafe24_order_no, status)')
+        .eq('status', 'collected')
+        .is('batch_id', null)
+        .eq('orders.status', 'N20')
+      const pendingMap = new Map<string, string>()
+      for (const row of (pendingRows ?? []) as any[]) {
+        pendingMap.set(row.orders.cafe24_order_no, row.orders.id)
+      }
+      const pendingNos = [...pendingMap.keys()]
+      for (let i = 0; i < pendingNos.length; i += 50) {
+        const chunk = pendingNos.slice(i, i + 50)
+        // order_status는 주문이 아니라 상품(item) 단위 필드라 embed=items로 조회해서 읽어야 함.
+        // order_id 지정 시 날짜 파라미터 없이도 조회 가능 (날짜 필터엔 3개월 제한이 있어서 회피)
+        const data = await cafe24Get(
+          `/api/v2/admin/orders?order_id=${chunk.join(',')}&embed=items&shop_no=1&limit=${chunk.length}`,
+          token
+        )
+        const statusMap = new Map<string, string>(
+          (data.orders ?? [])
+            .filter((o: any) => o.items?.[0]?.order_status)
+            .map((o: any) => [o.order_id, o.items[0].order_status])
+        )
+        for (const no of chunk) {
+          const st = statusMap.get(no)
+          if (st && st !== 'N20') {
+            await supabase.from('orders').update({ status: st }).eq('id', pendingMap.get(no)!)
+            notReady++
+          }
+        }
+      }
+    }
+
     if (!cafe24Orders.length) {
-      return res.status(200).json({ collected: 0, skipped: 0, total: 0, message: '수집할 주문이 없습니다.' })
+      return res.status(200).json({ collected: 0, skipped: 0, total: 0, not_ready: notReady, message: '수집할 주문이 없습니다.' })
     }
 
     const ids = cafe24Orders.map(o => o.order_id)
@@ -138,7 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           cafe24_order_no: order.order_id,
           customer_name: order.billing_name,
           order_date: order.order_date,
-          status: 'collected',
+          status: order.items?.[0]?.order_status ?? orderStatus,
           ...receiverFieldsOf(order),
         }).select('id').single()
 
@@ -159,6 +199,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       collected,
       skipped: cafe24Orders.length - collected,
       items_backfilled: itemsBackfilled,
+      not_ready: notReady,
       total: cafe24Orders.length,
       ...(errors.length && { errors }),
     })

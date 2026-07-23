@@ -96,9 +96,10 @@ export default function SoumOrders() {
     const to = from + PAGE_SIZE - 1
     const { data, count } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, order_date)', { count: 'exact' })
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, order_date, status)', { count: 'exact' })
       .eq('status', 'collected')
       .is('batch_id', null)
+      .eq('orders.status', 'N20')
       .order('order_date', { referencedTable: 'orders', ascending: false })
       .range(from, to)
     setTotalCount(count ?? 0)
@@ -178,8 +179,9 @@ export default function SoumOrders() {
       } else {
         const errMsg = data.errors?.length ? ` | 실패: ${data.errors[0]}` : ''
         const backfillMsg = data.items_backfilled ? ` / 상품보충 ${data.items_backfilled}건` : ''
-        setCollectMsg(`카페24 ${data.total ?? 0}건 조회 / 신규 ${data.collected ?? 0}건${backfillMsg}${errMsg}`)
-        if (data.collected > 0 || data.items_backfilled > 0) loadOrders(0)
+        const notReadyMsg = data.not_ready ? ` / 상태변경으로 숨김 ${data.not_ready}건` : ''
+        setCollectMsg(`카페24 ${data.total ?? 0}건 조회 / 신규 ${data.collected ?? 0}건${backfillMsg}${notReadyMsg}${errMsg}`)
+        if (data.collected > 0 || data.items_backfilled > 0 || data.not_ready > 0) loadOrders(0)
       }
     } catch {
       setCollectMsg('네트워크 오류')
