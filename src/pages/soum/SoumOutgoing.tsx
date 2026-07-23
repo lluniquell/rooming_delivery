@@ -20,6 +20,7 @@ interface InspectItem {
   quantity: number
   inspected_qty: number
   delivery_method: string | null
+  cafe24_item_code: string | null
 }
 
 interface UnregisteredModal {
@@ -53,15 +54,16 @@ export default function SoumOutgoing() {
   }, [])
 
   async function loadPending() {
-    // 운송장 등록됐고 아직 출고 안 된 상품이 있는 주문
+    // 운송장 등록됐고 아직 출고 안 된 상품이 있는 주문 — 운송장번호는 상품(order_item) 자신의
+    // 값이라, 같은 주문에 다른 배송방법 상품이 섞여 있어도 그건 여기 잡히지 않음
     const { data } = await supabase
       .from('order_items')
-      .select('id, orders!inner(tracking_number, customer_name)')
+      .select('tracking_number, orders!inner(customer_name)')
       .eq('status', 'confirmed')
-      .not('orders.tracking_number', 'is', null)
+      .not('tracking_number', 'is', null)
     const map: Record<string, PendingOrder> = {}
     for (const row of (data ?? []) as any[]) {
-      const t = row.orders.tracking_number
+      const t = row.tracking_number
       if (!map[t]) map[t] = { tracking_number: t, customer_name: row.orders.customer_name, item_count: 0 }
       map[t].item_count++
     }
@@ -69,34 +71,24 @@ export default function SoumOutgoing() {
   }
 
   async function loadByTracking(tracking: string) {
-    const { data: order } = await supabase
-      .from('orders')
-      .select('id, cafe24_order_no, customer_name, tracking_number')
-      .eq('tracking_number', tracking)
-      .maybeSingle()
-
-    if (!order) {
-      setMessage('해당 운송장번호의 주문이 없습니다.')
-      setItems([])
-      setOrderInfo(null)
-      return
-    }
-
+    // 주문 단위가 아니라, 이 운송장번호를 실제로 가진 상품(order_item) 행만 조회 —
+    // 같은 주문의 다른 배송방법(경동/직배) 상품은 tracking_number가 다르므로 절대 섞이지 않음
     const { data: itemData } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method')
-      .eq('order_id', order.id)
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, cafe24_item_code, order_id, orders!inner(id, cafe24_order_no, customer_name)')
+      .eq('tracking_number', tracking)
       .eq('status', 'confirmed')
 
     if (!itemData?.length) {
-      setMessage('이 주문에 검수 대기 상품이 없습니다. (이미 출고됐거나 배정 전)')
+      setMessage('해당 운송장번호의 검수 대기 상품이 없습니다. (이미 출고됐거나 배정 전)')
       setItems([])
       setOrderInfo(null)
       return
     }
 
-    setOrderInfo(order)
-    setItems(itemData)
+    const order = (itemData[0] as any).orders
+    setOrderInfo({ id: order.id, cafe24_order_no: order.cafe24_order_no, customer_name: order.customer_name, tracking_number: tracking })
+    setItems(itemData.map(({ orders, ...rest }: any) => rest))
     setMessage('')
     setTimeout(() => barcodeRef.current?.focus(), 100)
   }
@@ -123,10 +115,11 @@ export default function SoumOutgoing() {
         .in('id', items.map(i => i.id))
         .then(async () => {
           try {
+            const itemCodes = items.map(i => i.cafe24_item_code).filter(Boolean) as string[]
             const res = await fetch('/api/cafe24/ship-transit', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ order_nos: [orderInfo.cafe24_order_no] }),
+              body: JSON.stringify({ orders: [{ order_no: orderInfo.cafe24_order_no, item_codes: itemCodes }] }),
             })
             const result = await res.json()
             if (result.errors?.length) {

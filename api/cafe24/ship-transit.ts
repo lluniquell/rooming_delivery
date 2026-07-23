@@ -27,9 +27,15 @@ async function cafe24Get(path: string, token: string) {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
 
-  const { order_nos } = req.body ?? {}
-  if (!Array.isArray(order_nos) || !order_nos.length) {
-    return res.status(400).json({ error: 'order_nos 배열이 필요합니다.' })
+  // orders: [{ order_no, item_codes }] — item_codes가 있으면 그 상품(order_item_code)들의
+  // shipping_code만 전환, 없으면(구버전 호출 호환) 주문의 모든 shipping_code를 전환
+  const { order_nos, orders } = req.body ?? {}
+  const targets: { order_no: string; item_codes?: string[] }[] =
+    Array.isArray(orders) ? orders
+    : Array.isArray(order_nos) ? order_nos.map((o: string) => ({ order_no: o }))
+    : []
+  if (!targets.length) {
+    return res.status(400).json({ error: 'order_nos 또는 orders 배열이 필요합니다.' })
   }
 
   try {
@@ -37,14 +43,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let updated = 0
     const errors: string[] = []
 
-    for (const orderNo of order_nos) {
+    for (const { order_no: orderNo, item_codes } of targets) {
       if (!orderNo) continue
       try {
         // shipping_code는 D-{주문번호}-00으로 고정이 아님 — 상품(라인)이 서로 다른
         // 배송 그룹으로 나뉘면 -01, -02 등 별도 코드를 갖는 경우가 실제로 있어서,
         // 주문의 실제 아이템을 조회해 존재하는 shipping_code를 전부 처리해야 함
         const itemsData = await cafe24Get(`/api/v2/admin/orders/${orderNo}/items?shop_no=1`, token)
-        const shippingCodes = [...new Set((itemsData.items ?? []).map((i: any) => i.shipping_code).filter(Boolean))]
+        const allItems: any[] = itemsData.items ?? []
+
+        // item_codes가 지정된 경우, 그 상품(order_item_code)에 해당하는 shipping_code만 대상으로 함
+        // — 같은 주문에 다른 배송방법 상품이 섞여 있어도 그쪽 그룹은 건드리지 않기 위함
+        const scoped = item_codes?.length
+          ? allItems.filter(i => item_codes.includes(i.order_item_code))
+          : allItems
+        const shippingCodes = [...new Set(scoped.map((i: any) => i.shipping_code).filter(Boolean))]
 
         if (!shippingCodes.length) {
           errors.push(`${orderNo}: shipping_code를 찾을 수 없음`)
@@ -75,7 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    res.status(200).json({ updated, total: order_nos.length, ...(errors.length && { errors }) })
+    res.status(200).json({ updated, total: targets.length, ...(errors.length && { errors }) })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
   }

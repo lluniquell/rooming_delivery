@@ -40,6 +40,7 @@ function itemRowsOf(order: any, dbOrderId: string) {
   const items: any[] = order.items ?? []
   return items.map((item: any) => ({
     order_id: dbOrderId,
+    cafe24_item_code: item.order_item_code ?? null,
     product_code: item.variant_code ?? item.product_code ?? '',
     product_name: item.product_name ?? '',
     option_info: item.option_value || null,
@@ -109,6 +110,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               const { error } = await supabase.from('order_items').insert(rows)
               if (error) throw new Error(`아이템 저장 실패: ${error.message}`)
               itemsBackfilled++
+            }
+          } else {
+            // cafe24_item_code 컬럼 추가 이전에 수집된 상품 행 보정 (상품코드 매칭, 중복 시 순서대로 매칭)
+            const { data: missing } = await supabase
+              .from('order_items')
+              .select('id, product_code')
+              .eq('order_id', existed.id)
+              .is('cafe24_item_code', null)
+            if (missing?.length) {
+              const pool = [...(order.items ?? [])]
+              for (const row of missing) {
+                const idx = pool.findIndex((i: any) => (i.variant_code ?? i.product_code ?? '') === row.product_code)
+                if (idx >= 0) {
+                  const [matched] = pool.splice(idx, 1)
+                  await supabase.from('order_items').update({ cafe24_item_code: matched.order_item_code ?? null }).eq('id', row.id)
+                }
+              }
             }
           }
           continue

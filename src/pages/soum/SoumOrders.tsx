@@ -28,6 +28,16 @@ interface Batch {
 
 const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버']
 const PAGE_SIZE = 500
+
+// 배치 이름으로 배송방법을 유추 — 어느 바구니에 넣느냐가 곧 배송방법 지정이라,
+// 배정 시점에 자동으로 order_items.delivery_method에 찍어둠 (보류로 옮겨도 이 값은 안 바뀜)
+function methodOfBatch(name: string): string | null {
+  if (name.includes('CJ')) return 'CJ'
+  if (name.includes('경동')) return '경동'
+  if (name.includes('직배')) return '직배'
+  if (name.includes('팀무버')) return '팀무버'
+  return null
+}
 const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
 
 // 로컬(KST) 기준 날짜 — toISOString은 UTC라 오전 9시 전에 하루 밀림
@@ -54,9 +64,6 @@ export default function SoumOrders() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [collecting, setCollecting] = useState(false)
   const [collectMsg, setCollectMsg] = useState('')
-  const [showModal, setShowModal] = useState(false)
-  const [assignBatchId, setAssignBatchId] = useState('')
-  const [assignMethod, setAssignMethod] = useState('CJ')
   const [startDate, setStartDate] = useState(today())
   const [endDate, setEndDate] = useState(today())
   const [activePreset, setActivePreset] = useState('오늘')
@@ -147,7 +154,6 @@ export default function SoumOrders() {
       .neq('type', 'hold')
       .order('batch_no')
     setBatches(data ?? [])
-    if (data?.length) setAssignBatchId(data[0].id)
   }
 
   async function collect() {
@@ -254,22 +260,15 @@ export default function SoumOrders() {
     })
   }
 
-  async function confirmAssign() {
-    await assignItems([...selected], {
-      batch_id: assignBatchId,
-      delivery_method: assignMethod,
-      status: 'confirmed',
-    })
-    setShowModal(false)
-  }
-
-  async function quickAssign(group: OrderGroup, batchId: string) {
+  async function quickAssign(group: OrderGroup, batch: Batch) {
     // 이 주문에서 체크된 상품이 있으면 그 상품만, 없으면 주문 전체
     const checkedInGroup = group.items.filter(i => selected.has(i.id))
     const targets = checkedInGroup.length ? checkedInGroup : group.items
+    const method = methodOfBatch(batch.name)
     await assignItems(targets.map(i => i.id), {
-      batch_id: batchId,
+      batch_id: batch.id,
       status: 'confirmed',
+      ...(method && { delivery_method: method }),
     })
   }
 
@@ -358,12 +357,9 @@ export default function SoumOrders() {
               이 페이지 전체 선택 (주문 {groups.length}건 / 상품 {allItemIds.length}개)
             </label>
             {selected.size > 0 && (
-              <button
-                onClick={() => setShowModal(true)}
-                className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-700"
-              >
-                상품 {selected.size}개 배치 배정
-              </button>
+              <span className="text-xs text-gray-400">
+                상품 {selected.size}개 선택됨 — 배정할 주문의 배치 버튼을 누르세요
+              </span>
             )}
           </div>
 
@@ -392,7 +388,7 @@ export default function SoumOrders() {
                     {batches.map(b => (
                       <button
                         key={b.id}
-                        onClick={() => quickAssign(group, b.id)}
+                        onClick={() => quickAssign(group, b)}
                         title={`${b.batch_no}번 ${b.name}으로 배정`}
                         className="px-2 py-1 rounded text-xs font-medium border border-gray-200 text-gray-500 bg-white hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-colors"
                       >
@@ -459,67 +455,6 @@ export default function SoumOrders() {
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {showModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
-            <h3 className="font-bold text-gray-800 mb-5">배치 배정 (상품 {selected.size}개)</h3>
-
-            <div className="mb-4">
-              <p className="text-xs font-medium text-gray-500 mb-2">배치</p>
-              <div className="flex flex-wrap gap-2">
-                {batches.map(b => (
-                  <button
-                    key={b.id}
-                    onClick={() => setAssignBatchId(b.id)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                      assignBatchId === b.id
-                        ? 'bg-indigo-600 text-white border-indigo-600'
-                        : 'text-gray-600 border-gray-300 hover:border-indigo-400'
-                    }`}
-                  >
-                    {b.batch_no}번 {b.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mb-6">
-              <p className="text-xs font-medium text-gray-500 mb-2">배송 방법</p>
-              <div className="flex flex-wrap gap-2">
-                {DELIVERY_METHODS.map(m => (
-                  <button
-                    key={m}
-                    onClick={() => setAssignMethod(m)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                      assignMethod === m
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'text-gray-600 border-gray-300 hover:border-blue-400'
-                    }`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => setShowModal(false)}
-                className="flex-1 py-2 text-sm text-gray-500 border rounded-lg hover:bg-gray-50"
-              >
-                취소
-              </button>
-              <button
-                onClick={confirmAssign}
-                className="flex-1 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 font-medium"
-              >
-                확정
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

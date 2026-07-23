@@ -20,9 +20,10 @@ interface Item {
   quantity: number
   delivery_method: string | null
   status: string
+  cafe24_item_code: string | null
+  tracking_number: string | null
   cafe24_order_no: string
   customer_name: string
-  tracking_number: string | null
   receiver_name: string | null
   receiver_phone: string | null
   zipcode: string | null
@@ -76,7 +77,7 @@ export default function SoumBatch() {
     setLoading(true)
     const { data } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, delivery_method, status, orders!inner(cafe24_order_no, customer_name, tracking_number, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message)')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, delivery_method, status, cafe24_item_code, tracking_number, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message)')
       .eq('batch_id', batchId)
       .eq('status', 'confirmed')
     const rows = ((data ?? []) as any[])
@@ -90,9 +91,10 @@ export default function SoumBatch() {
         quantity: row.quantity,
         delivery_method: row.delivery_method,
         status: row.status,
+        cafe24_item_code: row.cafe24_item_code,
+        tracking_number: row.tracking_number,
         cafe24_order_no: row.orders.cafe24_order_no,
         customer_name: row.orders.customer_name,
-        tracking_number: row.orders.tracking_number,
         receiver_name: row.orders.receiver_name,
         receiver_phone: row.orders.receiver_phone,
         zipcode: row.orders.zipcode,
@@ -145,13 +147,20 @@ export default function SoumBatch() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   function downloadCJ() {
+    // 이 배치에 경동/직배 상품이 섞여 있어도 CJ로 배정된 상품만 CJ 송장 엑셀에 실림
+    const cjItems = items.filter(i => i.delivery_method === 'CJ')
+    if (!cjItems.length) {
+      alert('이 배치에 CJ 배정 상품이 없습니다.')
+      return
+    }
+
     // 택배 프로그램의 '합포장' 설정으로 같은 고객주문번호 여러 줄이 하나로 묶여 출력됨을 확인 —
     // 상품마다 한 줄씩 나누고, 품목명은 각 줄의 실제 상품명, 박스수량은 항상 1
     const orderInfo: Record<string, {
       orderNo: string; name: string; phone: string; zipcode: string
       address: string; message: string
     }> = {}
-    for (const item of items) {
+    for (const item of cjItems) {
       const key = item.cafe24_order_no
       if (!orderInfo[key]) {
         orderInfo[key] = {
@@ -177,7 +186,7 @@ export default function SoumBatch() {
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
     // 상품마다 한 줄씩 — 같은 주문번호가 여러 줄에 반복됨, 박스수량은 항상 1
-    const dataRows = items.map(item => {
+    const dataRows = cjItems.map(item => {
       const o = orderInfo[item.cafe24_order_no]
       return [
         '', dateStr, o.name, o.phone, '',
@@ -216,51 +225,39 @@ export default function SoumBatch() {
         return
       }
 
-      let updated = 0
-      const failed: string[] = []
-      const synced: { order_no: string; tracking_no: string }[] = []
+      const parsed: { order_no: string; tracking_no: string }[] = []
       for (const r of rows.slice(headerIdx + 1)) {
         const orderNo = String(r?.[orderCol] ?? '').trim()
         const tracking = String(r?.[trackCol] ?? '').trim().replace(/[-\s]/g, '')
         if (!orderNo || !tracking) continue
-        const { error, count } = await supabase
-          .from('orders')
-          .update({ tracking_number: tracking }, { count: 'exact' })
-          .eq('cafe24_order_no', orderNo)
-        if (error || !count) failed.push(orderNo)
-        else {
-          updated += count
-          synced.push({ order_no: orderNo, tracking_no: tracking })
+        parsed.push({ order_no: orderNo, tracking_no: tracking })
+      }
+
+      // 운송장번호 등록 + 카페24 배송대기 처리 모두 서버에서 처리 — 서버가 주문별로
+      // CJ 배정 상품만 찾아 그 상품의 shipping_code에만 반영함 (타임아웃 방지 위해 50건씩 분할)
+      let cafe24Updated = 0
+      const cafe24Errors: string[] = []
+      for (let i = 0; i < parsed.length; i += 50) {
+        const chunk = parsed.slice(i, i + 50)
+        try {
+          const res = await fetch('/api/cafe24/ship-standby', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orders: chunk }),
+          })
+          const result = await res.json()
+          cafe24Updated += result.updated ?? 0
+          if (result.errors?.length) cafe24Errors.push(...result.errors)
+        } catch {
+          cafe24Errors.push(`${chunk[0].order_no} 외 ${chunk.length - 1}건: 네트워크 오류`)
         }
       }
 
-      // 카페24 배송대기 처리 (운송장 등록) — 타임아웃 방지를 위해 50건씩 분할 호출
-      let cafe24Msg = ''
-      if (synced.length) {
-        let cafe24Updated = 0
-        const cafe24Errors: string[] = []
-        for (let i = 0; i < synced.length; i += 50) {
-          const chunk = synced.slice(i, i + 50)
-          try {
-            const res = await fetch('/api/cafe24/ship-standby', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ orders: chunk }),
-            })
-            const result = await res.json()
-            cafe24Updated += result.updated ?? 0
-            if (result.errors?.length) cafe24Errors.push(...result.errors)
-          } catch {
-            cafe24Errors.push(`${chunk[0].order_no} 외 ${chunk.length - 1}건: 네트워크 오류`)
-          }
-        }
-        cafe24Msg = `\n카페24 배송대기 처리 ${cafe24Updated}건`
-        if (cafe24Errors.length) {
-          cafe24Msg += ` / 실패 ${cafe24Errors.length}건\n${cafe24Errors[0]}`
-        }
+      let msg = `카페24 배송대기 처리 ${cafe24Updated}건 / 전체 ${parsed.length}건`
+      if (cafe24Errors.length) {
+        msg += `\n실패 ${cafe24Errors.length}건\n${cafe24Errors.slice(0, 5).join('\n')}${cafe24Errors.length > 5 ? '\n...' : ''}`
       }
-
-      alert(`운송장 ${updated}건 등록 완료${failed.length ? `\n미매칭 ${failed.length}건: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? ' ...' : ''}` : ''}${cafe24Msg}`)
+      alert(msg)
       if (activeBatchId) selectBatch(activeBatchId)
     } catch (err: any) {
       alert(`파일 처리 실패: ${err.message}`)
