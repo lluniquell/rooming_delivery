@@ -183,7 +183,7 @@ export default function SoumBatch() {
         '', dateStr, o.name, o.phone, '',
         o.zipcode, o.address, '', o.orderNo,
         item.product_name, 1, '', '', o.message, '',
-        item.product_name, '',
+        '', '',
       ]
     })
 
