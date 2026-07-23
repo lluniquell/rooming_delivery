@@ -60,7 +60,7 @@ export default function SoumBatch() {
     const { data: itemData } = await supabase
       .from('order_items')
       .select('batch_id')
-      .in('status', ['confirmed', 'in_transit'])
+      .eq('status', 'confirmed')
 
     const countMap: Record<string, number> = {}
     for (const it of itemData ?? []) {
@@ -78,7 +78,7 @@ export default function SoumBatch() {
       .from('order_items')
       .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, delivery_method, status, orders!inner(cafe24_order_no, customer_name, tracking_number, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message)')
       .eq('batch_id', batchId)
-      .in('status', ['confirmed', 'in_transit'])
+      .eq('status', 'confirmed')
     const rows = ((data ?? []) as any[])
       .map(row => ({
         id: row.id,
