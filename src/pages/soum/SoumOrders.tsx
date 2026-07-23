@@ -232,7 +232,17 @@ export default function SoumOrders() {
         ? { type: 'conflict', text: `⚠️ 이미 배정된 상품이라 제외됨: ${[...orderNos].join(', ')}` }
         : null
     )
-    loadOrders()
+
+    // 서버 재조회 없이 방금 배정된 상품만 화면에서 바로 제거 (전체 재조회는 느림)
+    setGroups(prev => prev
+      .map(g => ({ ...g, items: g.items.filter(i => !updatedSet.has(i.id)) }))
+      .filter(g => g.items.length > 0)
+    )
+    setSelected(prev => {
+      const next = new Set(prev)
+      for (const id of updatedSet) next.delete(id)
+      return next
+    })
   }
 
   async function confirmAssign() {
