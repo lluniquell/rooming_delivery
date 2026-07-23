@@ -43,7 +43,20 @@ function RequireAccountManage({ driver, children }: { driver: Driver; children: 
 function defaultAdminPath(driver: Driver) {
   if (driver.is_superadmin || driver.permissions?.includes('admin')) return '/admin/dashboard'
   const firstGroup = PERMISSION_GROUPS.find(g => driver.permissions?.includes(g.key))
-  return firstGroup ? firstGroup.items[0].to : '/login'
+  // 권한이 하나도 없으면 /login으로 보내면 안 됨 — 이미 로그인된 상태라 / <-> /login 무한 리다이렉트 루프에 빠짐
+  return firstGroup ? firstGroup.items[0].to : '/admin/no-access'
+}
+
+function NoAccess({ driver }: { driver: Driver }) {
+  return (
+    <div className="max-w-md mx-auto mt-20 text-center">
+      <h2 className="text-lg font-bold text-gray-800 mb-2">부여된 권한이 없습니다</h2>
+      <p className="text-sm text-gray-500">
+        {driver.name}님 계정에 아직 메뉴 권한이 설정되지 않았어요.<br />
+        관리자에게 계정 관리에서 권한을 부여해달라고 요청해주세요.
+      </p>
+    </div>
+  )
 }
 
 function App() {
@@ -83,6 +96,7 @@ function App() {
           element={driver?.role === 'admin' ? <AdminLayout driver={driver} /> : <Navigate to="/login" />}
         >
           <Route index element={driver && <Navigate to={defaultAdminPath(driver)} replace />} />
+          <Route path="no-access" element={driver && <NoAccess driver={driver} />} />
           <Route path="dashboard" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminDashboard /></RequirePermission>} />
           <Route path="register" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminRegister /></RequirePermission>} />
           <Route path="assign" element={driver && <RequirePermission perm="delivery" driver={driver}><AdminAssign /></RequirePermission>} />
