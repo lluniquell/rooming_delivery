@@ -35,7 +35,7 @@ interface PendingOrder {
 
 export default function SoumOutgoing() {
   const [invoiceNo, setInvoiceNo] = useState('')
-  const [orderInfo, setOrderInfo] = useState<{ id: string; customer_name: string; tracking_number: string } | null>(null)
+  const [orderInfo, setOrderInfo] = useState<{ id: string; cafe24_order_no: string; customer_name: string; tracking_number: string } | null>(null)
   const [items, setItems] = useState<InspectItem[]>([])
   const [barcode, setBarcode] = useState('')
   const [modal, setModal] = useState<UnregisteredModal | null>(null)
@@ -71,7 +71,7 @@ export default function SoumOutgoing() {
   async function loadByTracking(tracking: string) {
     const { data: order } = await supabase
       .from('orders')
-      .select('id, customer_name, tracking_number')
+      .select('id, cafe24_order_no, customer_name, tracking_number')
       .eq('tracking_number', tracking)
       .maybeSingle()
 
@@ -117,11 +117,24 @@ export default function SoumOutgoing() {
           p_qty: i.quantity,
         }).then(() => {})
       }
-      // 검수 완료 → 상품 출고 처리 (TODO: 카페24 배송중 API 연동)
+      // 검수 완료 → 상품 출고 처리 + 카페24 배송중 전환
       supabase.from('order_items')
         .update({ status: 'in_transit' })
         .in('id', items.map(i => i.id))
-        .then(() => {
+        .then(async () => {
+          try {
+            const res = await fetch('/api/cafe24/ship-transit', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ order_nos: [orderInfo.cafe24_order_no] }),
+            })
+            const result = await res.json()
+            if (result.errors?.length) {
+              setMessage(`카페24 배송중 전환 실패: ${result.errors[0]}`)
+            }
+          } catch {
+            setMessage('카페24 배송중 전환 실패: 네트워크 오류')
+          }
           loadPending()
           setTimeout(() => {
             setDone(false)
