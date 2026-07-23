@@ -58,17 +58,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const token = await getToken()
 
-    const { start_date, end_date } = req.body ?? {}
+    const { start_date, end_date, order_status } = req.body ?? {}
     // 기본값은 KST 기준 (서버는 UTC로 돌므로 +9h 보정)
     const kstNow = (ms = 0) => new Date(Date.now() + 9 * 3600 * 1000 + ms).toISOString().slice(0, 10)
     const endDate = end_date ?? kstNow()
     const startDate = start_date ?? kstNow(-180 * 24 * 3600 * 1000)
+    // N20 = 배송준비중. 담당자가 상품준비를 마치고 카페24에서 이 상태로 넘긴 주문만 수집
+    const orderStatus = order_status ?? 'N20'
 
     // 100건씩 페이지네이션으로 전부 수집
     const cafe24Orders: any[] = []
     for (let offset = 0; offset < 5000; offset += 100) {
       const data = await cafe24Get(
-        `/api/v2/admin/orders?embed=items,receivers&limit=100&offset=${offset}&shop_no=1&start_date=${startDate}&end_date=${endDate}`,
+        `/api/v2/admin/orders?embed=items,receivers&limit=100&offset=${offset}&shop_no=1&start_date=${startDate}&end_date=${endDate}&order_status=${orderStatus}`,
         token
       )
       if (data.error) return res.status(400).json(data)

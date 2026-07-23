@@ -75,12 +75,20 @@ export default function SoumOutgoing() {
     // 같은 주문의 다른 배송방법(경동/직배) 상품은 tracking_number가 다르므로 절대 섞이지 않음
     const { data: itemData } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, cafe24_item_code, order_id, orders!inner(id, cafe24_order_no, customer_name)')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, cafe24_item_code, order_id, orders!inner(id, cafe24_order_no, customer_name, cancelled_at)')
       .eq('tracking_number', tracking)
       .eq('status', 'confirmed')
 
     if (!itemData?.length) {
       setMessage('해당 운송장번호의 검수 대기 상품이 없습니다. (이미 출고됐거나 배정 전)')
+      setItems([])
+      setOrderInfo(null)
+      return
+    }
+
+    // 출고 전 취소된 주문 — 검수/출고 진행 자체를 막고 경고만 표시
+    if ((itemData[0] as any).orders.cancelled_at) {
+      setMessage('⚠️ 취소 주문입니다. 출고하지 마세요.')
       setItems([])
       setOrderInfo(null)
       return
