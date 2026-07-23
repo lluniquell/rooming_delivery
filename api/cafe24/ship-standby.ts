@@ -2,8 +2,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 
 const MALL_ID = (process.env.VITE_CAFE24_MALL_ID ?? '').trim()
-// 카페24 관리자 기준 배송사 코드 (기본: CJ대한통운). 코드가 다르면 환경변수로 교체
-const CJ_CARRIER_CODE = (process.env.CAFE24_CJ_CARRIER_CODE ?? '0019').trim()
+// 카페24 배송사 코드 — "CJ대한통운(연동)" (API 연동용, 0006 "CJ대한통운"과는 별개).
+// /api/cafe24/carriers 조회로 확인: 0019=롯데택배(오배정 사례), 0006=CJ대한통운(수동), 1040=CJ대한통운(연동)
+const CJ_CARRIER_CODE = (process.env.CAFE24_CJ_CARRIER_CODE ?? '1040').trim()
 
 const supabase = createClient(
   (process.env.VITE_SUPABASE_URL ?? '').trim(),
