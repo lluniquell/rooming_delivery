@@ -18,7 +18,8 @@ export default function AdminAccounts() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [selected, setSelected] = useState<SelectableKey[]>([])
+  // 기본값 '관리자'(전체 메뉴) — 아무것도 안 건드리면 전체 권한, 좁히고 싶으면 직접 조정
+  const [selected, setSelected] = useState<SelectableKey[]>(['admin'])
   const [adding, setAdding] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -66,7 +67,7 @@ export default function AdminAccounts() {
 
     if (res.ok) {
       setMessage('계정 추가 완료!')
-      setName(''); setEmail(''); setPassword(''); setSelected([])
+      setName(''); setEmail(''); setPassword(''); setSelected(['admin'])
       load()
     } else {
       const err = await res.json()
