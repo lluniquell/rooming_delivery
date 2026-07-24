@@ -51,6 +51,7 @@ export default function SoumBatch() {
   const [items, setItems] = useState<Item[]>([])
   const [showPicking, setShowPicking] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => { loadBatches() }, [])
 
@@ -108,11 +109,16 @@ export default function SoumBatch() {
   }
 
   async function moveToHold(itemId: string) {
-    const { data: holdBatch } = await supabase.from('batches').select('id').eq('type', 'hold').single()
+    const holdBatch = batches.find(b => b.type === 'hold')
     if (!holdBatch) return
     await supabase.from('order_items').update({ batch_id: holdBatch.id }).eq('id', itemId)
-    if (activeBatchId) selectBatch(activeBatchId)
-    loadBatches()
+    // 서버 재조회 없이 로컬에서 바로 반영 (매번 전체 배치를 다시 불러오면 느림)
+    setItems(prev => prev.filter(i => i.id !== itemId))
+    setBatches(prev => prev.map(b => {
+      if (b.id === activeBatchId) return { ...b, item_count: Math.max(0, b.item_count - 1) }
+      if (b.id === holdBatch.id) return { ...b, item_count: b.item_count + 1 }
+      return b
+    }))
   }
 
   function buildPickingList() {
@@ -266,9 +272,25 @@ export default function SoumBatch() {
     }
   }
 
+  async function refresh() {
+    setRefreshing(true)
+    await loadBatches()
+    if (activeBatchId) await selectBatch(activeBatchId)
+    setRefreshing(false)
+  }
+
   return (
     <div className="max-w-5xl">
-      <h2 className="text-xl font-bold text-gray-800 mb-6">배치 현황</h2>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-xl font-bold text-gray-800">배치 현황</h2>
+        <button
+          onClick={refresh}
+          disabled={refreshing}
+          className="px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-200 text-gray-500 bg-white hover:bg-gray-50 disabled:opacity-50"
+        >
+          {refreshing ? '새로고침 중...' : '↻ 새로고침'}
+        </button>
+      </div>
 
       {/* 배치 카드 */}
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-6">
