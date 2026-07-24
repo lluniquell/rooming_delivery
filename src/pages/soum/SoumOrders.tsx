@@ -14,7 +14,8 @@ interface Item {
 interface OrderGroup {
   order_id: string
   cafe24_order_no: string
-  receiver_name: string
+  customer_name: string
+  receiver_name: string | null
   address: string | null
   order_date: string | null
   order_place_name: string | null
@@ -121,7 +122,8 @@ const OrderRow = memo(function OrderRow({
         />
         <span className="font-mono text-xs text-gray-500">{group.cafe24_order_no}</span>
         <ChannelBadge placeName={group.order_place_name} />
-        <span className="font-medium text-gray-800 text-sm">{group.receiver_name}</span>
+        <span className="text-gray-600 text-sm">{group.customer_name}</span>
+        <span className="font-medium text-gray-800 text-sm">{group.receiver_name || '-'}</span>
         {group.address && (
           <span className="text-xs text-gray-400 shrink-0">{regionOf(group.address)}</span>
         )}
@@ -262,7 +264,8 @@ export default function SoumOrders() {
         map[o.id] = {
           order_id: o.id,
           cafe24_order_no: o.cafe24_order_no,
-          receiver_name: o.receiver_name || o.customer_name,
+          customer_name: o.customer_name,
+          receiver_name: o.receiver_name,
           address: o.address,
           order_date: o.order_date,
           order_place_name: o.order_place_name,

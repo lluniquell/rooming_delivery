@@ -392,7 +392,8 @@ export default function SoumBatch() {
               <thead className="border-b bg-gray-50">
                 <tr>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">주문번호</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">수령인</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">주문자명</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">수령인명</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">상품</th>
                   <th className="text-center px-4 py-2 font-medium text-gray-500 text-xs w-12">수량</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">배송방법</th>
@@ -404,7 +405,8 @@ export default function SoumBatch() {
                 {items.map(item => (
                   <tr key={item.id} className="border-b last:border-0 hover:bg-gray-50">
                     <td className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{item.cafe24_order_no}</td>
-                    <td className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap">{item.customer_name}</td>
+                    <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{item.customer_name}</td>
+                    <td className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap">{item.receiver_name || '-'}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">
                       {item.brand && <span className="text-gray-400 text-xs mr-1.5">[{item.brand}]</span>}
                       {item.product_name}
