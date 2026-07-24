@@ -41,9 +41,9 @@ function methodOfBatch(name: string): string | null {
 }
 const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
 
-// 상세주소 없이 지역만 (예: "서울 강남구")
+// 동까지만 (예: "서울 강남구 도산대로83길")
 function regionOf(address: string) {
-  return address.split(/\s+/).slice(0, 2).join(' ')
+  return address.split(/\s+/).slice(0, 3).join(' ')
 }
 
 // 로컬(KST) 기준 날짜 — toISOString은 UTC라 오전 9시 전에 하루 밀림
@@ -436,10 +436,15 @@ export default function SoumOrders() {
                       className="rounded"
                     />
                     <span className="text-xs text-gray-400 w-24 shrink-0">{item.brand ?? '-'}</span>
-                    <span className="text-sm text-gray-800 flex-1">
-                      {item.product_name}
-                      {item.option_info && <span className="text-gray-400 text-xs ml-2">{item.option_info}</span>}
-                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-gray-800">
+                        {item.product_name}
+                        {item.option_info && <span className="text-gray-400 text-xs ml-2">{item.option_info}</span>}
+                      </div>
+                      {item.supplier_name && (
+                        <div className="text-[10px] text-gray-400 truncate">{item.supplier_name}</div>
+                      )}
+                    </div>
                     <span className="flex gap-2 text-[11px] shrink-0">
                       {DELIVERY_METHODS.map(m => {
                         const c = shipStats[item.product_code]?.[m] ?? 0
