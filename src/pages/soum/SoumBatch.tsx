@@ -174,7 +174,7 @@ export default function SoumBatch() {
     }
 
     // 택배 프로그램의 '합포장' 설정으로 같은 고객주문번호 여러 줄이 하나로 묶여 출력됨을 확인 —
-    // 상품마다 한 줄씩 나누고, 품목명은 각 줄의 실제 상품명, 박스수량은 항상 1
+    // 상품마다 한 줄씩 나누고, 품목명은 각 줄의 실제 상품명, 박스수량은 실제 주문 수량
     const orderInfo: Record<string, {
       orderNo: string; name: string; phone: string; zipcode: string
       address: string; message: string
@@ -204,13 +204,13 @@ export default function SoumBatch() {
     const d = new Date()
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-    // 상품마다 한 줄씩 — 같은 주문번호가 여러 줄에 반복됨, 박스수량은 항상 1
+    // 상품마다 한 줄씩 — 같은 주문번호가 여러 줄에 반복됨, 박스수량은 실제 주문 수량
     const dataRows = cjItems.map(item => {
       const o = orderInfo[item.cafe24_order_no]
       return [
         '', dateStr, o.name, o.phone, '',
         o.zipcode, o.address, '', o.orderNo,
-        item.product_name, 1, '', '', o.message, '',
+        item.product_name, item.quantity, '', '', o.message, '',
         '', '',
       ]
     })
