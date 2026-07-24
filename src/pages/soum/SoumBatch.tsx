@@ -221,6 +221,54 @@ export default function SoumBatch() {
     XLSX.writeFile(wb, `CJ송장_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
   }
 
+  // CJ "루밍" 지정형 레이아웃용 (내품수량 필드가 있는 커스텀 양식) — 박스수량은 항상 1,
+  // 실제 수량은 내품수량 컬럼에 넣음
+  function downloadCJUpload1() {
+    const cjItems = items.filter(i => i.delivery_method === 'CJ')
+    if (!cjItems.length) {
+      alert('이 배치에 CJ 배정 상품이 없습니다.')
+      return
+    }
+
+    const orderInfo: Record<string, {
+      orderNo: string; name: string; phone: string; zipcode: string
+      address: string; message: string
+    }> = {}
+    for (const item of cjItems) {
+      const key = item.cafe24_order_no
+      if (!orderInfo[key]) {
+        orderInfo[key] = {
+          orderNo: key,
+          name: item.receiver_name || item.customer_name,
+          phone: item.receiver_phone ?? '',
+          zipcode: item.zipcode ?? '',
+          address: item.address ?? '',
+          message: item.shipping_message ?? '',
+        }
+      }
+    }
+
+    const header = [
+      '받는분성명', '받는분전화번호', '받는분우편번호', '받는분주소(전체, 분할)',
+      '고객주문번호', '품목명', '내품수량', '배송메세지1', '품목명', '박스수량',
+    ]
+    const d = new Date()
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+    const dataRows = cjItems.map(item => {
+      const o = orderInfo[item.cafe24_order_no]
+      return [
+        o.name, o.phone, o.zipcode, o.address,
+        o.orderNo, item.product_name, item.quantity, o.message, '', 1,
+      ]
+    })
+
+    const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'CJ업로드1')
+    XLSX.writeFile(wb, `CJ업로드1_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
+  }
+
   async function uploadTracking(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -343,6 +391,12 @@ export default function SoumBatch() {
                   className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
                 >
                   CJ 송장 출력용 엑셀 다운로드
+                </button>
+                <button
+                  onClick={downloadCJUpload1}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600"
+                >
+                  CJ업로드1
                 </button>
                 <button
                   onClick={() => fileInputRef.current?.click()}
