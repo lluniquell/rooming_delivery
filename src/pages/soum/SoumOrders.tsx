@@ -27,7 +27,7 @@ interface Batch {
   type: string
 }
 
-const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버']
+const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버', '업체배송']
 const PAGE_SIZE = 500
 
 // 배치 이름으로 배송방법을 유추 — 어느 바구니에 넣느냐가 곧 배송방법 지정이라,
@@ -37,6 +37,7 @@ function methodOfBatch(name: string): string | null {
   if (name.includes('경동')) return '경동'
   if (name.includes('직배')) return '직배'
   if (name.includes('팀무버')) return '팀무버'
+  if (name.includes('업체배송')) return '업체배송'
   return null
 }
 const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
