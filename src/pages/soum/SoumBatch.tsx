@@ -18,6 +18,7 @@ interface Item {
   brand: string | null
   supplier_name: string | null
   quantity: number
+  inspected_qty: number
   delivery_method: string | null
   status: string
   cafe24_item_code: string | null
@@ -88,7 +89,7 @@ export default function SoumBatch() {
     setLoading(true)
     const { data } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, delivery_method, status, cafe24_item_code, tracking_number, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message)')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message)')
       .eq('batch_id', batchId)
       .eq('status', 'confirmed')
     const rows = ((data ?? []) as any[])
@@ -100,6 +101,7 @@ export default function SoumBatch() {
         brand: row.brand,
         supplier_name: row.supplier_name,
         quantity: row.quantity,
+        inspected_qty: row.inspected_qty,
         delivery_method: row.delivery_method,
         status: row.status,
         cafe24_item_code: row.cafe24_item_code,
@@ -151,12 +153,17 @@ export default function SoumBatch() {
     }> = {}
 
     for (const item of items) {
+      // 이미 바코드 검수 끝난(출고검수1에서 스캔 완료된) 수량은 다시 픽킹할 필요 없음 —
+      // 아직 안 채워진 나머지 수량만 픽킹리스트에 반영 (예: 보류 배치에서 B만 남은 경우)
+      const remaining = item.quantity - item.inspected_qty
+      if (remaining <= 0) continue
+
       const supplier = item.supplier_name ?? ''
       const location = supplier.match(LOC_REGEX)?.[0] ?? ''
       const supplier_note = supplier.replace(LOC_REGEX, '').replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '').trim()
       const key = `${item.product_code}__${item.option_info ?? ''}`
       if (merged[key]) {
-        merged[key].quantity += item.quantity
+        merged[key].quantity += remaining
       } else {
         merged[key] = {
           location,
@@ -164,7 +171,7 @@ export default function SoumBatch() {
           product_name: item.product_name,
           option_info: item.option_info ?? '',
           supplier_note,
-          quantity: item.quantity,
+          quantity: remaining,
         }
       }
     }
