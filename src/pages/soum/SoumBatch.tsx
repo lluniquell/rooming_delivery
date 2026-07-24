@@ -148,8 +148,8 @@ export default function SoumBatch() {
     }
     const rows = Object.values(merged)
     return pickingSort === 'brand'
-      ? rows.sort((a, b) => b.brand.localeCompare(a.brand))
-      : rows.sort((a, b) => b.location.localeCompare(a.location))
+      ? rows.sort((a, b) => a.brand.localeCompare(b.brand))
+      : rows.sort((a, b) => a.location.localeCompare(b.location))
   }
 
   const activeBatch = batches.find(b => b.id === activeBatchId)
@@ -427,7 +427,7 @@ export default function SoumBatch() {
                       : 'text-gray-600 border-gray-300 hover:border-indigo-400'
                   }`}
                 >
-                  로케이션 내림차순
+                  로케이션 오름차순
                 </button>
                 <button
                   onClick={() => setPickingSort('brand')}
@@ -437,7 +437,7 @@ export default function SoumBatch() {
                       : 'text-gray-600 border-gray-300 hover:border-indigo-400'
                   }`}
                 >
-                  브랜드명 내림차순
+                  브랜드명 오름차순
                 </button>
                 <button
                   onClick={() => setShowPicking(false)}
