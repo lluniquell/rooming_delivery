@@ -41,6 +41,11 @@ function methodOfBatch(name: string): string | null {
 }
 const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
 
+// 상세주소 없이 지역만 (예: "서울 강남구")
+function regionOf(address: string) {
+  return address.split(/\s+/).slice(0, 2).join(' ')
+}
+
 // 로컬(KST) 기준 날짜 — toISOString은 UTC라 오전 9시 전에 하루 밀림
 const fmtDate = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -72,6 +77,7 @@ export default function SoumOrders() {
   const [assignWarn, setAssignWarn] = useState<{ type: 'error' | 'conflict'; text: string } | null>(null)
   const [page, setPage] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
+  const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null)
 
   function applyPreset(preset: typeof PRESETS[0]) {
     setStartDate(preset.start())
@@ -269,11 +275,16 @@ export default function SoumOrders() {
     const checkedInGroup = group.items.filter(i => selected.has(i.id))
     const targets = checkedInGroup.length ? checkedInGroup : group.items
     const method = methodOfBatch(batch.name)
-    await assignItems(targets.map(i => i.id), {
-      batch_id: batch.id,
-      status: 'confirmed',
-      ...(method && { delivery_method: method }),
-    })
+    setAssigningOrderId(group.order_id)
+    try {
+      await assignItems(targets.map(i => i.id), {
+        batch_id: batch.id,
+        status: 'confirmed',
+        ...(method && { delivery_method: method }),
+      })
+    } finally {
+      setAssigningOrderId(null)
+    }
   }
 
   function locationOf(item: Item) {
@@ -386,18 +397,22 @@ export default function SoumOrders() {
                   <span className="font-mono text-xs text-gray-500">{group.cafe24_order_no}</span>
                   <span className="font-medium text-gray-800 text-sm">{group.receiver_name}</span>
                   {group.address && (
-                    <span className="text-xs text-gray-400 truncate max-w-xs">{group.address}</span>
+                    <span className="text-xs text-gray-400 shrink-0">{regionOf(group.address)}</span>
                   )}
                   <span className="text-xs text-gray-400">
                     {group.order_date ? new Date(group.order_date).toLocaleDateString('ko-KR') : '-'}
                   </span>
                   <div className="flex gap-1 ml-auto" onClick={e => e.stopPropagation()}>
+                    {assigningOrderId === group.order_id && (
+                      <span className="text-xs text-gray-400 self-center mr-1">배정 중...</span>
+                    )}
                     {batches.map(b => (
                       <button
                         key={b.id}
                         onClick={() => quickAssign(group, b)}
+                        disabled={assigningOrderId === group.order_id}
                         title={`${b.batch_no}번 ${b.name}으로 배정`}
-                        className="px-2 py-1 rounded text-xs font-medium border border-gray-200 text-gray-500 bg-white hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-colors"
+                        className="px-2 py-1 rounded text-xs font-medium border border-gray-200 text-gray-500 bg-white hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:text-gray-500"
                       >
                         {b.name}
                       </button>
