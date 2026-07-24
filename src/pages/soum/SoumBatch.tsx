@@ -50,6 +50,7 @@ export default function SoumBatch() {
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null)
   const [items, setItems] = useState<Item[]>([])
   const [showPicking, setShowPicking] = useState(false)
+  const [pickingSort, setPickingSort] = useState<'location' | 'brand'>('location')
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -145,7 +146,10 @@ export default function SoumBatch() {
         }
       }
     }
-    return Object.values(merged).sort((a, b) => a.location.localeCompare(b.location))
+    const rows = Object.values(merged)
+    return pickingSort === 'brand'
+      ? rows.sort((a, b) => b.brand.localeCompare(a.brand))
+      : rows.sort((a, b) => b.location.localeCompare(a.location))
   }
 
   const activeBatch = batches.find(b => b.id === activeBatchId)
@@ -345,14 +349,10 @@ export default function SoumBatch() {
                   className="hidden"
                 />
                 <button
-                  onClick={() => setShowPicking(v => !v)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
-                    showPicking
-                      ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                      : 'bg-green-600 text-white hover:bg-green-700'
-                  }`}
+                  onClick={() => setShowPicking(true)}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700"
                 >
-                  {showPicking ? '상품 목록' : '픽킹리스트'}
+                  픽킹리스트
                 </button>
               </div>
             )}
@@ -362,31 +362,6 @@ export default function SoumBatch() {
             <div className="p-12 text-center text-gray-400 text-sm">불러오는 중...</div>
           ) : items.length === 0 ? (
             <div className="p-12 text-center text-gray-400 text-sm">이 배치에 상품이 없습니다</div>
-          ) : showPicking ? (
-            <table className="w-full text-sm">
-              <thead className="border-b bg-gray-50">
-                <tr>
-                  <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">로케이션</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">브랜드</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">상품명</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">옵션</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">공급사</th>
-                  <th className="text-center px-3 py-2 font-medium text-gray-500 text-xs w-12">수량</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pickingList.map((item, i) => (
-                  <tr key={i} className="border-b last:border-0">
-                    <td className="px-3 py-2.5 font-mono text-xs text-indigo-600 whitespace-nowrap">{item.location || '-'}</td>
-                    <td className="px-3 py-2.5 text-xs text-gray-500">{item.brand || '-'}</td>
-                    <td className="px-3 py-2.5 text-sm text-gray-800">{item.product_name}</td>
-                    <td className="px-3 py-2.5 text-xs text-gray-500">{item.option_info || '-'}</td>
-                    <td className="px-3 py-2.5 text-xs text-gray-400">{item.supplier_note || '-'}</td>
-                    <td className="px-3 py-2.5 text-center font-bold text-gray-800">{item.quantity}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           ) : (
             <table className="w-full text-sm">
               <thead className="border-b bg-gray-50">
@@ -432,6 +407,73 @@ export default function SoumBatch() {
               </tbody>
             </table>
           )}
+        </div>
+      )}
+
+      {showPicking && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col">
+            <div className="px-5 py-3 border-b flex items-center justify-between shrink-0">
+              <h3 className="font-bold text-gray-800">
+                픽킹리스트 <span className="text-gray-400 font-normal text-sm ml-1">{activeBatch?.name}</span>
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-400 mr-1">정렬</span>
+                <button
+                  onClick={() => setPickingSort('location')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    pickingSort === 'location'
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'text-gray-600 border-gray-300 hover:border-indigo-400'
+                  }`}
+                >
+                  로케이션 내림차순
+                </button>
+                <button
+                  onClick={() => setPickingSort('brand')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors ${
+                    pickingSort === 'brand'
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'text-gray-600 border-gray-300 hover:border-indigo-400'
+                  }`}
+                >
+                  브랜드명 내림차순
+                </button>
+                <button
+                  onClick={() => setShowPicking(false)}
+                  className="ml-2 text-gray-400 hover:text-gray-600 text-xl leading-none px-1"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+            <div className="overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">로케이션</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">브랜드</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">상품명</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">옵션</th>
+                    <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">공급사</th>
+                    <th className="text-center px-3 py-2 font-medium text-gray-500 text-xs w-12">수량</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pickingList.map((item, i) => (
+                    <tr key={i} className="border-b last:border-0">
+                      <td className="px-3 py-2.5 font-mono text-xs text-indigo-600 whitespace-nowrap">{item.location || '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-gray-500">{item.brand || '-'}</td>
+                      <td className="px-3 py-2.5 text-sm text-gray-800">{item.product_name}</td>
+                      <td className="px-3 py-2.5 text-xs text-gray-500">{item.option_info || '-'}</td>
+                      <td className="px-3 py-2.5 text-xs text-gray-400">{item.supplier_note || '-'}</td>
+                      <td className="px-3 py-2.5 text-center font-bold text-gray-800">{item.quantity}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
     </div>
