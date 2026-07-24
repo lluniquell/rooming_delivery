@@ -45,6 +45,15 @@ const STATUS_COLOR: Record<string, string> = {
 
 const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
 
+// 출력 시점 표시용 — YYYYMMDD HH:SS
+function printTimestamp() {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const date = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+  const time = `${pad(d.getHours())}:${pad(d.getSeconds())}`
+  return `${date} ${time}`
+}
+
 export default function SoumBatch() {
   const [batches, setBatches] = useState<Batch[]>([])
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null)
@@ -462,7 +471,7 @@ export default function SoumBatch() {
               </div>
             </div>
             <p className="hidden print:block px-5 pt-4 text-sm font-bold text-gray-800">
-              픽킹리스트 — {activeBatch?.name}
+              픽킹리스트 — {activeBatch?.name} <span className="font-normal text-gray-400">{printTimestamp()}</span>
             </p>
             <div className="overflow-y-auto print:overflow-visible">
               <table className="w-full text-sm">
