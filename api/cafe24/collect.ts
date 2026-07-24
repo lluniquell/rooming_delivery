@@ -177,12 +177,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ids = cafe24Orders.map(o => o.order_id)
     const { data: existing } = await supabase
       .from('orders')
-      .select('id, cafe24_order_no, receiver_name, order_items(count)')
+      .select('id, cafe24_order_no, receiver_name, order_place_name, order_items(count)')
       .in('cafe24_order_no', ids)
     const existingMap = new Map(
       (existing ?? []).map((e: any) => [
         e.cafe24_order_no,
-        { id: e.id, hasReceiver: !!e.receiver_name, itemCount: e.order_items?.[0]?.count ?? 0 },
+        { id: e.id, hasReceiver: !!e.receiver_name, hasPlaceName: !!e.order_place_name, itemCount: e.order_items?.[0]?.count ?? 0 },
       ])
     )
 
@@ -197,6 +197,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           // 이미 수집된 주문 — 빠진 정보만 보충
           if (!existed.hasReceiver && order.receivers?.[0]) {
             await supabase.from('orders').update(receiverFieldsOf(order)).eq('id', existed.id)
+          }
+          if (!existed.hasPlaceName && order.order_place_name) {
+            await supabase.from('orders').update({ order_place_name: order.order_place_name }).eq('id', existed.id)
           }
           if (existed.itemCount === 0) {
             const rows = itemRowsOf(order, existed.id)
@@ -231,6 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           customer_name: order.billing_name,
           order_date: order.order_date,
           status: order.items?.[0]?.order_status ?? orderStatus,
+          order_place_name: order.order_place_name ?? null,
           ...receiverFieldsOf(order),
         }).select('id').single()
 

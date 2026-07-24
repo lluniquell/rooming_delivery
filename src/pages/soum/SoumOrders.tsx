@@ -17,6 +17,7 @@ interface OrderGroup {
   receiver_name: string
   address: string | null
   order_date: string | null
+  order_place_name: string | null
   items: Item[]
 }
 
@@ -49,6 +50,26 @@ function regionOf(address: string) {
 
 function locationOf(item: Item) {
   return item.supplier_name?.match(LOC_REGEX)?.[0] ?? ''
+}
+
+// 주문경로 텍스트로 판단 — 정확한 코드값 대신 이름 텍스트 매칭이라 표기가 바뀌어도 웬만하면 잡힘
+function ChannelBadge({ placeName }: { placeName: string | null }) {
+  if (!placeName) return null
+  if (placeName.includes('카카오')) {
+    return (
+      <span title={placeName} className="w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold shrink-0" style={{ backgroundColor: '#FEE500', color: '#391B1B' }}>
+        K
+      </span>
+    )
+  }
+  if (placeName.includes('스마트스토어') || placeName.includes('네이버')) {
+    return (
+      <span title={placeName} className="w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold shrink-0 text-white" style={{ backgroundColor: '#03C75A' }}>
+        N
+      </span>
+    )
+  }
+  return null
 }
 
 // 로컬(KST) 기준 날짜 — toISOString은 UTC라 오전 9시 전에 하루 밀림
@@ -99,6 +120,7 @@ const OrderRow = memo(function OrderRow({
           className="rounded"
         />
         <span className="font-mono text-xs text-gray-500">{group.cafe24_order_no}</span>
+        <ChannelBadge placeName={group.order_place_name} />
         <span className="font-medium text-gray-800 text-sm">{group.receiver_name}</span>
         {group.address && (
           <span className="text-xs text-gray-400 shrink-0">{regionOf(group.address)}</span>
@@ -225,7 +247,7 @@ export default function SoumOrders() {
     const to = from + PAGE_SIZE - 1
     const { data, count } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, status)', { count: 'exact' })
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, order_place_name, status)', { count: 'exact' })
       .eq('status', 'collected')
       .is('batch_id', null)
       .eq('orders.status', 'N20')
@@ -243,6 +265,7 @@ export default function SoumOrders() {
           receiver_name: o.receiver_name || o.customer_name,
           address: o.address,
           order_date: o.order_date,
+          order_place_name: o.order_place_name,
           items: [],
         }
       }
