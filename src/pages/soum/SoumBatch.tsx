@@ -131,6 +131,19 @@ export default function SoumBatch() {
     }))
   }
 
+  // 배정을 취소하고 "주문 수집" 화면의 미배정 목록으로 되돌림
+  async function moveToUnassigned(itemId: string) {
+    if (!confirm('이 상품을 배정 취소하고 주문 수집(미배정) 목록으로 되돌릴까요?')) return
+    await supabase.from('order_items')
+      .update({ status: 'collected', batch_id: null, delivery_method: null })
+      .eq('id', itemId)
+    // 서버 재조회 없이 로컬에서 바로 반영
+    setItems(prev => prev.filter(i => i.id !== itemId))
+    setBatches(prev => prev.map(b =>
+      b.id === activeBatchId ? { ...b, item_count: Math.max(0, b.item_count - 1) } : b
+    ))
+  }
+
   function buildPickingList() {
     const merged: Record<string, {
       location: string; brand: string; product_name: string
@@ -457,7 +470,13 @@ export default function SoumBatch() {
                         {STATUS_LABEL[item.status] ?? item.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <button
+                        onClick={() => moveToUnassigned(item.id)}
+                        className="text-xs text-gray-300 hover:text-indigo-400 transition-colors mr-3"
+                      >
+                        미배정으로
+                      </button>
                       <button
                         onClick={() => moveToHold(item.id)}
                         className="text-xs text-gray-300 hover:text-orange-400 transition-colors"
