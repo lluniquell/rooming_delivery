@@ -411,9 +411,17 @@ export default function SoumBatch() {
       )}
 
       {showPicking && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col">
-            <div className="px-5 py-3 border-b flex items-center justify-between shrink-0">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 print:static print:bg-white print:p-0">
+          {/* 인쇄 시 이 팝업(picking-print-area)만 남기고 나머지 화면은 전부 숨김 */}
+          <style>{`
+            @media print {
+              body * { visibility: hidden; }
+              .picking-print-area, .picking-print-area * { visibility: visible; }
+              .picking-print-area { position: absolute; left: 0; top: 0; width: 100%; }
+            }
+          `}</style>
+          <div className="picking-print-area bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col print:rounded-none print:shadow-none print:max-h-none print:max-w-none">
+            <div className="px-5 py-3 border-b flex items-center justify-between shrink-0 print:hidden">
               <h3 className="font-bold text-gray-800">
                 픽킹리스트 <span className="text-gray-400 font-normal text-sm ml-1">{activeBatch?.name}</span>
               </h3>
@@ -440,6 +448,12 @@ export default function SoumBatch() {
                   브랜드명 오름차순
                 </button>
                 <button
+                  onClick={() => window.print()}
+                  className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:border-indigo-400 ml-2"
+                >
+                  인쇄
+                </button>
+                <button
                   onClick={() => setShowPicking(false)}
                   className="ml-2 text-gray-400 hover:text-gray-600 text-xl leading-none px-1"
                 >
@@ -447,9 +461,12 @@ export default function SoumBatch() {
                 </button>
               </div>
             </div>
-            <div className="overflow-y-auto">
+            <p className="hidden print:block px-5 pt-4 text-sm font-bold text-gray-800">
+              픽킹리스트 — {activeBatch?.name}
+            </p>
+            <div className="overflow-y-auto print:overflow-visible">
               <table className="w-full text-sm">
-                <thead className="border-b bg-gray-50 sticky top-0">
+                <thead className="border-b bg-gray-50 sticky top-0 print:static">
                   <tr>
                     <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">로케이션</th>
                     <th className="text-left px-3 py-2 font-medium text-gray-500 text-xs">브랜드</th>
@@ -461,7 +478,7 @@ export default function SoumBatch() {
                 </thead>
                 <tbody>
                   {pickingList.map((item, i) => (
-                    <tr key={i} className="border-b last:border-0">
+                    <tr key={i} className="border-b last:border-0 print:break-inside-avoid">
                       <td className="px-3 py-2.5 font-mono text-xs text-indigo-600 whitespace-nowrap">{item.location || '-'}</td>
                       <td className="px-3 py-2.5 text-xs text-gray-500">{item.brand || '-'}</td>
                       <td className="px-3 py-2.5 text-sm text-gray-800">{item.product_name}</td>
