@@ -177,12 +177,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ids = cafe24Orders.map(o => o.order_id)
     const { data: existing } = await supabase
       .from('orders')
-      .select('id, cafe24_order_no, receiver_name, order_place_name, order_items(count)')
+      .select('id, cafe24_order_no, status, receiver_name, order_place_name, order_items(count)')
       .in('cafe24_order_no', ids)
     const existingMap = new Map(
       (existing ?? []).map((e: any) => [
         e.cafe24_order_no,
-        { id: e.id, hasReceiver: !!e.receiver_name, hasPlaceName: !!e.order_place_name, itemCount: e.order_items?.[0]?.count ?? 0 },
+        { id: e.id, status: e.status, hasReceiver: !!e.receiver_name, hasPlaceName: !!e.order_place_name, itemCount: e.order_items?.[0]?.count ?? 0 },
       ])
     )
 
@@ -200,6 +200,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
           if (!existed.hasPlaceName && order.order_place_name) {
             await supabase.from('orders').update({ order_place_name: order.order_place_name }).eq('id', existed.id)
+          }
+          // 이 조회 자체가 order_status=N20 필터라, 여기 걸린 주문은 지금 카페24에서 N20이 맞음.
+          // 예전에 N20이 아니게(N10 등) 갱신됐다가 다시 N20으로 돌아온 경우 여기서 다시 맞춰줌
+          const currentStatus = order.items?.[0]?.order_status ?? orderStatus
+          if (existed.status !== currentStatus) {
+            await supabase.from('orders').update({ status: currentStatus }).eq('id', existed.id)
           }
           if (existed.itemCount === 0) {
             const rows = itemRowsOf(order, existed.id)
