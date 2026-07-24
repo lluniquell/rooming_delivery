@@ -80,6 +80,7 @@ function itemRowsOf(order: any, dbOrderId: string) {
   return items.map((item: any) => ({
     order_id: dbOrderId,
     cafe24_item_code: item.order_item_code ?? null,
+    order_status: item.order_status ?? null,
     product_code: item.variant_code ?? item.product_code ?? '',
     product_name: item.product_name ?? '',
     option_info: item.option_value || null,
@@ -131,40 +132,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (page.length < 100) break
     }
 
-    // orders.status에는 카페24의 실제 order_status 코드(N20, N10, C00 등)를 그대로 저장.
-    // 이미 수집됐지만 아직 배치 미배정인 주문들의 현재 상태를 다시 조회해서, N20이 아니게
-    // 바뀐 것들은 실제 값으로 갱신 — 주문 수집 화면은 status='N20'인 것만 보여주므로 자동으로 숨겨짐
+    // order_items.order_status에 카페24의 실제 상태 코드(N20, N40, E40 등)를 상품 단위로 저장.
+    // 한 주문 안에서도 상품마다 상태가 다를 수 있음(배송완료/교환완료/배송준비중이 한 주문에
+    // 섞여있는 실제 사례 확인) — 그래서 주문 단위가 아니라 상품 단위로 추적해야 함.
+    // 이미 수집됐지만 아직 배치 미배정인 상품들 중 N20이 아니게 바뀐 게 있으면 실제 값으로 갱신
+    // — 주문 수집 화면은 order_status='N20'인 상품만 보여주므로 자동으로 숨겨짐
     let notReady = 0
     {
       const { data: pendingRows } = await supabase
         .from('order_items')
-        .select('orders!inner(id, cafe24_order_no, status)')
+        .select('id, cafe24_item_code, orders!inner(cafe24_order_no)')
         .eq('status', 'collected')
         .is('batch_id', null)
-        .eq('orders.status', 'N20')
-      const pendingMap = new Map<string, string>()
+        .eq('order_status', 'N20')
+      const byOrderNo = new Map<string, { id: string; cafe24_item_code: string }[]>()
       for (const row of (pendingRows ?? []) as any[]) {
-        pendingMap.set(row.orders.cafe24_order_no, row.orders.id)
+        const no = row.orders.cafe24_order_no
+        if (!row.cafe24_item_code) continue
+        if (!byOrderNo.has(no)) byOrderNo.set(no, [])
+        byOrderNo.get(no)!.push({ id: row.id, cafe24_item_code: row.cafe24_item_code })
       }
-      const pendingNos = [...pendingMap.keys()]
-      for (let i = 0; i < pendingNos.length; i += 50) {
-        const chunk = pendingNos.slice(i, i + 50)
-        // order_status는 주문이 아니라 상품(item) 단위 필드라 embed=items로 조회해서 읽어야 함.
+      const orderNos = [...byOrderNo.keys()]
+      for (let i = 0; i < orderNos.length; i += 50) {
+        const chunk = orderNos.slice(i, i + 50)
         // order_id 지정 시 날짜 파라미터 없이도 조회 가능 (날짜 필터엔 3개월 제한이 있어서 회피)
         const data = await cafe24Get(
           `/api/v2/admin/orders?order_id=${chunk.join(',')}&embed=items&shop_no=1&limit=${chunk.length}`,
           token
         )
-        const statusMap = new Map<string, string>(
-          (data.orders ?? [])
-            .filter((o: any) => o.items?.[0]?.order_status)
-            .map((o: any) => [o.order_id, o.items[0].order_status])
-        )
+        const itemsByOrder = new Map<string, any[]>((data.orders ?? []).map((o: any) => [o.order_id, o.items ?? []]))
         for (const no of chunk) {
-          const st = statusMap.get(no)
-          if (st && st !== 'N20') {
-            await supabase.from('orders').update({ status: st }).eq('id', pendingMap.get(no)!)
-            notReady++
+          const liveItems = itemsByOrder.get(no) ?? []
+          for (const pendingItem of byOrderNo.get(no) ?? []) {
+            const match = liveItems.find((i: any) => i.order_item_code === pendingItem.cafe24_item_code)
+            if (match?.order_status && match.order_status !== 'N20') {
+              await supabase.from('order_items').update({ order_status: match.order_status }).eq('id', pendingItem.id)
+              notReady++
+            }
           }
         }
       }
@@ -177,12 +181,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ids = cafe24Orders.map(o => o.order_id)
     const { data: existing } = await supabase
       .from('orders')
-      .select('id, cafe24_order_no, status, receiver_name, order_place_name, order_items(count)')
+      .select('id, cafe24_order_no, receiver_name, order_place_name, order_items(count)')
       .in('cafe24_order_no', ids)
     const existingMap = new Map(
       (existing ?? []).map((e: any) => [
         e.cafe24_order_no,
-        { id: e.id, status: e.status, hasReceiver: !!e.receiver_name, hasPlaceName: !!e.order_place_name, itemCount: e.order_items?.[0]?.count ?? 0 },
+        { id: e.id, hasReceiver: !!e.receiver_name, hasPlaceName: !!e.order_place_name, itemCount: e.order_items?.[0]?.count ?? 0 },
       ])
     )
 
@@ -201,12 +205,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (!existed.hasPlaceName && order.order_place_name) {
             await supabase.from('orders').update({ order_place_name: order.order_place_name }).eq('id', existed.id)
           }
-          // 이 조회 자체가 order_status=N20 필터라, 여기 걸린 주문은 지금 카페24에서 N20이 맞음.
-          // 예전에 N20이 아니게(N10 등) 갱신됐다가 다시 N20으로 돌아온 경우 여기서 다시 맞춰줌
-          const currentStatus = order.items?.[0]?.order_status ?? orderStatus
-          if (existed.status !== currentStatus) {
-            await supabase.from('orders').update({ status: currentStatus }).eq('id', existed.id)
-          }
           if (existed.itemCount === 0) {
             const rows = itemRowsOf(order, existed.id)
             if (rows.length) {
@@ -215,20 +213,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               itemsBackfilled++
             }
           } else {
-            // cafe24_item_code 컬럼 추가 이전에 수집된 상품 행 보정 (상품코드 매칭, 중복 시 순서대로 매칭)
-            const { data: missing } = await supabase
+            // 기존 상품 행 보정: cafe24_item_code 없으면 상품코드로 매칭해서 채우고,
+            // order_item_code로 매칭되면 상품별 order_status도 최신 값으로 맞춰줌
+            const { data: existingItems } = await supabase
               .from('order_items')
-              .select('id, product_code')
+              .select('id, product_code, cafe24_item_code, order_status')
               .eq('order_id', existed.id)
-              .is('cafe24_item_code', null)
-            if (missing?.length) {
-              const pool = [...(order.items ?? [])]
-              for (const row of missing) {
+            const pool = [...(order.items ?? [])]
+            for (const row of existingItems ?? []) {
+              let match = row.cafe24_item_code
+                ? pool.find((i: any) => i.order_item_code === row.cafe24_item_code)
+                : undefined
+              if (!match && !row.cafe24_item_code) {
                 const idx = pool.findIndex((i: any) => (i.variant_code ?? i.product_code ?? '') === row.product_code)
-                if (idx >= 0) {
-                  const [matched] = pool.splice(idx, 1)
-                  await supabase.from('order_items').update({ cafe24_item_code: matched.order_item_code ?? null }).eq('id', row.id)
-                }
+                if (idx >= 0) match = pool.splice(idx, 1)[0]
+              }
+              if (!match) continue
+              const patch: Record<string, any> = {}
+              if (!row.cafe24_item_code && match.order_item_code) patch.cafe24_item_code = match.order_item_code
+              if (match.order_status && match.order_status !== row.order_status) patch.order_status = match.order_status
+              if (Object.keys(patch).length) {
+                await supabase.from('order_items').update(patch).eq('id', row.id)
               }
             }
           }
@@ -239,7 +244,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           cafe24_order_no: order.order_id,
           customer_name: order.billing_name,
           order_date: order.order_date,
-          status: order.items?.[0]?.order_status ?? orderStatus,
           order_place_name: order.order_place_name ?? null,
           ...receiverFieldsOf(order),
         }).select('id').single()

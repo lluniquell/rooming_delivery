@@ -247,10 +247,10 @@ export default function SoumOrders() {
     const to = from + PAGE_SIZE - 1
     const { data, count } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, order_place_name, status)', { count: 'exact' })
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, order_place_name)', { count: 'exact' })
       .eq('status', 'collected')
       .is('batch_id', null)
-      .eq('orders.status', 'N20')
+      .eq('order_status', 'N20')
       .order('order_date', { referencedTable: 'orders', ascending: false })
       .range(from, to)
     setTotalCount(count ?? 0)
