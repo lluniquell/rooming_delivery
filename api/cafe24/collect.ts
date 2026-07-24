@@ -181,12 +181,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const ids = cafe24Orders.map(o => o.order_id)
     const { data: existing } = await supabase
       .from('orders')
-      .select('id, cafe24_order_no, receiver_name, order_place_name, order_items(count)')
+      .select('id, cafe24_order_no, order_place_name, order_items(count)')
       .in('cafe24_order_no', ids)
     const existingMap = new Map(
       (existing ?? []).map((e: any) => [
         e.cafe24_order_no,
-        { id: e.id, hasReceiver: !!e.receiver_name, hasPlaceName: !!e.order_place_name, itemCount: e.order_items?.[0]?.count ?? 0 },
+        { id: e.id, hasPlaceName: !!e.order_place_name, itemCount: e.order_items?.[0]?.count ?? 0 },
       ])
     )
 
@@ -198,8 +198,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const existed = existingMap.get(order.order_id)
       try {
         if (existed) {
-          // 이미 수집된 주문 — 빠진 정보만 보충
-          if (!existed.hasReceiver && order.receivers?.[0]) {
+          // 이미 수집된 주문 — 수령인 정보는 이 조회에서 받아온 최신 값으로 항상 덮어씀
+          // (예전엔 비어있을 때만 채워서, 한 번 잘못/기본값으로 들어간 뒤엔 영영 안 고쳐졌음)
+          if (order.receivers?.[0]) {
             await supabase.from('orders').update(receiverFieldsOf(order)).eq('id', existed.id)
           }
           if (!existed.hasPlaceName && order.order_place_name) {
