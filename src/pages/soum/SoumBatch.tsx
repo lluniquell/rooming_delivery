@@ -45,12 +45,12 @@ const STATUS_COLOR: Record<string, string> = {
 
 const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
 
-// 출력 시점 표시용 — YYYYMMDD HH:SS
+// 출력 시점 표시용 — YYYYMMDD HH:MM:SS
 function printTimestamp() {
   const d = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
   const date = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
-  const time = `${pad(d.getHours())}:${pad(d.getSeconds())}`
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
   return `${date} ${time}`
 }
 
