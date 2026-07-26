@@ -268,7 +268,7 @@ export default function SoumOrders() {
       .eq('status', 'collected')
       .is('batch_id', null)
       .eq('order_status', 'N20')
-      .order('cafe24_order_no', { referencedTable: 'orders', ascending: sort === 'asc' })
+      .order('orders(cafe24_order_no)', { ascending: sort === 'asc' })
       .order('id', { ascending: true })
       .range(from, to)
     setTotalCount(count ?? 0)
