@@ -30,7 +30,7 @@ interface Batch {
 }
 
 const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버', '업체배송']
-const PAGE_SIZE = 500
+const PAGE_SIZE = 100
 
 // 배치 이름으로 배송방법을 유추 — 어느 바구니에 넣느냐가 곧 배송방법 지정이라,
 // 배정 시점에 자동으로 order_items.delivery_method에 찍어둠 (보류로 옮겨도 이 값은 안 바뀜)
