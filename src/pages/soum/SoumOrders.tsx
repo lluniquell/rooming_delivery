@@ -227,6 +227,7 @@ export default function SoumOrders() {
   const [assignWarn, setAssignWarn] = useState<{ type: 'error' | 'conflict'; text: string } | null>(null)
   const [page, setPage] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
+  const [orderSort, setOrderSort] = useState<'asc' | 'desc'>('desc')
   const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null)
   // 배정된 상품 id — groups 배열에서는 안 지우고 여기만 기록해서 화면에서 invisible 처리함
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set())
@@ -258,7 +259,7 @@ export default function SoumOrders() {
     setLastCollected(data?.value || null)
   }
 
-  async function loadOrders(pageNum = page) {
+  async function loadOrders(pageNum = page, sort = orderSort) {
     const from = pageNum * PAGE_SIZE
     const to = from + PAGE_SIZE - 1
     const { data, count } = await supabase
@@ -267,7 +268,7 @@ export default function SoumOrders() {
       .eq('status', 'collected')
       .is('batch_id', null)
       .eq('order_status', 'N20')
-      .order('order_date', { referencedTable: 'orders', ascending: false })
+      .order('cafe24_order_no', { referencedTable: 'orders', ascending: sort === 'asc' })
       .range(from, to)
     setTotalCount(count ?? 0)
     setPage(pageNum)
@@ -297,7 +298,11 @@ export default function SoumOrders() {
       })
     }
     setGroups(
-      Object.values(map).sort((a, b) => (b.order_date ?? '').localeCompare(a.order_date ?? ''))
+      Object.values(map).sort((a, b) =>
+        sort === 'asc'
+          ? a.cafe24_order_no.localeCompare(b.cafe24_order_no)
+          : b.cafe24_order_no.localeCompare(a.cafe24_order_no)
+      )
     )
     setSelected(new Set())
     setAssignedIds(new Set())
@@ -506,6 +511,16 @@ export default function SoumOrders() {
             className="border rounded-lg px-2 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
+        <button
+          onClick={() => {
+            const next = orderSort === 'asc' ? 'desc' : 'asc'
+            setOrderSort(next)
+            loadOrders(0, next)
+          }}
+          className="ml-auto px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+        >
+          주문번호 {orderSort === 'asc' ? '오름차순 ↑' : '내림차순 ↓'}
+        </button>
       </div>
 
       {assignWarn && (
