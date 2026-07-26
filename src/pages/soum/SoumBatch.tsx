@@ -8,6 +8,7 @@ interface Batch {
   name: string
   type: string
   item_count: number
+  order_count: number
 }
 
 interface Item {
@@ -44,7 +45,8 @@ const STATUS_COLOR: Record<string, string> = {
   delivered: 'bg-green-100 text-green-700',
 }
 
-const LOC_REGEX = /[A-Z]{2}-\d{2}-\d{2}-\d{2}/
+// 각 자리는 숫자/문자 상관없이 올 수 있음 (예: NK-01-02-03, NK-A1-B2-C3)
+const LOC_REGEX = /[A-Z]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}/
 
 // 출력 시점 표시용 — YYYYMMDD HH:MM:SS
 function printTimestamp() {
@@ -72,15 +74,26 @@ export default function SoumBatch() {
 
     const { data: itemData } = await supabase
       .from('order_items')
-      .select('batch_id')
+      .select('batch_id, orders(cafe24_order_no)')
       .eq('status', 'confirmed')
 
     const countMap: Record<string, number> = {}
-    for (const it of itemData ?? []) {
-      if (it.batch_id) countMap[it.batch_id] = (countMap[it.batch_id] ?? 0) + 1
+    const orderSetMap: Record<string, Set<string>> = {}
+    for (const it of (itemData ?? []) as any[]) {
+      if (!it.batch_id) continue
+      countMap[it.batch_id] = (countMap[it.batch_id] ?? 0) + 1
+      const orderNo = it.orders?.cafe24_order_no
+      if (orderNo) {
+        if (!orderSetMap[it.batch_id]) orderSetMap[it.batch_id] = new Set()
+        orderSetMap[it.batch_id].add(orderNo)
+      }
     }
 
-    setBatches(batchData.map(b => ({ ...b, item_count: countMap[b.id] ?? 0 })))
+    setBatches(batchData.map(b => ({
+      ...b,
+      item_count: countMap[b.id] ?? 0,
+      order_count: orderSetMap[b.id]?.size ?? 0,
+    })))
   }
 
   async function selectBatch(batchId: string) {
@@ -159,8 +172,21 @@ export default function SoumBatch() {
       if (remaining <= 0) continue
 
       const supplier = item.supplier_name ?? ''
-      const location = supplier.match(LOC_REGEX)?.[0] ?? ''
-      const supplier_note = supplier.replace(LOC_REGEX, '').replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '').trim()
+      const codeMatch = supplier.match(LOC_REGEX)?.[0]
+      const hasMiseong = supplier.includes('미성')
+
+      let location = ''
+      let stripPattern: RegExp | string = ''
+      if (codeMatch) {
+        location = codeMatch
+        stripPattern = LOC_REGEX
+      } else if (hasMiseong) {
+        location = '미성'
+        stripPattern = '미성'
+      }
+
+      const supplier_note = (stripPattern ? supplier.replace(stripPattern, '') : supplier)
+        .replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '').trim()
       const key = `${item.product_code}__${item.option_info ?? ''}`
       if (merged[key]) {
         merged[key].quantity += remaining
@@ -390,8 +416,9 @@ export default function SoumBatch() {
             <div className={`text-2xl font-bold mt-2 ${
               batch.item_count > 0 ? 'text-indigo-600' : 'text-gray-200'
             }`}>
-              {batch.item_count}
+              {batch.order_count}건
             </div>
+            <div className="text-xs text-gray-400">SKU {batch.item_count}개</div>
           </button>
         ))}
       </div>
