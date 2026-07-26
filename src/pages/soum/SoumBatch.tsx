@@ -402,7 +402,9 @@ export default function SoumBatch() {
           <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
             <span className="font-medium text-gray-800">
               {activeBatch?.batch_no}번 {activeBatch?.name}
-              <span className="text-gray-400 font-normal ml-2 text-sm">상품 {items.length}개</span>
+              <span className="text-gray-400 font-normal ml-2 text-sm">
+                주문 {new Set(items.map(i => i.cafe24_order_no)).size}건 / SKU {items.length}개
+              </span>
             </span>
             {items.length > 0 && (
               <div className="flex gap-2">
