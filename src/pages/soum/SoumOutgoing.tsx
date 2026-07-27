@@ -107,47 +107,63 @@ export default function SoumOutgoing() {
     await loadByTracking(parseInvoiceNo(invoiceNo))
   }
 
+  // 상품별 배송방법 카운트 + 상태를 배송중으로 바꾸고 카페24에 배송중 전환 요청
+  async function shipItems(targetItems: InspectItem[], orderNo: string) {
+    for (const i of targetItems) {
+      supabase.rpc('increment_ship_count', {
+        p_code: i.product_code,
+        p_method: i.delivery_method ?? 'CJ',
+        p_qty: i.quantity,
+      }).then(() => {})
+    }
+    await supabase.from('order_items')
+      .update({ status: 'in_transit' })
+      .in('id', targetItems.map(i => i.id))
+    try {
+      const itemCodes = targetItems.map(i => i.cafe24_item_code).filter(Boolean) as string[]
+      const res = await fetch('/api/cafe24/shipments?action=transit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders: [{ order_no: orderNo, item_codes: itemCodes }] }),
+      })
+      const result = await res.json()
+      if (result.errors?.length) {
+        setMessage(`카페24 배송중 전환 실패: ${result.errors[0]}`)
+      }
+    } catch {
+      setMessage('카페24 배송중 전환 실패: 네트워크 오류')
+    }
+    loadPending()
+  }
+
   useEffect(() => {
     if (done && orderInfo) {
-      // 상품별 배송방법 카운트 (이 화면은 CJ 흐름이라 방법 미지정 시 CJ로 집계)
-      for (const i of items) {
-        supabase.rpc('increment_ship_count', {
-          p_code: i.product_code,
-          p_method: i.delivery_method ?? 'CJ',
-          p_qty: i.quantity,
-        }).then(() => {})
-      }
-      // 검수 완료 → 상품 출고 처리 + 카페24 배송중 전환
-      supabase.from('order_items')
-        .update({ status: 'in_transit' })
-        .in('id', items.map(i => i.id))
-        .then(async () => {
-          try {
-            const itemCodes = items.map(i => i.cafe24_item_code).filter(Boolean) as string[]
-            const res = await fetch('/api/cafe24/shipments?action=transit', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ orders: [{ order_no: orderInfo.cafe24_order_no, item_codes: itemCodes }] }),
-            })
-            const result = await res.json()
-            if (result.errors?.length) {
-              setMessage(`카페24 배송중 전환 실패: ${result.errors[0]}`)
-            }
-          } catch {
-            setMessage('카페24 배송중 전환 실패: 네트워크 오류')
-          }
-          loadPending()
-          setTimeout(() => {
-            setDone(false)
-            setItems([])
-            setOrderInfo(null)
-            setInvoiceNo('')
-            setMessage('')
-            invoiceRef.current?.focus()
-          }, 2000)
-        })
+      shipItems(items, orderInfo.cafe24_order_no).then(() => {
+        setTimeout(() => {
+          setDone(false)
+          setItems([])
+          setOrderInfo(null)
+          setInvoiceNo('')
+          setMessage('')
+          invoiceRef.current?.focus()
+        }, 2000)
+      })
     }
   }, [done])
+
+  // 매장 재고 부족 등으로 일부만 검수됐을 때, 그 완료분만 먼저 배송중 처리
+  async function shipCompletedOnly() {
+    if (!orderInfo) return
+    const completed = items.filter(i => i.inspected_qty >= i.quantity)
+    if (!completed.length) return
+    const remaining = items.length - completed.length
+    if (!confirm(`검수 완료된 ${completed.length}건만 배송중으로 처리합니다. 나머지 ${remaining}건은 검수 대기로 남습니다. 진행할까요?`)) return
+
+    await shipItems(completed, orderInfo.cafe24_order_no)
+    const completedIds = new Set(completed.map(i => i.id))
+    setItems(prev => prev.filter(i => !completedIds.has(i.id)))
+    setMessage('')
+  }
 
   async function handleBarcodeScan(e: React.FormEvent) {
     e.preventDefault()
@@ -381,6 +397,16 @@ export default function SoumOutgoing() {
             입력
           </button>
         </form>
+      )}
+
+      {/* 매장 재고 부족 등으로 일부만 검수됐을 때, 완료분만 먼저 출고 */}
+      {items.length > 0 && !allDone && items.some(i => i.inspected_qty >= i.quantity) && (
+        <button
+          onClick={shipCompletedOnly}
+          className="w-full mt-3 py-2.5 rounded-lg text-sm font-medium border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100"
+        >
+          검수 완료분만 배송중 처리 ({items.filter(i => i.inspected_qty >= i.quantity).length}건)
+        </button>
       )}
 
       {message && (
