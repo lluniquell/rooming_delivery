@@ -10,6 +10,7 @@ interface Item {
   supplier_name: string | null
   quantity: number
   labels: string[] | null
+  cafe24_item_code: string | null
 }
 
 interface OrderGroup {
@@ -283,7 +284,7 @@ export default function SoumOrders() {
     const to = from + PAGE_SIZE - 1
     const { data, count } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, labels, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, order_place_name, admin_memo)', { count: 'exact' })
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, labels, cafe24_item_code, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, order_place_name, admin_memo)', { count: 'exact' })
       .eq('status', 'collected')
       .is('batch_id', null)
       .eq('order_status', 'N20')
@@ -317,7 +318,11 @@ export default function SoumOrders() {
         supplier_name: row.supplier_name,
         quantity: row.quantity,
         labels: row.labels,
+        cafe24_item_code: row.cafe24_item_code,
       })
+    }
+    for (const g of Object.values(map)) {
+      g.items.sort((a, b) => (a.cafe24_item_code ?? '').localeCompare(b.cafe24_item_code ?? ''))
     }
     setGroups(
       Object.values(map).sort((a, b) =>
