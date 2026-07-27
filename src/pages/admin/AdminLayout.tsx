@@ -10,6 +10,7 @@ interface Props {
 const orderItems = [
   { to: '/admin/soum/orders', label: '주문 수집' },
   { to: '/admin/soum/batches', label: '배치 현황' },
+  { to: '/admin/soum/shipping-status', label: '배송 현황' },
 ]
 
 const scheduleItems = [

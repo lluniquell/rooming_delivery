@@ -15,6 +15,7 @@ import AdminTest from './pages/admin/AdminTest'
 import SoumOrders from './pages/soum/SoumOrders'
 import SoumBatch from './pages/soum/SoumBatch'
 import SoumOutgoing from './pages/soum/SoumOutgoing'
+import SoumShippingStatus from './pages/soum/SoumShippingStatus'
 import ScheduleBoard from './pages/schedule/ScheduleBoard'
 import ScheduleDay from './pages/schedule/ScheduleDay'
 import DriverLayout from './pages/driver/DriverLayout'
@@ -96,6 +97,7 @@ function App() {
           <Route path="no-access" element={driver && <NoAccess driver={driver} />} />
           <Route path="soum/orders" element={driver && <RequirePermission perm="orders" driver={driver}><SoumOrders /></RequirePermission>} />
           <Route path="soum/batches" element={driver && <RequirePermission perm="orders" driver={driver}><SoumBatch /></RequirePermission>} />
+          <Route path="soum/shipping-status" element={driver && <RequirePermission perm="orders" driver={driver}><SoumShippingStatus /></RequirePermission>} />
           <Route path="soum/outgoing" element={driver && <RequirePermission perm="soum" driver={driver}><SoumOutgoing /></RequirePermission>} />
           <Route path="schedule" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleBoard /></RequirePermission>} />
           <Route path="schedule/day/:date" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleDay /></RequirePermission>} />
