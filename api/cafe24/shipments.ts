@@ -27,6 +27,18 @@ async function cafe24Get(path: string, token: string) {
   }
 }
 
+async function cafe24Req(method: string, path: string, token: string, body?: any) {
+  const res = await fetch(`https://${MALL_ID}.cafe24api.com${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  })
+  const text = await res.text()
+  let data: any
+  try { data = JSON.parse(text) } catch { data = { raw: text.slice(0, 200) } }
+  return { ok: res.ok, data }
+}
+
 // CJ 운송장 등록 — 이 주문에서 CJ로 배정된 상품에만 정확히 등록 (POST ?action=standby)
 async function handleStandby(req: VercelRequest, res: VercelResponse) {
   const { orders, carrier_code } = req.body ?? {}
@@ -112,10 +124,13 @@ async function handleStandby(req: VercelRequest, res: VercelResponse) {
 
 // 출고검수1 완료 시 배송중 전환 (POST ?action=transit)
 async function handleTransit(req: VercelRequest, res: VercelResponse) {
-  // orders: [{ order_no, item_codes }] — item_codes가 있으면 그 상품(order_item_code)들의
-  // shipping_code만 전환, 없으면(구버전 호출 호환) 주문의 모든 shipping_code를 전환
+  // orders: [{ order_no, item_codes, tracking_no }] — item_codes가 있으면 그 상품들만 배송중 전환 대상.
+  // 카페24는 배송상태를 상품 단위가 아니라 shipping_code(운송장 그룹) 단위로만 바꿀 수 있어서,
+  // item_codes가 그 그룹의 일부만 가리키면(예: 매장 재고 부족으로 일부만 먼저 출고) 그룹 전체를
+  // 지우고 item_codes만 같은 tracking_no로 새 그룹을 만들어 그 그룹만 배송중 전환한다.
+  // (실제로 이 필터를 무시하고 그룹 전체를 전환해버려 정상 출고분까지 상태가 꼬인 적 있음 — 2026-07-26)
   const { order_nos, orders } = req.body ?? {}
-  const targets: { order_no: string; item_codes?: string[] }[] =
+  const targets: { order_no: string; item_codes?: string[]; tracking_no?: string }[] =
     Array.isArray(orders) ? orders
     : Array.isArray(order_nos) ? order_nos.map((o: string) => ({ order_no: o }))
     : []
@@ -128,7 +143,7 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
     let updated = 0
     const errors: string[] = []
 
-    for (const { order_no: orderNo, item_codes } of targets) {
+    for (const { order_no: orderNo, item_codes, tracking_no } of targets) {
       if (!orderNo) continue
       try {
         // shipping_code는 D-{주문번호}-00으로 고정이 아님 — 상품(라인)이 서로 다른
@@ -137,33 +152,62 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
         const itemsData = await cafe24Get(`/api/v2/admin/orders/${orderNo}/items?shop_no=1`, token)
         const allItems: any[] = itemsData.items ?? []
 
-        // item_codes가 지정된 경우, 그 상품(order_item_code)에 해당하는 shipping_code만 대상으로 함
-        // — 같은 주문에 다른 배송방법 상품이 섞여 있어도 그쪽 그룹은 건드리지 않기 위함
-        const scoped = item_codes?.length
-          ? allItems.filter(i => item_codes.includes(i.order_item_code))
-          : allItems
-        const shippingCodes = [...new Set(scoped.map((i: any) => i.shipping_code).filter(Boolean))]
+        const targetSet = new Set<string>(
+          item_codes?.length ? item_codes : allItems.map((i: any) => i.order_item_code)
+        )
+        const groupOf: Record<string, string[]> = {}
+        for (const it of allItems) {
+          if (!it.shipping_code) continue
+          ;(groupOf[it.shipping_code] ??= []).push(it.order_item_code)
+        }
+        const touchedGroups = [...new Set(
+          allItems.filter((i: any) => targetSet.has(i.order_item_code)).map((i: any) => i.shipping_code).filter(Boolean)
+        )]
 
-        if (!shippingCodes.length) {
+        if (!touchedGroups.length) {
           errors.push(`${orderNo}: shipping_code를 찾을 수 없음`)
           continue
         }
 
-        for (const shippingCode of shippingCodes) {
-          const apiRes = await fetch(
-            `https://${MALL_ID}.cafe24api.com/api/v2/admin/orders/${orderNo}/shipments/${shippingCode}`,
-            {
-              method: 'PUT',
-              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ shop_no: 1, request: { status: 'shipping' } }),
-            }
-          )
-          const text = await apiRes.text()
-          let data: any
-          try { data = JSON.parse(text) } catch { data = { raw: text.slice(0, 200) } }
+        for (const shippingCode of touchedGroups) {
+          const groupItems = groupOf[shippingCode] ?? []
+          const isFullGroup = groupItems.every(code => targetSet.has(code))
 
-          if (!apiRes.ok || data.error) {
-            errors.push(`${orderNo} (${shippingCode}): ${data.error?.message ?? JSON.stringify(data).slice(0, 150)}`)
+          if (isFullGroup) {
+            const r = await cafe24Req('PUT', `/api/v2/admin/orders/${orderNo}/shipments/${shippingCode}`, token,
+              { shop_no: 1, request: { status: 'shipping' } })
+            if (!r.ok || r.data.error) {
+              errors.push(`${orderNo} (${shippingCode}): ${r.data.error?.message ?? JSON.stringify(r.data).slice(0, 150)}`)
+            }
+          } else if (!tracking_no) {
+            errors.push(`${orderNo} (${shippingCode}): 그룹 일부만 전환하려면 tracking_no가 필요합니다`)
+          } else {
+            // 그룹 일부만 대상 — 기존 등록을 지우고 대상 상품만 같은 운송장번호로 새 그룹 생성 후 전환
+            const targetCodes = groupItems.filter(code => targetSet.has(code))
+            const delRes = await cafe24Req('DELETE', `/api/v2/admin/orders/${orderNo}/shipments/${shippingCode}?shop_no=1`, token)
+            if (!delRes.ok) {
+              errors.push(`${orderNo} (${shippingCode}): 기존 운송장 등록 삭제 실패`)
+              continue
+            }
+            const postRes = await cafe24Req('POST', `/api/v2/admin/orders/${orderNo}/shipments`, token, {
+              shop_no: 1,
+              request: {
+                status: 'standby',
+                tracking_no,
+                shipping_company_code: CJ_CARRIER_CODE,
+                order_item_code: targetCodes,
+              },
+            })
+            const newCode = postRes.data?.shipments?.[0]?.shipping_code
+            if (!postRes.ok || !newCode) {
+              errors.push(`${orderNo}: 부분 운송장 재등록 실패 — ${JSON.stringify(postRes.data).slice(0, 150)}`)
+              continue
+            }
+            const putRes = await cafe24Req('PUT', `/api/v2/admin/orders/${orderNo}/shipments/${newCode}`, token,
+              { shop_no: 1, request: { status: 'shipping' } })
+            if (!putRes.ok || putRes.data.error) {
+              errors.push(`${orderNo} (${newCode}): ${putRes.data.error?.message ?? JSON.stringify(putRes.data).slice(0, 150)}`)
+            }
           }
           await new Promise(r => setTimeout(r, 150))
         }

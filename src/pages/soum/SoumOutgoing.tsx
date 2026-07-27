@@ -108,7 +108,7 @@ export default function SoumOutgoing() {
   }
 
   // 상품별 배송방법 카운트 + 상태를 배송중으로 바꾸고 카페24에 배송중 전환 요청
-  async function shipItems(targetItems: InspectItem[], orderNo: string) {
+  async function shipItems(targetItems: InspectItem[], orderNo: string, trackingNo: string) {
     for (const i of targetItems) {
       supabase.rpc('increment_ship_count', {
         p_code: i.product_code,
@@ -124,7 +124,7 @@ export default function SoumOutgoing() {
       const res = await fetch('/api/cafe24/shipments?action=transit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orders: [{ order_no: orderNo, item_codes: itemCodes }] }),
+        body: JSON.stringify({ orders: [{ order_no: orderNo, item_codes: itemCodes, tracking_no: trackingNo }] }),
       })
       const result = await res.json()
       if (result.errors?.length) {
@@ -138,7 +138,7 @@ export default function SoumOutgoing() {
 
   useEffect(() => {
     if (done && orderInfo) {
-      shipItems(items, orderInfo.cafe24_order_no).then(() => {
+      shipItems(items, orderInfo.cafe24_order_no, orderInfo.tracking_number).then(() => {
         setTimeout(() => {
           setDone(false)
           setItems([])
@@ -159,7 +159,7 @@ export default function SoumOutgoing() {
     const remaining = items.length - completed.length
     if (!confirm(`검수 완료된 ${completed.length}건만 배송중으로 처리합니다. 나머지 ${remaining}건은 검수 대기로 남습니다. 진행할까요?`)) return
 
-    await shipItems(completed, orderInfo.cafe24_order_no)
+    await shipItems(completed, orderInfo.cafe24_order_no, orderInfo.tracking_number)
     const completedIds = new Set(completed.map(i => i.id))
     setItems(prev => prev.filter(i => !completedIds.has(i.id)))
     setMessage('')
