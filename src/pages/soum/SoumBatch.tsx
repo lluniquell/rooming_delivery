@@ -150,7 +150,7 @@ export default function SoumBatch() {
   async function moveToUnassigned(itemId: string) {
     if (!confirm('이 상품을 배정 취소하고 주문 수집(미배정) 목록으로 되돌릴까요?')) return
     await supabase.from('order_items')
-      .update({ status: 'collected', batch_id: null, delivery_method: null })
+      .update({ status: 'collected', batch_id: null, delivery_method: null, tracking_number: null })
       .eq('id', itemId)
     // 서버 재조회 없이 로컬에서 바로 반영
     setItems(prev => prev.filter(i => i.id !== itemId))
