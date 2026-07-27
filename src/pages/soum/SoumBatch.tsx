@@ -297,7 +297,12 @@ export default function SoumBatch() {
     const header = [
       '받는분성명', '받는분전화번호', '받는분우편번호', '받는분주소(전체, 분할)',
       '고객주문번호', '품목명', '내품수량', '배송메세지1', '품목명', '박스수량',
+      '보내는분성명', '보내는분주소(전체, 분할)', '보내는분전화번호', '운임구분',
     ]
+    const SENDER_NAME = '루밍'
+    const SENDER_ADDRESS = '서울 서초구 사평대로26길 48 미성빌딩'
+    const SENDER_PHONE = '02-599-0804'
+    const FREIGHT_TYPE = '신용'
     const d = new Date()
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
@@ -306,6 +311,7 @@ export default function SoumBatch() {
       return [
         o.name, o.phone, o.zipcode, o.address,
         o.orderNo, item.product_name, item.quantity, o.message, '', 1,
+        SENDER_NAME, SENDER_ADDRESS, SENDER_PHONE, FREIGHT_TYPE,
       ]
     })
 
