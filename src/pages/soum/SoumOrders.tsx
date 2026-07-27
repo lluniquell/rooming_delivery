@@ -9,6 +9,7 @@ interface Item {
   brand: string | null
   supplier_name: string | null
   quantity: number
+  labels: string[] | null
 }
 
 interface OrderGroup {
@@ -19,6 +20,7 @@ interface OrderGroup {
   address: string | null
   order_date: string | null
   order_place_name: string | null
+  admin_memo: string[] | null
   items: Item[]
 }
 
@@ -136,6 +138,14 @@ const OrderRow = memo(function OrderRow({
         <span className="text-xs text-gray-400">
           {group.order_date ? new Date(group.order_date).toLocaleDateString('ko-KR') : '-'}
         </span>
+        {group.admin_memo && group.admin_memo.length > 0 && (
+          <span
+            title={group.admin_memo.join('\n')}
+            className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 shrink-0"
+          >
+            📝 메모 {group.admin_memo.length}
+          </span>
+        )}
         <div className="flex gap-1 ml-auto" onClick={e => e.stopPropagation()}>
           {isAssigning && (
             <span className="text-xs text-gray-400 self-center mr-1">배정 중...</span>
@@ -179,6 +189,15 @@ const OrderRow = memo(function OrderRow({
               </div>
               {item.supplier_name && (
                 <div className="text-[10px] text-gray-400 truncate">{item.supplier_name}</div>
+              )}
+              {item.labels && item.labels.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  {item.labels.map((l, idx) => (
+                    <span key={idx} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 text-rose-700">
+                      {l}
+                    </span>
+                  ))}
+                </div>
               )}
             </div>
             <span className="flex gap-2 text-[11px] shrink-0">
@@ -264,7 +283,7 @@ export default function SoumOrders() {
     const to = from + PAGE_SIZE - 1
     const { data, count } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, order_place_name)', { count: 'exact' })
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, labels, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, order_place_name, admin_memo)', { count: 'exact' })
       .eq('status', 'collected')
       .is('batch_id', null)
       .eq('order_status', 'N20')
@@ -285,6 +304,7 @@ export default function SoumOrders() {
           address: o.address,
           order_date: o.order_date,
           order_place_name: o.order_place_name,
+          admin_memo: o.admin_memo,
           items: [],
         }
       }
@@ -296,6 +316,7 @@ export default function SoumOrders() {
         brand: row.brand,
         supplier_name: row.supplier_name,
         quantity: row.quantity,
+        labels: row.labels,
       })
     }
     setGroups(

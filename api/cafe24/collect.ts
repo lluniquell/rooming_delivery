@@ -63,6 +63,16 @@ async function cafe24Get(path: string, token: string) {
   }
 }
 
+// 관리자 메모(주문 단위) — 상품 문제(품절 등) 발생 시 담당자가 남기는 메모라 항상 최신으로 갱신해야 함
+async function fetchMemos(orderNo: string, token: string): Promise<string[]> {
+  try {
+    const data = await cafe24Get(`/api/v2/admin/orders/${orderNo}/memos?shop_no=1`, token)
+    return ((data.memos ?? []) as any[]).map(m => m.content).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
 function receiverFieldsOf(order: any) {
   const r = order.receivers?.[0]
   if (!r) return {}
@@ -89,6 +99,7 @@ function itemRowsOf(order: any, dbOrderId: string) {
     quantity: item.quantity ?? 1,
     inspected_qty: 0,
     status: 'collected',
+    labels: item.labels ?? [],
   }))
 }
 
@@ -141,16 +152,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     {
       const { data: pendingRows } = await supabase
         .from('order_items')
-        .select('id, cafe24_item_code, orders!inner(cafe24_order_no)')
+        .select('id, cafe24_item_code, labels, orders!inner(id, cafe24_order_no)')
         .eq('status', 'collected')
         .is('batch_id', null)
         .eq('order_status', 'N20')
-      const byOrderNo = new Map<string, { id: string; cafe24_item_code: string }[]>()
+      const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null }[]>()
+      const orderIdByNo = new Map<string, string>()
       for (const row of (pendingRows ?? []) as any[]) {
         const no = row.orders.cafe24_order_no
+        orderIdByNo.set(no, row.orders.id)
         if (!row.cafe24_item_code) continue
         if (!byOrderNo.has(no)) byOrderNo.set(no, [])
-        byOrderNo.get(no)!.push({ id: row.id, cafe24_item_code: row.cafe24_item_code })
+        byOrderNo.get(no)!.push({ id: row.id, cafe24_item_code: row.cafe24_item_code, labels: row.labels })
       }
       const orderNos = [...byOrderNo.keys()]
       for (let i = 0; i < orderNos.length; i += 50) {
@@ -165,11 +178,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const liveItems = itemsByOrder.get(no) ?? []
           for (const pendingItem of byOrderNo.get(no) ?? []) {
             const match = liveItems.find((i: any) => i.order_item_code === pendingItem.cafe24_item_code)
-            if (match?.order_status && match.order_status !== 'N20') {
-              await supabase.from('order_items').update({ order_status: match.order_status }).eq('id', pendingItem.id)
-              notReady++
+            if (!match) continue
+            const patch: Record<string, any> = {}
+            if (match.order_status && match.order_status !== 'N20') { patch.order_status = match.order_status; notReady++ }
+            if (JSON.stringify(match.labels ?? []) !== JSON.stringify(pendingItem.labels ?? [])) {
+              patch.labels = match.labels ?? []
+            }
+            if (Object.keys(patch).length) {
+              await supabase.from('order_items').update(patch).eq('id', pendingItem.id)
             }
           }
+
+          // 이슈 발생 시 담당자가 남기는 관리자 메모 — 미배정 재확인 때도 최신으로 갱신
+          const orderId = orderIdByNo.get(no)
+          if (orderId) {
+            const memos = await fetchMemos(no, token)
+            await supabase.from('orders').update({ admin_memo: memos }).eq('id', orderId)
+          }
+          await new Promise(r => setTimeout(r, 100))
         }
       }
     }
@@ -197,6 +223,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const order of cafe24Orders) {
       const existed = existingMap.get(order.order_id)
       try {
+        // 이슈 발생 시 담당자가 남기는 관리자 메모 — 항상 최신 값으로 갱신해야 함
+        const memos = await fetchMemos(order.order_id, token)
+
         if (existed) {
           // 이미 수집된 주문 — 수령인 정보는 이 조회에서 받아온 최신 값으로 항상 덮어씀
           // (예전엔 비어있을 때만 채워서, 한 번 잘못/기본값으로 들어간 뒤엔 영영 안 고쳐졌음)
@@ -206,6 +235,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (!existed.hasPlaceName && order.order_place_name) {
             await supabase.from('orders').update({ order_place_name: order.order_place_name }).eq('id', existed.id)
           }
+          await supabase.from('orders').update({ admin_memo: memos }).eq('id', existed.id)
           if (existed.itemCount === 0) {
             const rows = itemRowsOf(order, existed.id)
             if (rows.length) {
@@ -215,10 +245,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           } else {
             // 기존 상품 행 보정: cafe24_item_code 없으면 상품코드로 매칭해서 채우고,
-            // order_item_code로 매칭되면 상품별 order_status도 최신 값으로 맞춰줌
+            // order_item_code로 매칭되면 상품별 order_status/라벨도 최신 값으로 맞춰줌
             const { data: existingItems } = await supabase
               .from('order_items')
-              .select('id, product_code, cafe24_item_code, order_status')
+              .select('id, product_code, cafe24_item_code, order_status, labels')
               .eq('order_id', existed.id)
             const pool = [...(order.items ?? [])]
             for (const row of existingItems ?? []) {
@@ -233,6 +263,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               const patch: Record<string, any> = {}
               if (!row.cafe24_item_code && match.order_item_code) patch.cafe24_item_code = match.order_item_code
               if (match.order_status && match.order_status !== row.order_status) patch.order_status = match.order_status
+              if (JSON.stringify(match.labels ?? []) !== JSON.stringify(row.labels ?? [])) patch.labels = match.labels ?? []
               if (Object.keys(patch).length) {
                 await supabase.from('order_items').update(patch).eq('id', row.id)
               }
@@ -246,6 +277,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           customer_name: order.billing_name,
           order_date: order.order_date,
           order_place_name: order.order_place_name ?? null,
+          admin_memo: memos,
           ...receiverFieldsOf(order),
         }).select('id').single()
 
