@@ -203,8 +203,8 @@ export default function SoumBatch() {
     }
     const rows = Object.values(merged)
     return pickingSort === 'brand'
-      ? rows.sort((a, b) => a.brand.localeCompare(b.brand))
-      : rows.sort((a, b) => a.location.localeCompare(b.location))
+      ? rows.sort((a, b) => a.brand.localeCompare(b.brand) || a.product_name.localeCompare(b.product_name))
+      : rows.sort((a, b) => a.location.localeCompare(b.location) || a.product_name.localeCompare(b.product_name))
   }
 
   const activeBatch = batches.find(b => b.id === activeBatchId)
