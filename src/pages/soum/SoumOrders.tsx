@@ -84,6 +84,18 @@ const fmtDate = (d: Date) =>
 const today = () => fmtDate(new Date())
 const daysAgo = (n: number) => fmtDate(new Date(Date.now() - n * 86400000))
 
+// 넓은 날짜 범위를 하루 단위로 쪼개서 순차 수집 — 한 번에 다 하면 타임아웃 남
+function dateRange(start: string, end: string): string[] {
+  const days: string[] = []
+  const cur = new Date(`${start}T00:00:00`)
+  const last = new Date(`${end}T00:00:00`)
+  while (cur <= last) {
+    days.push(fmtDate(cur))
+    cur.setDate(cur.getDate() + 1)
+  }
+  return days
+}
+
 const PRESETS = [
   { label: '오늘', start: () => today() },
   { label: '어제', start: () => daysAgo(1), end: () => daysAgo(1) },
@@ -398,25 +410,39 @@ export default function SoumOrders() {
 
     setCollecting(true)
     setCollectMsg('')
-    setProgress({ phase: 'main', current: 0, total: 0 })
     await supabase.from('app_meta').upsert({ key: 'collect_lock', value: new Date().toISOString(), updated_at: new Date().toISOString() })
 
-    let mainResult: any = null
-    try {
-      const res = await fetch('/api/cafe24/collect', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start_date: startDate, end_date: endDate }),
-      })
-      mainResult = await res.json()
-    } catch {
-      setCollectMsg('네트워크 오류')
+    // 1단계: 메인 수집 — 범위가 넓으면 한 번에 처리하다 타임아웃 나서, 하루씩 나눠 순차 호출
+    const days = dateRange(startDate, endDate)
+    let totalCollected = 0, totalBackfilled = 0, totalChecked = 0
+    const mainErrors: string[] = []
+    setProgress({ phase: 'main', current: 0, total: days.length })
+    for (let i = 0; i < days.length; i++) {
+      const day = days[i]
+      try {
+        const res = await fetch('/api/cafe24/collect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ start_date: day, end_date: day }),
+        })
+        const data = await res.json()
+        if (data.error) {
+          mainErrors.push(`${day}: ${JSON.stringify(data.error)}`)
+        } else {
+          totalCollected += data.collected ?? 0
+          totalBackfilled += data.items_backfilled ?? 0
+          totalChecked += data.total ?? 0
+          if (data.errors?.length) mainErrors.push(...data.errors)
+        }
+      } catch {
+        mainErrors.push(`${day}: 네트워크 오류`)
+      }
+      setProgress({ phase: 'main', current: i + 1, total: days.length })
     }
 
+    // 2단계: 미배정 재확인 — 대상이 많을 때 타임아웃 나서, 50건씩 나눠 반복 호출
     let notReady = 0
-    if (mainResult && !mainResult.error) {
-      // 2단계: 미배정 재확인 — 한 번에 다 하면 대상이 많을 때 타임아웃 나서, 50건씩
-      // 나눠 반복 호출하며 진행률 표시
+    {
       let offset = 0
       let total = 0
       try {
@@ -439,15 +465,11 @@ export default function SoumOrders() {
       }
     }
 
-    if (mainResult?.error) {
-      setCollectMsg(`오류: ${JSON.stringify(mainResult.error)}`)
-    } else if (mainResult) {
-      const errMsg = mainResult.errors?.length ? ` | 실패: ${mainResult.errors[0]}` : ''
-      const backfillMsg = mainResult.items_backfilled ? ` / 상품보충 ${mainResult.items_backfilled}건` : ''
-      const notReadyMsg = notReady ? ` / 상태변경으로 숨김 ${notReady}건` : ''
-      setCollectMsg(`카페24 ${mainResult.total ?? 0}건 조회 / 신규 ${mainResult.collected ?? 0}건${backfillMsg}${notReadyMsg}${errMsg}`)
-      if (mainResult.collected > 0 || mainResult.items_backfilled > 0 || notReady > 0) loadOrders(0)
-    }
+    const errMsg = mainErrors.length ? ` | 실패: ${mainErrors[0]}${mainErrors.length > 1 ? ` 외 ${mainErrors.length - 1}건` : ''}` : ''
+    const backfillMsg = totalBackfilled ? ` / 상품보충 ${totalBackfilled}건` : ''
+    const notReadyMsg = notReady ? ` / 상태변경으로 숨김 ${notReady}건` : ''
+    setCollectMsg(`카페24 ${totalChecked}건 조회 / 신규 ${totalCollected}건${backfillMsg}${notReadyMsg}${errMsg}`)
+    if (totalCollected > 0 || totalBackfilled > 0 || notReady > 0) loadOrders(0)
 
     // 락 해제 + 최종 수집 시간 기록
     const now = new Date().toISOString()
@@ -576,16 +598,16 @@ export default function SoumOrders() {
             <span className="font-medium text-gray-700">
               {progress.phase === 'main' ? '메인 수집 중...' : '미배정 재확인 중...'}
             </span>
-            {progress.phase === 'recheck' && progress.total > 0 && (
-              <span>{progress.current} / {progress.total}건</span>
+            {progress.total > 0 && (
+              <span>{progress.current} / {progress.total}{progress.phase === 'main' ? '일' : '건'}</span>
             )}
           </div>
           <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-300 ${
-                progress.phase === 'main' ? 'bg-blue-400 w-1/3' : 'bg-blue-600'
+                progress.phase === 'main' ? 'bg-blue-400' : 'bg-blue-600'
               }`}
-              style={progress.phase === 'recheck' && progress.total > 0
+              style={progress.total > 0
                 ? { width: `${Math.min(100, (progress.current / progress.total) * 100)}%` }
                 : undefined}
             />
