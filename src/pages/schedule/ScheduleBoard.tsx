@@ -7,6 +7,7 @@ interface StopItem {
   product_name: string
   option_info: string | null
   quantity: number
+  labels: string[] | null
 }
 
 interface Stop {
@@ -86,6 +87,7 @@ export default function ScheduleBoard() {
         product_name: row.product_name,
         option_info: row.option_info,
         quantity: row.quantity,
+        labels: row.labels,
       })
     }
     return Object.values(map)
@@ -94,7 +96,7 @@ export default function ScheduleBoard() {
   async function loadUnscheduled(bid: string) {
     const { data } = await supabase
       .from('order_items')
-      .select('id, product_name, option_info, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, scheduled_date, crew_size)')
+      .select('id, product_name, option_info, quantity, labels, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, scheduled_date, crew_size)')
       .eq('batch_id', bid)
       .eq('status', 'confirmed')
       .is('orders.scheduled_date', null)
@@ -104,7 +106,7 @@ export default function ScheduleBoard() {
   async function loadScheduled(bid: string) {
     const { data } = await supabase
       .from('order_items')
-      .select('id, product_name, option_info, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, scheduled_date, crew_size)')
+      .select('id, product_name, option_info, quantity, labels, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, scheduled_date, crew_size)')
       .eq('batch_id', bid)
       .in('status', ['confirmed', 'in_transit'])
       .gte('orders.scheduled_date', fmt(weekDates[0]))
@@ -184,8 +186,19 @@ export default function ScheduleBoard() {
                   <div className="text-[11px] text-gray-400 mt-0.5 font-mono">{stop.cafe24_order_no}</div>
                   <div className="mt-1 space-y-0.5">
                     {stop.items.map(it => (
-                      <div key={it.id} className="text-xs text-gray-600 truncate">
-                        {it.product_name} <span className="text-gray-400">×{it.quantity}</span>
+                      <div key={it.id}>
+                        <div className="text-xs text-gray-600 truncate">
+                          {it.product_name} <span className="text-gray-400">×{it.quantity}</span>
+                        </div>
+                        {it.labels && it.labels.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {it.labels.map((l, idx) => (
+                              <span key={idx} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 text-rose-700">
+                                {l}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -231,6 +244,12 @@ export default function ScheduleBoard() {
                     <div key={stop.order_id} className="border rounded-lg p-2 bg-gray-50/50 group relative">
                       <div className="flex items-center gap-1">
                         <span className="text-xs font-medium text-gray-800 truncate">{stop.customer_name}</span>
+                        {stop.items.some(i => i.labels && i.labels.length > 0) && (
+                          <span
+                            className="text-[10px] shrink-0"
+                            title={stop.items.flatMap(i => i.labels ?? []).join('\n')}
+                          >🏷️</span>
+                        )}
                       </div>
                       <div className="text-[10px] text-indigo-600 mt-0.5">{regionOf(stop.address)}</div>
                       <div className="text-[10px] text-gray-500 truncate">
