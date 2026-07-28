@@ -251,7 +251,7 @@ export default function SoumOutgoing() {
   return (
     <div className="max-w-2xl">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-gray-800">출고 검수 1</h2>
+        <h2 className="text-xl font-bold text-gray-800">출고 검수</h2>
         <div className="flex items-center gap-2">
           {pendingList.length > 0 && (
             <button
