@@ -137,11 +137,11 @@ function SortableStop({ stop, index, color, onRemove }: {
           <span className="text-sm font-medium text-gray-800 truncate">{stop.name}</span>
         </div>
         <div className="text-[11px] text-gray-400 truncate">{stop.address}</div>
-        {!isPreset && stop.items.length > 0 && (
-          <div className="text-[11px] text-gray-500 truncate">
-            {stop.items.map(i => `${i.product_name} ×${i.quantity}`).join(', ')}
+        {!isPreset && stop.items.map(i => (
+          <div key={i.id} className="text-[11px] text-gray-500 truncate">
+            {i.product_name} ×{i.quantity}
           </div>
-        )}
+        ))}
       </div>
       <button
         onClick={() => onRemove(stop)}
@@ -624,11 +624,11 @@ export default function ScheduleDay() {
                         )}
                       </div>
                       <div className="text-[11px] text-gray-400">{regionOf(s.address)}</div>
-                      {s.items.length > 0 && (
-                        <div className="text-[11px] text-gray-500 truncate">
-                          {s.items.map(i => `${i.product_name} ×${i.quantity}`).join(', ')}
+                      {s.items.map(i => (
+                        <div key={i.id} className="text-[11px] text-gray-500 truncate">
+                          {i.product_name} ×{i.quantity}
                         </div>
-                      )}
+                      ))}
                     </div>
                   ))}
                 </div>
