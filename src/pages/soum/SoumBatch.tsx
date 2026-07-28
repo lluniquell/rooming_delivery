@@ -149,6 +149,25 @@ export default function SoumBatch() {
   // 배정을 취소하고 "주문 수집" 화면의 미배정 목록으로 되돌림
   async function moveToUnassigned(itemId: string) {
     if (!confirm('이 상품을 배정 취소하고 주문 수집(미배정) 목록으로 되돌릴까요?')) return
+    const item = items.find(i => i.id === itemId)
+
+    // 카페24에 이미 운송장이 등록돼 있으면(운송장 업로드를 거쳤으면) 거기도 같이 정리
+    if (item?.tracking_number && item.cafe24_item_code) {
+      try {
+        const res = await fetch('/api/cafe24/shipments?action=unregister', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ order_no: item.cafe24_order_no, item_code: item.cafe24_item_code }),
+        })
+        const result = await res.json()
+        if (result.error) {
+          alert(`카페24 운송장 정리 실패: ${result.error}\n로컬 미배정은 계속 진행됩니다.`)
+        }
+      } catch {
+        alert('카페24 운송장 정리 중 네트워크 오류가 발생했습니다.\n로컬 미배정은 계속 진행됩니다.')
+      }
+    }
+
     await supabase.from('order_items')
       .update({ status: 'collected', batch_id: null, delivery_method: null, tracking_number: null })
       .eq('id', itemId)

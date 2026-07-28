@@ -223,6 +223,56 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+// 미배정으로 되돌릴 때 기존 운송장 등록을 카페24에서도 정리 (POST ?action=unregister)
+// 이 상품이 속한 shipping_code 그룹에 다른 상품이 더 있으면(같은 운송장으로 같이 등록된 경우)
+// 그룹 전체를 지우고 나머지 상품만 같은 운송장번호로 재등록 — 이 상품만 쏙 빠지고
+// 상태는 자동으로 배송준비중(N20)으로 돌아감 (등록 삭제의 부수 효과)
+async function handleUnregister(req: VercelRequest, res: VercelResponse) {
+  const { order_no, item_code } = req.body ?? {}
+  if (!order_no || !item_code) {
+    return res.status(400).json({ error: 'order_no, item_code가 필요합니다.' })
+  }
+
+  try {
+    const token = await getToken()
+    const itemsData = await cafe24Get(`/api/v2/admin/orders/${order_no}/items?shop_no=1`, token)
+    const allItems: any[] = itemsData.items ?? []
+    const target = allItems.find((i: any) => i.order_item_code === item_code)
+
+    if (!target?.shipping_code) {
+      return res.status(200).json({ ok: true, message: '등록된 운송장이 없습니다.' })
+    }
+
+    const shippingCode = target.shipping_code
+    const groupItems = allItems.filter((i: any) => i.shipping_code === shippingCode)
+    const remaining = groupItems.filter((i: any) => i.order_item_code !== item_code)
+
+    const delRes = await cafe24Req('DELETE', `/api/v2/admin/orders/${order_no}/shipments/${shippingCode}?shop_no=1`, token)
+    if (!delRes.ok) {
+      return res.status(500).json({ error: '기존 운송장 등록 삭제 실패', detail: delRes.data })
+    }
+
+    if (remaining.length) {
+      const postRes = await cafe24Req('POST', `/api/v2/admin/orders/${order_no}/shipments`, token, {
+        shop_no: 1,
+        request: {
+          status: 'standby',
+          tracking_no: target.tracking_no,
+          shipping_company_code: target.shipping_company_code || CJ_CARRIER_CODE,
+          order_item_code: remaining.map((i: any) => i.order_item_code),
+        },
+      })
+      if (!postRes.ok) {
+        return res.status(500).json({ error: '나머지 상품 재등록 실패', detail: postRes.data })
+      }
+    }
+
+    res.status(200).json({ ok: true })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+}
+
 // 90026: 주문 취소상태 변경(단건), 90072: 주문 취소상태 변경(일괄) — event_code는 둘 다 cancel_order
 const CANCEL_EVENTS = new Set([90026, 90072])
 
@@ -255,5 +305,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = req.query.action
   if (action === 'standby') return handleStandby(req, res)
   if (action === 'transit') return handleTransit(req, res)
+  if (action === 'unregister') return handleUnregister(req, res)
   return handleWebhook(req, res)
 }
