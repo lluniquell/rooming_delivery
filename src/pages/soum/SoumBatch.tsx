@@ -394,6 +394,9 @@ export default function SoumBatch() {
 
   return (
     <div className="max-w-5xl">
+      {/* 인쇄 시 이 페이지 본문은 전부 숨김(display:none) — visibility:hidden은 자리를 그대로
+          차지해서 뒤에 가려진 콘텐츠 높이만큼 빈 페이지가 같이 인쇄되는 문제가 있었음 */}
+      <div className="print:hidden">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold text-gray-800">배치 현황</h2>
         <button
@@ -533,18 +536,11 @@ export default function SoumBatch() {
           )}
         </div>
       )}
+      </div>
 
       {showPicking && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 print:static print:bg-white print:p-0">
-          {/* 인쇄 시 이 팝업(picking-print-area)만 남기고 나머지 화면은 전부 숨김 */}
-          <style>{`
-            @media print {
-              body * { visibility: hidden; }
-              .picking-print-area, .picking-print-area * { visibility: visible; }
-              .picking-print-area { position: absolute; left: 0; top: 0; width: 100%; }
-            }
-          `}</style>
-          <div className="picking-print-area bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col print:rounded-none print:shadow-none print:max-h-none print:max-w-none">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 print:static print:bg-white print:p-0 print:block">
+          <div className="picking-print-area bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col print:rounded-none print:shadow-none print:max-h-none print:max-w-none print:block">
             <div className="px-5 py-3 border-b flex items-center justify-between shrink-0 print:hidden">
               <h3 className="font-bold text-gray-800">
                 픽킹리스트 <span className="text-gray-400 font-normal text-sm ml-1">{activeBatch?.name}</span>
