@@ -44,6 +44,7 @@ export default function SoumOutgoing() {
   const [done, setDone] = useState(false)
   const [pendingList, setPendingList] = useState<PendingOrder[]>([])
   const [showPending, setShowPending] = useState(false)
+  const [holdBatchId, setHoldBatchId] = useState<string | null>(null)
 
   const invoiceRef = useRef<HTMLInputElement>(null)
   const barcodeRef = useRef<HTMLInputElement>(null)
@@ -51,6 +52,8 @@ export default function SoumOutgoing() {
   useEffect(() => {
     invoiceRef.current?.focus()
     loadPending()
+    supabase.from('batches').select('id').eq('type', 'hold').maybeSingle()
+      .then(({ data }) => setHoldBatchId(data?.id ?? null))
   }, [])
 
   async function loadPending() {
@@ -163,6 +166,24 @@ export default function SoumOutgoing() {
     const completedIds = new Set(completed.map(i => i.id))
     setItems(prev => prev.filter(i => !completedIds.has(i.id)))
     setMessage('')
+  }
+
+  // 일부 상품이 품절 등으로 준비가 안 될 때, 이 운송장 전체(검수 진행분 포함)를 보류로 이동
+  // — 배치 현황에서 상품마다 따로 누를 필요 없이 여기서 한 번에 처리
+  async function moveAllToHold() {
+    if (!orderInfo || !holdBatchId) return
+    if (!confirm(`이 운송장의 상품 ${items.length}건을 전부 보류로 이동할까요? (검수 진행 상황은 그대로 유지됩니다)`)) return
+
+    await supabase.from('order_items')
+      .update({ batch_id: holdBatchId })
+      .in('id', items.map(i => i.id))
+
+    loadPending()
+    setItems([])
+    setOrderInfo(null)
+    setInvoiceNo('')
+    setMessage('')
+    invoiceRef.current?.focus()
   }
 
   async function handleBarcodeScan(e: React.FormEvent) {
@@ -406,6 +427,17 @@ export default function SoumOutgoing() {
           className="w-full mt-3 py-2.5 rounded-lg text-sm font-medium border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100"
         >
           검수 완료분만 배송중 처리 ({items.filter(i => i.inspected_qty >= i.quantity).length}건)
+        </button>
+      )}
+
+      {/* 일부 상품 품절 등으로 준비가 안 될 때, 이 운송장 전체를 보류로 이동 */}
+      {items.length > 0 && !allDone && (
+        <button
+          onClick={moveAllToHold}
+          disabled={!holdBatchId}
+          className="w-full mt-2 py-2.5 rounded-lg text-sm font-medium border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 disabled:opacity-50"
+        >
+          이 운송장 전체 보류로 이동
         </button>
       )}
 
