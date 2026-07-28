@@ -213,6 +213,24 @@ export default function SoumOutgoing() {
     barcodeRef.current?.focus()
   }
 
+  // 검수 수량을 직접 지정 — 바코드 스캔(countUp)과 텍스트박스 수동 입력이 둘 다 이걸 씀
+  async function setInspectedQty(itemId: string, rawQty: number) {
+    const target = items.find(i => i.id === itemId)
+    if (!target) return
+    const newQty = Math.max(0, Math.min(rawQty, target.quantity))
+    if (newQty === target.inspected_qty) return
+
+    await supabase.from('order_items').update({ inspected_qty: newQty }).eq('id', itemId)
+
+    const updated = items.map(i => i.id === itemId ? { ...i, inspected_qty: newQty } : i)
+    setItems(updated)
+    setMessage('')
+
+    if (updated.every(i => i.inspected_qty >= i.quantity)) {
+      setDone(true)
+    }
+  }
+
   async function countUp(productCode: string) {
     const target = items.find(i => i.product_code === productCode)
     if (!target) {
@@ -223,22 +241,7 @@ export default function SoumOutgoing() {
       setMessage(`이미 수량이 완료된 상품입니다. (${target.product_name})`)
       return
     }
-
-    const newQty = target.inspected_qty + 1
-    await supabase
-      .from('order_items')
-      .update({ inspected_qty: newQty })
-      .eq('id', target.id)
-
-    const updated = items.map(i =>
-      i.id === target.id ? { ...i, inspected_qty: newQty } : i
-    )
-    setItems(updated)
-    setMessage('')
-
-    if (updated.every(i => i.inspected_qty >= i.quantity)) {
-      setDone(true)
-    }
+    await setInspectedQty(target.id, target.inspected_qty + 1)
   }
 
   async function registerBarcode(item: InspectItem) {
@@ -381,17 +384,22 @@ export default function SoumOutgoing() {
                     </td>
                     <td className="text-center px-3 py-3 text-gray-600 text-sm">{item.quantity}</td>
                     <td className="text-center px-3 py-3">
-                      <div className="flex items-center justify-center gap-1">
-                        <span className={`text-sm font-bold ${complete ? 'text-green-600' : item.inspected_qty > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
-                          {item.inspected_qty}
-                        </span>
-                        {!complete && (
-                          <button
-                            onClick={() => countUp(item.product_code)}
-                            className="w-5 h-5 rounded-full bg-gray-200 hover:bg-blue-500 hover:text-white text-gray-500 text-xs font-bold flex items-center justify-center leading-none"
-                          >+</button>
-                        )}
-                      </div>
+                      {/* 바코드 스캔하면 이 값이 자동으로 올라가고, 대량 수량은 직접 타이핑해서
+                          입력해도 됨 — 수량 맞으면 자동으로 초록색(완료) 처리 */}
+                      <input
+                        type="number"
+                        min={0}
+                        max={item.quantity}
+                        value={item.inspected_qty}
+                        onChange={e => setInspectedQty(item.id, Number(e.target.value))}
+                        className={`w-14 text-center text-sm font-bold rounded border py-1 focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                          complete
+                            ? 'text-green-600 border-green-300 bg-green-50'
+                            : item.inspected_qty > 0
+                              ? 'text-blue-600 border-blue-300'
+                              : 'text-gray-400 border-gray-200'
+                        }`}
+                      />
                     </td>
                   </tr>
                 )
