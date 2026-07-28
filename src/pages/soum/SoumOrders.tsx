@@ -33,7 +33,9 @@ interface Batch {
 }
 
 const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버', '업체배송']
-const PAGE_SIZE = 100
+// 상품(order_item) 개수가 아니라 "주문" 개수 기준 — 그래야 한 주문의 상품들이
+// 페이지 경계에서 쪼개지지 않음
+const PAGE_SIZE = 50
 
 // 배치 이름으로 배송방법을 유추 — 어느 바구니에 넣느냐가 곧 배송방법 지정이라,
 // 배정 시점에 자동으로 order_items.delivery_method에 찍어둠 (보류로 옮겨도 이 값은 안 바뀜)
@@ -280,19 +282,45 @@ export default function SoumOrders() {
   }
 
   async function loadOrders(pageNum = page, sort = orderSort) {
-    const from = pageNum * PAGE_SIZE
-    const to = from + PAGE_SIZE - 1
-    const { data, count } = await supabase
+    // 1단계: 조건에 맞는 주문id + 주문번호만 가볍게 전부 조회 — 여기서 정렬/페이지를
+    // "주문" 단위로 정해야 한 주문의 상품들이 페이지 경계에서 쪼개지지 않음
+    const { data: idRows } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, labels, cafe24_item_code, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, order_place_name, admin_memo)', { count: 'exact' })
+      .select('order_id, orders!inner(cafe24_order_no)')
       .eq('status', 'collected')
       .is('batch_id', null)
       .eq('order_status', 'N20')
-      .order('orders(cafe24_order_no)', { ascending: sort === 'asc' })
-      .order('id', { ascending: true })
-      .range(from, to)
-    setTotalCount(count ?? 0)
+
+    const orderNoById = new Map<string, string>()
+    for (const row of (idRows ?? []) as any[]) {
+      orderNoById.set(row.order_id, row.orders.cafe24_order_no)
+    }
+    const sortedOrderIds = [...orderNoById.entries()]
+      .sort((a, b) => sort === 'asc' ? a[1].localeCompare(b[1]) : b[1].localeCompare(a[1]))
+      .map(([id]) => id)
+
+    setTotalCount(sortedOrderIds.length)
     setPage(pageNum)
+
+    const from = pageNum * PAGE_SIZE
+    const pageOrderIds = sortedOrderIds.slice(from, from + PAGE_SIZE)
+
+    if (!pageOrderIds.length) {
+      setGroups([])
+      setSelected(new Set())
+      setAssignedIds(new Set())
+      setShipStats({})
+      return
+    }
+
+    // 2단계: 이 페이지 주문들의 상품 전체를 실제 컬럼으로 조회 (주문이 몇 개짜리든 다 가져옴)
+    const { data } = await supabase
+      .from('order_items')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, labels, cafe24_item_code, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, order_date, order_place_name, admin_memo)')
+      .in('order_id', pageOrderIds)
+      .eq('status', 'collected')
+      .is('batch_id', null)
+      .eq('order_status', 'N20')
     const map: Record<string, OrderGroup> = {}
     for (const row of (data ?? []) as any[]) {
       const o = row.orders
