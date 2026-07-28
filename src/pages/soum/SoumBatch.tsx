@@ -65,6 +65,7 @@ export default function SoumBatch() {
   const [pickingSort, setPickingSort] = useState<'location' | 'brand'>('location')
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null)
 
   useEffect(() => { loadBatches() }, [])
 
@@ -230,62 +231,6 @@ export default function SoumBatch() {
   const pickingList = buildPickingList()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  function downloadCJ() {
-    // 이 배치에 경동/직배 상품이 섞여 있어도 CJ로 배정된 상품만 CJ 송장 엑셀에 실림
-    const cjItems = items.filter(i => i.delivery_method === 'CJ')
-    if (!cjItems.length) {
-      alert('이 배치에 CJ 배정 상품이 없습니다.')
-      return
-    }
-
-    // 택배 프로그램의 '합포장' 설정으로 같은 고객주문번호 여러 줄이 하나로 묶여 출력됨을 확인 —
-    // 상품마다 한 줄씩 나누고, 품목명은 각 줄의 실제 상품명, 박스수량은 실제 주문 수량
-    const orderInfo: Record<string, {
-      orderNo: string; name: string; phone: string; zipcode: string
-      address: string; message: string
-    }> = {}
-    for (const item of cjItems) {
-      const key = item.cafe24_order_no
-      if (!orderInfo[key]) {
-        orderInfo[key] = {
-          orderNo: key,
-          name: item.receiver_name || item.customer_name,
-          phone: item.receiver_phone ?? '',
-          zipcode: item.zipcode ?? '',
-          address: item.address ?? '',
-          message: item.shipping_message ?? '',
-        }
-      }
-    }
-
-    // CJ 표준 양식 (컬럼 순서 고정). 값이 없는 필드(예약구분/받는분기타연락처/운송장번호/
-    // 박스타입/기본운임/배송메세지2)는 CJ 시스템이 채우거나 우리가 안 쓰는 항목이라 공란.
-    const header = [
-      '예약구분', '집하예정일', '받는분성명', '받는분전화번호', '받는분기타연락처',
-      '받는분우편번호', '받는분주소(전체, 분할)', '운송장번호', '고객주문번호',
-      '품목명', '박스수량', '박스타입', '기본운임', '배송메세지1', '배송메세지2',
-      '품목명', '운임구분',
-    ]
-    const d = new Date()
-    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-
-    // 상품마다 한 줄씩 — 같은 주문번호가 여러 줄에 반복됨, 박스수량은 실제 주문 수량
-    const dataRows = cjItems.map(item => {
-      const o = orderInfo[item.cafe24_order_no]
-      return [
-        '', dateStr, o.name, o.phone, '',
-        o.zipcode, o.address, '', o.orderNo,
-        item.product_name, item.quantity, '', '', o.message, '',
-        '', '',
-      ]
-    })
-
-    const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows])
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'CJ송장')
-    XLSX.writeFile(wb, `CJ송장_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
-  }
-
   // CJ "루밍" 지정형 레이아웃용 (내품수량 필드가 있는 커스텀 양식) — 박스수량은 항상 1,
   // 실제 수량은 내품수량 컬럼에 넣음
   function downloadCJUpload1() {
@@ -375,6 +320,7 @@ export default function SoumBatch() {
       // CJ 배정 상품만 찾아 그 상품의 shipping_code에만 반영함 (타임아웃 방지 위해 50건씩 분할)
       let cafe24Updated = 0
       const cafe24Errors: string[] = []
+      setUploadProgress({ current: 0, total: parsed.length })
       for (let i = 0; i < parsed.length; i += 50) {
         const chunk = parsed.slice(i, i + 50)
         try {
@@ -389,6 +335,7 @@ export default function SoumBatch() {
         } catch {
           cafe24Errors.push(`${chunk[0].order_no} 외 ${chunk.length - 1}건: 네트워크 오류`)
         }
+        setUploadProgress({ current: Math.min(i + 50, parsed.length), total: parsed.length })
       }
 
       let msg = `카페24 배송대기 처리 ${cafe24Updated}건 / 전체 ${parsed.length}건`
@@ -400,6 +347,7 @@ export default function SoumBatch() {
     } catch (err: any) {
       alert(`파일 처리 실패: ${err.message}`)
     } finally {
+      setUploadProgress(null)
       e.target.value = ''
     }
   }
@@ -426,6 +374,22 @@ export default function SoumBatch() {
           {refreshing ? '새로고침 중...' : '↻ 새로고침'}
         </button>
       </div>
+
+      {/* 운송장 업로드 진행 상태 (50건씩 분할 호출) */}
+      {uploadProgress && (
+        <div className="bg-white rounded-xl border p-3 mb-4">
+          <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
+            <span className="font-medium text-gray-700">운송장 등록 중...</span>
+            <span>{uploadProgress.current} / {uploadProgress.total}건</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-blue-600 transition-all duration-300"
+              style={{ width: `${uploadProgress.total ? (uploadProgress.current / uploadProgress.total) * 100 : 0}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* 배치 카드 */}
       <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-6">
@@ -464,16 +428,10 @@ export default function SoumBatch() {
             {items.length > 0 && (
               <div className="flex gap-2">
                 <button
-                  onClick={downloadCJ}
+                  onClick={downloadCJUpload1}
                   className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
                 >
                   CJ 송장 출력용 엑셀 다운로드
-                </button>
-                <button
-                  onClick={downloadCJUpload1}
-                  className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-500 text-white hover:bg-blue-600"
-                >
-                  CJ업로드1
                 </button>
                 <button
                   onClick={() => fileInputRef.current?.click()}
