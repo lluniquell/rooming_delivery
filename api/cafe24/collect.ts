@@ -103,7 +103,11 @@ function itemRowsOf(order: any, dbOrderId: string) {
   }))
 }
 
-// 미배정 재확인 — 이미 수집됐지만 아직 배치 미배정인 상품들의 상태/라벨/메모를 최신화.
+// 미배정 재확인 — 아직 운송장이 없는 상품(미배정이든, 배치에 들어갔지만 운송장 등록 전이든)의
+// 상태/라벨/메모를 최신화. 운송장이 이미 등록된 상품은 대상에서 제외 — 그건 나중에 배송대기
+// 전환 시도할 때 카페24가 취소 주문이면 알아서 에러로 걸러줌. 웹훅 없이 이 재확인만으로
+// 취소 감지를 대신함(2026-07-28 결정) — 배치에 들어간 채로 취소된 상품도 order_status가
+// 갱신되면 화면엔 안 보여도(주문 수집 화면은 batch_id null인 것만 보여줌) 내부 데이터는 정확해짐.
 // 대상이 몇 백 건이면 한 번에 다 처리하다 Vercel 60초 제한을 넘길 수 있어서(2026-07-28
 // 실제 발생) offset/limit으로 나눠 호출 — 프론트가 진행률 표시하며 반복 호출함
 // (POST ?phase=recheck, body: { offset, limit })
@@ -115,8 +119,8 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
     const { data: pendingRows } = await supabase
       .from('order_items')
       .select('id, cafe24_item_code, labels, orders!inner(id, cafe24_order_no)')
-      .eq('status', 'collected')
-      .is('batch_id', null)
+      .in('status', ['collected', 'confirmed'])
+      .is('tracking_number', null)
       .eq('order_status', 'N20')
 
     const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null }[]>()

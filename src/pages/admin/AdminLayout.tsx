@@ -63,6 +63,38 @@ export function isDriverAccount(driver: Driver) {
   return driver.permissions?.includes('driver') ?? false
 }
 
+// 지금 브라우저가 로드하고 있는 번들이 실제 배포된 최신 번들인지 주기적으로 확인.
+// index.html을 캐시 없이 다시 받아와서 그 안의 script 파일명(해시 포함)을 지금 로드된
+// 것과 비교 — 다르면 새 배포가 있었는데 새로고침을 안 한 것
+function useVersionCheck() {
+  const [outdated, setOutdated] = useState(false)
+
+  useEffect(() => {
+    async function check() {
+      try {
+        const currentScript = document.querySelector('script[src*="/assets/index-"]')?.getAttribute('src')
+        if (!currentScript) return // 로컬 개발 서버 등 해시 번들이 없는 환경
+        const res = await fetch('/', { cache: 'no-store' })
+        const html = await res.text()
+        const liveScript = html.match(/\/assets\/index-[^"]+\.js/)?.[0]
+        if (liveScript && liveScript !== currentScript) setOutdated(true)
+      } catch {
+        // 네트워크 오류는 무시 — 다음 주기에 재시도
+      }
+    }
+    check()
+    const interval = setInterval(check, 5 * 60 * 1000)
+    const onFocus = () => check()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      clearInterval(interval)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [])
+
+  return outdated
+}
+
 function NavGroup({ label, items }: { label: string; items: { to: string; label: string }[] }) {
   const [open, setOpen] = useState(false)
   const location = useLocation()
@@ -113,6 +145,7 @@ function NavGroup({ label, items }: { label: string; items: { to: string; label:
 
 export default function AdminLayout({ driver }: Props) {
   const canSee = (key: Permission) => hasPermission(driver, key)
+  const outdated = useVersionCheck()
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -137,6 +170,16 @@ export default function AdminLayout({ driver }: Props) {
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm text-gray-500">
+          {outdated ? (
+            <button
+              onClick={() => window.location.reload()}
+              className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 animate-pulse"
+            >
+              ⚠️ 새 버전 있음 · 새로고침
+            </button>
+          ) : (
+            <span className="text-[10px] text-gray-300 font-mono" title="배포 버전">{__BUILD_ID__}</span>
+          )}
           <span>{driver.name}</span>
           <button onClick={() => signOut()} className="text-gray-400 hover:text-gray-600">로그아웃</button>
         </div>
