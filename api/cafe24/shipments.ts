@@ -239,7 +239,9 @@ async function handleUnregister(req: VercelRequest, res: VercelResponse) {
     const allItems: any[] = itemsData.items ?? []
     const target = allItems.find((i: any) => i.order_item_code === item_code)
 
-    if (!target?.shipping_code) {
+    // shipping_code는 등록 안 된 상품에도 기본값(-00)이 항상 붙어있어서 등록 여부 판단에
+    // 쓸 수 없음 — 실제 운송장 등록 여부는 tracking_no 유무로 판단해야 함
+    if (!target?.tracking_no || !target?.shipping_code) {
       return res.status(200).json({ ok: true, message: '등록된 운송장이 없습니다.' })
     }
 
