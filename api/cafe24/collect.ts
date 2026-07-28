@@ -103,6 +103,85 @@ function itemRowsOf(order: any, dbOrderId: string) {
   }))
 }
 
+// 미배정 재확인 — 이미 수집됐지만 아직 배치 미배정인 상품들의 상태/라벨/메모를 최신화.
+// 대상이 몇 백 건이면 한 번에 다 처리하다 Vercel 60초 제한을 넘길 수 있어서(2026-07-28
+// 실제 발생) offset/limit으로 나눠 호출 — 프론트가 진행률 표시하며 반복 호출함
+// (POST ?phase=recheck, body: { offset, limit })
+async function handleRecheck(req: VercelRequest, res: VercelResponse) {
+  try {
+    const token = await getToken()
+    const { offset = 0, limit = 50 } = req.body ?? {}
+
+    const { data: pendingRows } = await supabase
+      .from('order_items')
+      .select('id, cafe24_item_code, labels, orders!inner(id, cafe24_order_no)')
+      .eq('status', 'collected')
+      .is('batch_id', null)
+      .eq('order_status', 'N20')
+
+    const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null }[]>()
+    const orderIdByNo = new Map<string, string>()
+    for (const row of (pendingRows ?? []) as any[]) {
+      const no = row.orders.cafe24_order_no
+      orderIdByNo.set(no, row.orders.id)
+      if (!row.cafe24_item_code) continue
+      if (!byOrderNo.has(no)) byOrderNo.set(no, [])
+      byOrderNo.get(no)!.push({ id: row.id, cafe24_item_code: row.cafe24_item_code, labels: row.labels })
+    }
+    // 매 호출마다 순서가 흔들리지 않도록 정렬 후 슬라이스
+    const allOrderNos = [...orderIdByNo.keys()].sort()
+    const total = allOrderNos.length
+    const chunk = allOrderNos.slice(offset, offset + limit)
+
+    let notReady = 0
+    if (chunk.length) {
+      // order_id 지정 시 날짜 파라미터 없이도 조회 가능 (날짜 필터엔 3개월 제한이 있어서 회피)
+      const data = await cafe24Get(
+        `/api/v2/admin/orders?order_id=${chunk.join(',')}&embed=items&shop_no=1&limit=${chunk.length}`,
+        token
+      )
+      const itemsByOrder = new Map<string, any[]>((data.orders ?? []).map((o: any) => [o.order_id, o.items ?? []]))
+      for (const no of chunk) {
+        const liveItems = itemsByOrder.get(no) ?? []
+        for (const pendingItem of byOrderNo.get(no) ?? []) {
+          const match = liveItems.find((i: any) => i.order_item_code === pendingItem.cafe24_item_code)
+          if (!match) continue
+          const patch: Record<string, any> = {}
+          if (match.order_status && match.order_status !== 'N20') { patch.order_status = match.order_status; notReady++ }
+          if (JSON.stringify(match.labels ?? []) !== JSON.stringify(pendingItem.labels ?? [])) {
+            patch.labels = match.labels ?? []
+          }
+          if (Object.keys(patch).length) {
+            await supabase.from('order_items').update(patch).eq('id', pendingItem.id)
+          }
+        }
+      }
+
+      // 관리자 메모는 카페24가 벌크 조회를 지원 안 해서 주문마다 따로 호출해야 함 — 동시에 처리
+      const MEMO_CONCURRENCY = 10
+      for (let j = 0; j < chunk.length; j += MEMO_CONCURRENCY) {
+        const sub = chunk.slice(j, j + MEMO_CONCURRENCY)
+        await Promise.all(sub.map(async no => {
+          const orderId = orderIdByNo.get(no)
+          if (!orderId) return
+          const memos = await fetchMemos(no, token)
+          await supabase.from('orders').update({ admin_memo: memos }).eq('id', orderId)
+        }))
+      }
+    }
+
+    res.status(200).json({
+      processed: chunk.length,
+      total,
+      not_ready: notReady,
+      next_offset: offset + limit,
+      done: offset + limit >= total,
+    })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 주문 1건 상세 조회 (orders/[orderNo].ts 병합) — GET ?order_no=xxx
   if (req.method === 'GET') {
@@ -118,6 +197,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method !== 'POST') return res.status(405).end()
+  if (req.query.phase === 'recheck') return handleRecheck(req, res)
 
   try {
     const token = await getToken()
@@ -143,65 +223,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (page.length < 100) break
     }
 
-    // order_items.order_status에 카페24의 실제 상태 코드(N20, N40, E40 등)를 상품 단위로 저장.
-    // 한 주문 안에서도 상품마다 상태가 다를 수 있음(배송완료/교환완료/배송준비중이 한 주문에
-    // 섞여있는 실제 사례 확인) — 그래서 주문 단위가 아니라 상품 단위로 추적해야 함.
-    // 이미 수집됐지만 아직 배치 미배정인 상품들 중 N20이 아니게 바뀐 게 있으면 실제 값으로 갱신
-    // — 주문 수집 화면은 order_status='N20'인 상품만 보여주므로 자동으로 숨겨짐
-    let notReady = 0
-    {
-      const { data: pendingRows } = await supabase
-        .from('order_items')
-        .select('id, cafe24_item_code, labels, orders!inner(id, cafe24_order_no)')
-        .eq('status', 'collected')
-        .is('batch_id', null)
-        .eq('order_status', 'N20')
-      const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null }[]>()
-      const orderIdByNo = new Map<string, string>()
-      for (const row of (pendingRows ?? []) as any[]) {
-        const no = row.orders.cafe24_order_no
-        orderIdByNo.set(no, row.orders.id)
-        if (!row.cafe24_item_code) continue
-        if (!byOrderNo.has(no)) byOrderNo.set(no, [])
-        byOrderNo.get(no)!.push({ id: row.id, cafe24_item_code: row.cafe24_item_code, labels: row.labels })
-      }
-      const orderNos = [...byOrderNo.keys()]
-      for (let i = 0; i < orderNos.length; i += 50) {
-        const chunk = orderNos.slice(i, i + 50)
-        // order_id 지정 시 날짜 파라미터 없이도 조회 가능 (날짜 필터엔 3개월 제한이 있어서 회피)
-        const data = await cafe24Get(
-          `/api/v2/admin/orders?order_id=${chunk.join(',')}&embed=items&shop_no=1&limit=${chunk.length}`,
-          token
-        )
-        const itemsByOrder = new Map<string, any[]>((data.orders ?? []).map((o: any) => [o.order_id, o.items ?? []]))
-        for (const no of chunk) {
-          const liveItems = itemsByOrder.get(no) ?? []
-          for (const pendingItem of byOrderNo.get(no) ?? []) {
-            const match = liveItems.find((i: any) => i.order_item_code === pendingItem.cafe24_item_code)
-            if (!match) continue
-            const patch: Record<string, any> = {}
-            if (match.order_status && match.order_status !== 'N20') { patch.order_status = match.order_status; notReady++ }
-            if (JSON.stringify(match.labels ?? []) !== JSON.stringify(pendingItem.labels ?? [])) {
-              patch.labels = match.labels ?? []
-            }
-            if (Object.keys(patch).length) {
-              await supabase.from('order_items').update(patch).eq('id', pendingItem.id)
-            }
-          }
-
-          // 이슈 발생 시 담당자가 남기는 관리자 메모 — 미배정 재확인 때도 최신으로 갱신
-          const orderId = orderIdByNo.get(no)
-          if (orderId) {
-            const memos = await fetchMemos(no, token)
-            await supabase.from('orders').update({ admin_memo: memos }).eq('id', orderId)
-          }
-          await new Promise(r => setTimeout(r, 100))
-        }
-      }
-    }
+    // 이미 수집됐지만 아직 배치 미배정인 상품들의 상태/라벨/메모 재확인은 별도 엔드포인트
+    // (POST ?phase=recheck)로 분리됨 — 프론트가 offset을 늘려가며 반복 호출
 
     if (!cafe24Orders.length) {
-      return res.status(200).json({ collected: 0, skipped: 0, total: 0, not_ready: notReady, message: '수집할 주문이 없습니다.' })
+      return res.status(200).json({ collected: 0, skipped: 0, total: 0, message: '수집할 주문이 없습니다.' })
     }
 
     const ids = cafe24Orders.map(o => o.order_id)
@@ -298,7 +324,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       collected,
       skipped: cafe24Orders.length - collected,
       items_backfilled: itemsBackfilled,
-      not_ready: notReady,
       total: cafe24Orders.length,
       ...(errors.length && { errors }),
     })
