@@ -36,6 +36,7 @@ interface Stop {
   route_id: string | null
   lat: number | null
   lng: number | null
+  visit_time: string | null
   items: StopItem[]
   _dist?: number
   _routeLabel?: string | null
@@ -79,6 +80,7 @@ interface RouteStop {
   crew_size: number | null
   lat: number | null
   lng: number | null
+  visit_time: string | null
   items: StopItem[]
   route_order: number
   route_id: string
@@ -110,8 +112,9 @@ function loadKakaoSdk(): Promise<void> {
   })
 }
 
-function SortableStop({ stop, index, color, onRemove }: {
+function SortableStop({ stop, index, color, onRemove, onTimeChange }: {
   stop: RouteStop; index: number; color: string; onRemove: (s: RouteStop) => void
+  onTimeChange: (s: RouteStop, time: string) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id })
   const style = { transform: CSS.Transform.toString(transform), transition }
@@ -119,6 +122,18 @@ function SortableStop({ stop, index, color, onRemove }: {
 
   return (
     <div ref={setNodeRef} style={style} className={`flex items-center gap-2 border rounded-lg p-2 group ${isPreset ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
+      {/* 고객 약속시간/지원기사 합류시간 — 동선 맨 앞에 표시 */}
+      {isPreset ? (
+        <span className="w-[4.5rem] shrink-0" />
+      ) : (
+        <input
+          type="time"
+          value={stop.visit_time ?? ''}
+          onChange={e => onTimeChange(stop, e.target.value)}
+          onClick={e => e.stopPropagation()}
+          className="w-[4.5rem] shrink-0 text-xs border rounded px-1 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
+        />
+      )}
       <span {...attributes} {...listeners} className="cursor-grab text-gray-300 text-lg leading-none px-1">⠿</span>
       <span className="w-6 h-6 rounded-full text-white text-xs font-bold flex items-center justify-center shrink-0" style={{ backgroundColor: color }}>
         {index + 1}
@@ -199,6 +214,7 @@ export default function ScheduleDay() {
         crew_size: s.crew_size,
         lat: s.lat,
         lng: s.lng,
+        visit_time: s.visit_time,
         items: s.items,
         route_order: s.route_order ?? 999,
         route_id: s.route_id!,
@@ -216,6 +232,7 @@ export default function ScheduleDay() {
           crew_size: null,
           lat: p.lat,
           lng: p.lng,
+          visit_time: null,
           items: [],
           route_order: w.route_order,
           route_id: w.route_id,
@@ -296,6 +313,7 @@ export default function ScheduleDay() {
           route_id: o.route_id,
           lat: o.lat,
           lng: o.lng,
+          visit_time: o.visit_time,
           items: [],
         }
       }
@@ -305,7 +323,7 @@ export default function ScheduleDay() {
   }
 
   async function loadAll(bid: string, routesForDate: RouteLane[]) {
-    const SELECT = 'id, product_name, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, crew_size, route_order, route_id, lat, lng, scheduled_date)'
+    const SELECT = 'id, product_name, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time)'
 
     const { data: scheduledData } = await supabase
       .from('order_items')
@@ -474,9 +492,15 @@ export default function ScheduleDay() {
     }
   }
 
+  async function updateVisitTime(stop: RouteStop, time: string) {
+    if (stop.kind !== 'order') return
+    await supabase.from('orders').update({ visit_time: time || null }).eq('id', stop.id)
+    setStops(prev => prev.map(s => s.order_id === stop.id ? { ...s, visit_time: time || null } : s))
+  }
+
   async function removeStop(stop: RouteStop) {
     if (stop.kind === 'order') {
-      await supabase.from('orders').update({ scheduled_date: null, crew_size: null, route_order: null, route_id: null }).eq('id', stop.id)
+      await supabase.from('orders').update({ scheduled_date: null, crew_size: null, route_order: null, route_id: null, visit_time: null }).eq('id', stop.id)
       if (batchId) loadAll(batchId, routes)
     } else {
       const [, routeId, key] = stop.id.split(':')
@@ -752,7 +776,7 @@ export default function ScheduleDay() {
                               <div className="p-4 text-center text-xs text-gray-300">이 루트에 배정된 배송건이 없습니다</div>
                             ) : (
                               laneStops.map((s, i) => (
-                                <SortableStop key={s.id} stop={s} index={i} color={color} onRemove={removeStop} />
+                                <SortableStop key={s.id} stop={s} index={i} color={color} onRemove={removeStop} onTimeChange={updateVisitTime} />
                               ))
                             )}
                           </LaneDropZone>
