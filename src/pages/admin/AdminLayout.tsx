@@ -116,7 +116,7 @@ export default function AdminLayout({ driver }: Props) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b px-6 py-3 flex items-center justify-between">
+      <header className="bg-white border-b px-6 py-3 flex items-center justify-between print:hidden">
         <div className="flex items-center gap-6">
           <span className="font-bold text-gray-800">루밍 관리</span>
           <nav className="flex gap-1">
