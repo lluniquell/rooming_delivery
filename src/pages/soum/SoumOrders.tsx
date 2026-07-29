@@ -263,6 +263,8 @@ export default function SoumOrders() {
   const [page, setPage] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
   const [orderSort, setOrderSort] = useState<'asc' | 'desc'>('desc')
+  const [searchQuery, setSearchQuery] = useState('')
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null)
   // 배정된 상품 id — groups 배열에서는 안 지우고 여기만 기록해서 화면에서 invisible 처리함
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set())
@@ -294,15 +296,27 @@ export default function SoumOrders() {
     setLastCollected(data?.value || null)
   }
 
-  async function loadOrders(pageNum = page, sort = orderSort) {
+  async function loadOrders(pageNum = page, sort = orderSort, search = searchQuery) {
     // 1단계: 조건에 맞는 주문id + 주문번호만 가볍게 전부 조회 — 여기서 정렬/페이지를
     // "주문" 단위로 정해야 한 주문의 상품들이 페이지 경계에서 쪼개지지 않음
-    const { data: idRows } = await supabase
+    let idQuery = supabase
       .from('order_items')
       .select('order_id, orders!inner(cafe24_order_no)')
       .eq('status', 'collected')
       .is('batch_id', null)
       .eq('order_status', 'N20')
+
+    // 검색어가 숫자/하이픈뿐이면 주문번호로, 아니면 주문자/수령인 이름으로 검색
+    const q = search.trim()
+    if (q) {
+      if (/^[\d-]+$/.test(q)) {
+        idQuery = idQuery.ilike('orders.cafe24_order_no', `%${q}%`)
+      } else {
+        idQuery = idQuery.or(`customer_name.ilike.%${q}%,receiver_name.ilike.%${q}%`, { foreignTable: 'orders' })
+      }
+    }
+
+    const { data: idRows } = await idQuery
 
     const orderNoById = new Map<string, string>()
     for (const row of (idRows ?? []) as any[]) {
@@ -655,6 +669,30 @@ export default function SoumOrders() {
         >
           주문번호 {orderSort === 'asc' ? '오름차순 ↑' : '내림차순 ↓'}
         </button>
+      </div>
+
+      {/* 검색 — 숫자/하이픈만 입력하면 주문번호로, 그 외엔 주문자/수령인 이름으로 검색 */}
+      <div className="bg-white rounded-xl border p-3 mb-4 flex items-center gap-2">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={e => {
+            const v = e.target.value
+            setSearchQuery(v)
+            if (searchTimeout.current) clearTimeout(searchTimeout.current)
+            searchTimeout.current = setTimeout(() => loadOrders(0, orderSort, v), 400)
+          }}
+          placeholder="주문자 / 수령인 / 주문번호로 검색"
+          className="flex-1 border rounded-lg px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        {searchQuery && (
+          <button
+            onClick={() => { setSearchQuery(''); loadOrders(0, orderSort, '') }}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+          >
+            초기화
+          </button>
+        )}
       </div>
 
       {assignWarn && (
