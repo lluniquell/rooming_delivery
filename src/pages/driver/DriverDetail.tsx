@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
+import { compressImage } from '../../lib/photo'
 
 interface OrderItem {
   id: string
@@ -19,24 +20,6 @@ interface OrderStop {
   delivered_at: string | null
   delivery_memo: string | null
   items: OrderItem[]
-}
-
-function compressImage(file: File): Promise<Blob> {
-  return new Promise((resolve) => {
-    const img = new Image()
-    const url = URL.createObjectURL(file)
-    img.onload = () => {
-      const canvas = document.createElement('canvas')
-      const maxW = 800
-      const scale = Math.min(1, maxW / img.width)
-      canvas.width = img.width * scale
-      canvas.height = img.height * scale
-      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height)
-      canvas.toBlob(blob => resolve(blob!), 'image/jpeg', 0.7)
-      URL.revokeObjectURL(url)
-    }
-    img.src = url
-  })
 }
 
 function mapDeeplink(address: string) {
@@ -99,8 +82,10 @@ export default function DriverDetail() {
     try {
       const compressed = await compressImage(file)
       const path = `${order.id}/${item.id}/${Date.now()}.jpg`
-      await supabase.storage.from('delivery-photos').upload(path, compressed)
-      await supabase.from('delivery_photos').insert({ order_id: order.id, order_item_id: item.id, storage_path: path })
+      const { error: uploadError } = await supabase.storage.from('delivery-photos').upload(path, compressed)
+      if (uploadError) { alert(`사진 업로드 실패: ${uploadError.message}`); return }
+      const { error: insertError } = await supabase.from('delivery_photos').insert({ order_id: order.id, order_item_id: item.id, storage_path: path })
+      if (insertError) { alert(`사진 저장 실패: ${insertError.message}`); return }
       setPhotoTaken(prev => new Set([...prev, item.id]))
     } finally {
       setUploadingItemId(null)
