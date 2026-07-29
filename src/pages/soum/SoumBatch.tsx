@@ -31,6 +31,7 @@ interface Item {
   zipcode: string | null
   address: string | null
   shipping_message: string | null
+  visit_time: string | null
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -103,7 +104,7 @@ export default function SoumBatch() {
     setLoading(true)
     const { data } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message)')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time)')
       .eq('batch_id', batchId)
       .eq('status', 'confirmed')
     const rows = ((data ?? []) as any[])
@@ -127,6 +128,7 @@ export default function SoumBatch() {
         zipcode: row.orders.zipcode,
         address: row.orders.address,
         shipping_message: row.orders.shipping_message,
+        visit_time: row.orders.visit_time,
         _date: row.orders.order_date ?? '',
       }))
       .sort((a, b) => a._date.localeCompare(b._date) || a.cafe24_order_no.localeCompare(b.cafe24_order_no))
@@ -286,6 +288,39 @@ export default function SoumBatch() {
     XLSX.writeFile(wb, `CJ업로드1_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
   }
 
+  // 직배(수기 배차) 용 — 배송담당자는 현장에서 손으로 채워 넣는 칸이라 빈 칸으로 둠.
+  // 번호는 "이 배치 전체 주문 중 몇 번째"를 뜻해서, 같은 주문의 상품 행들은 같은 번호를 공유함
+  function downloadDirectManual() {
+    if (!items.length) {
+      alert('이 배치에 상품이 없습니다.')
+      return
+    }
+
+    const orderNos = [...new Set(items.map(i => i.cafe24_order_no))]
+    const total = orderNos.length
+    const orderIndex: Record<string, number> = {}
+    orderNos.forEach((no, idx) => { orderIndex[no] = idx + 1 })
+
+    const header = ['배송 담당자', '판매담당자', '고객명', '번호', '제품명', '도착시간', '연락처', '주소']
+    const dataRows = items.map(item => [
+      '',
+      item.customer_name,
+      item.receiver_name || item.customer_name,
+      `${orderIndex[item.cafe24_order_no]}-${total}`,
+      `${item.product_name} x ${item.quantity}ea`,
+      item.visit_time ?? '',
+      item.receiver_phone ?? '',
+      item.address ?? '',
+    ])
+
+    const d = new Date()
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '수기엑셀')
+    XLSX.writeFile(wb, `수기엑셀_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
+  }
+
   async function uploadTracking(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -428,12 +463,21 @@ export default function SoumBatch() {
             </span>
             {items.length > 0 && (
               <div className="flex gap-2">
-                <button
-                  onClick={downloadCJUpload1}
-                  className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
-                >
-                  CJ 송장 출력용 엑셀 다운로드
-                </button>
+                {activeBatch?.type === 'direct' ? (
+                  <button
+                    onClick={downloadDirectManual}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    수기 엑셀 다운로드
+                  </button>
+                ) : (
+                  <button
+                    onClick={downloadCJUpload1}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    CJ 송장 출력용 엑셀 다운로드
+                  </button>
+                )}
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="px-3 py-1.5 rounded-lg text-sm font-medium bg-orange-500 text-white hover:bg-orange-600"
