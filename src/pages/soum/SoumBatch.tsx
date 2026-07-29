@@ -311,7 +311,7 @@ export default function SoumBatch() {
         item.customer_name,
         item.receiver_name || item.customer_name,
         total > 1 ? `${seenIndex[item.cafe24_order_no]}-${total}` : '',
-        `${item.product_name} x ${item.quantity}ea`,
+        item.supplier_name ? `${item.product_name} x ${item.quantity}ea\n${item.supplier_name}` : `${item.product_name} x ${item.quantity}ea`,
         item.visit_time ?? '',
         item.receiver_phone ?? '',
         item.address ?? '',
@@ -321,6 +321,25 @@ export default function SoumBatch() {
     const d = new Date()
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows])
+
+    // 같은 주문(고객)의 여러 상품 행은 판매담당자/고객명/연락처/주소가 다 똑같으니 셀 병합
+    // — items가 이미 cafe24_order_no 기준으로 정렬돼 있어서 연속된 행끼리만 묶으면 됨
+    const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = []
+    const mergeCols = [1, 2, 6, 7] // 판매담당자, 고객명, 연락처, 주소
+    let runStart = 0
+    for (let i = 1; i <= items.length; i++) {
+      const sameAsPrev = i < items.length && items[i].cafe24_order_no === items[runStart].cafe24_order_no
+      if (!sameAsPrev) {
+        if (i - runStart > 1) {
+          for (const c of mergeCols) {
+            merges.push({ s: { r: runStart + 1, c }, e: { r: i, c } }) // +1: 헤더 행 보정
+          }
+        }
+        runStart = i
+      }
+    }
+    ws['!merges'] = merges
+
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '수기엑셀')
     XLSX.writeFile(wb, `수기엑셀_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
