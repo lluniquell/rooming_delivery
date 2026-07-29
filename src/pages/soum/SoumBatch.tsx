@@ -33,6 +33,9 @@ interface Item {
   address: string | null
   shipping_message: string | null
   visit_time: string | null
+  order_date: string | null
+  tm_barcode: string | null
+  tm_external_order_no: string | null
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -49,6 +52,36 @@ const STATUS_COLOR: Record<string, string> = {
 
 // 각 자리는 숫자/문자 상관없이 올 수 있음 (예: NK-01-02-03, NK-A1-B2-C3)
 const LOC_REGEX = /[A-Z]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}/
+
+// 엑셀 열 너비 자동 계산용 — 한글은 2칸으로 계산
+function strWidth(s: string) {
+  let w = 0
+  for (const ch of s) w += /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(ch) ? 2 : 1
+  return w
+}
+
+function autoColWidths(header: string[], dataRows: string[][], colMax: Record<number, number> = {}) {
+  return header.map((h, colIdx) => {
+    let max = strWidth(h)
+    for (const row of dataRows) {
+      for (const line of String(row[colIdx] ?? '').split('\n')) {
+        max = Math.max(max, strWidth(line))
+      }
+    }
+    const width = max + 2
+    return { wch: colMax[colIdx] ? Math.min(width, colMax[colIdx]) : width }
+  })
+}
+
+// 도로명주소 뒤에 오는 "OOO동 OOO호" 같은 상세주소를 찾아 별도 줄로 분리 (100% 정확하진 않음)
+function splitAddressDetail(address: string | null): string {
+  if (!address) return ''
+  const m = address.match(/\s(\d+동\s*\d+호.*|\d+호.*)/)
+  if (!m || m.index === undefined) return address.trim()
+  const road = address.slice(0, m.index).trim()
+  const detail = m[0].trim()
+  return `${road}\n${detail}`
+}
 
 // 출력 시점 표시용 — YYYYMMDD HH:MM:SS
 function printTimestamp() {
@@ -105,7 +138,7 @@ export default function SoumBatch() {
     setLoading(true)
     const { data } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time)')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, tm_barcode, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no)')
       .eq('batch_id', batchId)
       .eq('status', 'confirmed')
     const rows = ((data ?? []) as any[])
@@ -130,9 +163,11 @@ export default function SoumBatch() {
         address: row.orders.address,
         shipping_message: row.orders.shipping_message,
         visit_time: row.orders.visit_time,
-        _date: row.orders.order_date ?? '',
+        order_date: row.orders.order_date ?? null,
+        tm_barcode: row.tm_barcode ?? null,
+        tm_external_order_no: row.orders.tm_external_order_no ?? null,
       }))
-      .sort((a, b) => a._date.localeCompare(b._date) || a.cafe24_order_no.localeCompare(b.cafe24_order_no))
+      .sort((a, b) => (a.order_date ?? '').localeCompare(b.order_date ?? '') || a.cafe24_order_no.localeCompare(b.cafe24_order_no))
     setItems(rows)
     setLoading(false)
   }
@@ -347,23 +382,8 @@ export default function SoumBatch() {
     }
     ws['!merges'] = merges
 
-    // 내용 길이에 맞춰 열 너비 자동 지정 (한글은 2칸으로 계산)
-    const strWidth = (s: string) => {
-      let w = 0
-      for (const ch of s) w += /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(ch) ? 2 : 1
-      return w
-    }
-    const COL_MAX: Record<number, number> = { 4: 40, 7: 45 } // 제품명·주소는 줄바꿈으로 처리하니 너무 넓어지지 않게 제한
-    ws['!cols'] = header.map((h, colIdx) => {
-      let max = strWidth(h)
-      for (const row of dataRows) {
-        for (const line of String(row[colIdx] ?? '').split('\n')) {
-          max = Math.max(max, strWidth(line))
-        }
-      }
-      const width = max + 2
-      return { wch: COL_MAX[colIdx] ? Math.min(width, COL_MAX[colIdx]) : width }
-    })
+    // 내용 길이에 맞춰 열 너비 자동 지정 — 제품명·주소는 줄바꿈으로 처리하니 너무 넓어지지 않게 제한
+    ws['!cols'] = autoColWidths(header, dataRows, { 4: 40, 7: 45 })
 
     // 병합된 행은 엑셀이 줄바꿈에 맞춰 행 높이를 자동으로 못 맞추므로, 줄 수에 맞춰 직접 지정
     const ROW_HEIGHT_PT = 15 // 엑셀 기본 한 줄 높이
@@ -375,6 +395,149 @@ export default function SoumBatch() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '수기엑셀')
     XLSX.writeFile(wb, `수기엑셀_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
+  }
+
+  // 팀무버 배치용 내부 확인용 엑셀 — 조립 여부/배송 희망일/배송 예정일은 아직 관리하는 데이터가
+  // 없어서 빈 칸으로 두고 현장에서 수기로 채움
+  function downloadTeamMoverExcel() {
+    if (!items.length) { alert('이 배치에 상품이 없습니다.'); return }
+
+    const header = ['담당자', '고객명', '제품명', '제품', '조립 여부', '배송 희망일', '배송 예정일', '', '연락처', '주소', '', '', '']
+    const dataRows = items.map(item => [
+      item.customer_name,
+      item.receiver_name || item.customer_name,
+      item.product_name,
+      item.supplier_name ?? '',
+      '',
+      '',
+      '',
+      '',
+      item.receiver_phone ?? '',
+      item.address ?? '',
+      '',
+      '',
+      '',
+    ])
+
+    const d = new Date()
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows])
+    ws['!cols'] = autoColWidths(header, dataRows, { 2: 35, 9: 45 })
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '팀무버')
+    XLSX.writeFile(wb, `팀무버_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
+  }
+
+  // 팀무버 주문 등록(외부 업로드용) 엑셀 — 외부주문번호/외부송장번호/바코드는 한번 발급되면
+  // 재다운로드해도 같은 값을 계속 써야 해서(중복 등록 방지) orders/order_items에 영구 저장해 재사용
+  async function downloadTeamMoverRegisterExcel() {
+    if (!items.length) { alert('이 배치에 상품이 없습니다.'); return }
+
+    // 1) 외부주문번호 — 주문 단위로 부여 (같은 주문의 상품 행들은 값을 공유)
+    const orderInfoByNo = new Map<string, { order_date: string | null; tm_external_order_no: string | null }>()
+    for (const item of items) {
+      if (!orderInfoByNo.has(item.cafe24_order_no)) {
+        orderInfoByNo.set(item.cafe24_order_no, { order_date: item.order_date, tm_external_order_no: item.tm_external_order_no })
+      }
+    }
+    const fmtYmd = (d: string | null) => (d ? d.slice(0, 10).replace(/-/g, '') : `${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}`)
+
+    const needAssignment = [...orderInfoByNo.entries()].filter(([, o]) => !o.tm_external_order_no)
+    const datesNeeded = [...new Set(needAssignment.map(([, o]) => fmtYmd(o.order_date)))]
+    const maxSeqByDate: Record<string, number> = {}
+    await Promise.all(datesNeeded.map(async datePart => {
+      const { data: usedRows } = await supabase
+        .from('orders')
+        .select('tm_external_order_no')
+        .like('tm_external_order_no', `${datePart}%`)
+      let max = 0
+      for (const row of usedRows ?? []) {
+        const seqPart = parseInt(String(row.tm_external_order_no).slice(8), 10)
+        if (!isNaN(seqPart)) max = Math.max(max, seqPart)
+      }
+      maxSeqByDate[datePart] = max
+    }))
+    const newExternalNoByOrderNo = new Map<string, string>()
+    for (const [orderNo, o] of needAssignment) {
+      const datePart = fmtYmd(o.order_date)
+      const next = (maxSeqByDate[datePart] ?? 0) + 1
+      maxSeqByDate[datePart] = next
+      newExternalNoByOrderNo.set(orderNo, `${datePart}${String(next).padStart(2, '0')}`)
+    }
+    if (newExternalNoByOrderNo.size) {
+      await Promise.all([...newExternalNoByOrderNo.entries()].map(([orderNo, no]) =>
+        supabase.from('orders').update({ tm_external_order_no: no }).eq('cafe24_order_no', orderNo)
+      ))
+    }
+    const externalNoByOrderNo = new Map<string, string>()
+    for (const [orderNo, o] of orderInfoByNo) {
+      externalNoByOrderNo.set(orderNo, o.tm_external_order_no ?? newExternalNoByOrderNo.get(orderNo) ?? '')
+    }
+
+    // 2) 바코드 — 상품(order_item) 단위로 부여, 고정 접두어 ROOMING + 전역 순번
+    const itemsNeedingBarcode = items.filter(i => !i.tm_barcode)
+    const newBarcodeById = new Map<string, string>()
+    if (itemsNeedingBarcode.length) {
+      const { data: maxRow } = await supabase
+        .from('order_items')
+        .select('tm_barcode')
+        .not('tm_barcode', 'is', null)
+        .order('tm_barcode', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      let seq = maxRow?.tm_barcode ? parseInt(String(maxRow.tm_barcode).replace('ROOMING', ''), 10) : 0
+      for (const item of itemsNeedingBarcode) {
+        seq += 1
+        newBarcodeById.set(item.id, `ROOMING${String(seq).padStart(6, '0')}`)
+      }
+      await Promise.all([...newBarcodeById.entries()].map(([id, code]) =>
+        supabase.from('order_items').update({ tm_barcode: code }).eq('id', id)
+      ))
+    }
+
+    const header = [
+      '판매사(필)', '외부주문번호(필)', '외부송장번호(필)', '묶음주문번호', '운송장번호', '주문유형(필)', '송장유형(필)',
+      '주문인(필)', '주문인전화번호1(필)', '주문인전화번호2', '주문인주소(필)', '주문인우편번호',
+      '수령인(필)', '수령인전화번호1(필)', '수령인전화번호2', '수령인주소(필)', '수령인우편번호',
+      '주문일(필)', '희망일', '고객요청사항', '인프라', '창고', '전시장',
+      '바코드(필)', '제품', '제품구분(필)', '제품수량(필)', '판매가', '할인율', '결제수단', '상품명',
+      '추천인고유번호', '추천인이름', '취소비용 고객부담 여부', '택배사', '택배사(직접입력)', '운임구분', '운임비',
+      '판매채널', '판매처', '등록유형', '도선료', '기타',
+    ]
+    const dataRows = items.map(item => {
+      const externalNo = externalNoByOrderNo.get(item.cafe24_order_no) ?? ''
+      const personName = `${item.receiver_name || item.customer_name}님`
+      const addr = splitAddressDetail(item.address)
+      const barcode = item.tm_barcode ?? newBarcodeById.get(item.id) ?? ''
+      return [
+        '(주)루밍', externalNo, externalNo, '', '', '배송', '단순배송',
+        personName, item.receiver_phone ?? '', '', addr, item.zipcode ?? '',
+        personName, item.receiver_phone ?? '', '', addr, item.zipcode ?? '',
+        item.order_date ? item.order_date.slice(0, 10) : '', '', item.shipping_message ?? '', '', '', '',
+        barcode, '', '구성품', String(item.quantity), '', '', '', item.product_name,
+        '', '', '', '', '', '', '',
+        '', '', '', '', '',
+      ]
+    })
+
+    const d = new Date()
+    const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows])
+    ws['!cols'] = autoColWidths(header, dataRows, { 10: 40, 15: 40, 19: 35 })
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '주문등록')
+    XLSX.writeFile(wb, `팀무버_주문등록_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
+
+    // 방금 새로 발급한 값들은 다음 화면 새로고침 없이도 바로 반영
+    if (newExternalNoByOrderNo.size || newBarcodeById.size) {
+      setItems(prev => prev.map(i => ({
+        ...i,
+        tm_external_order_no: i.tm_external_order_no ?? newExternalNoByOrderNo.get(i.cafe24_order_no) ?? null,
+        tm_barcode: i.tm_barcode ?? newBarcodeById.get(i.id) ?? null,
+      })))
+    }
   }
 
   async function uploadTracking(e: React.ChangeEvent<HTMLInputElement>) {
@@ -526,6 +689,21 @@ export default function SoumBatch() {
                   >
                     수기 엑셀 다운로드
                   </button>
+                ) : activeBatch?.name?.includes('팀무버') ? (
+                  <>
+                    <button
+                      onClick={downloadTeamMoverExcel}
+                      className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
+                    >
+                      팀무버 엑셀 다운로드
+                    </button>
+                    <button
+                      onClick={downloadTeamMoverRegisterExcel}
+                      className="px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700"
+                    >
+                      팀무버 주문 등록 엑셀 다운로드
+                    </button>
+                  </>
                 ) : (
                   <button
                     onClick={downloadCJUpload1}
