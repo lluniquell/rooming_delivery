@@ -347,6 +347,31 @@ export default function SoumBatch() {
     }
     ws['!merges'] = merges
 
+    // 내용 길이에 맞춰 열 너비 자동 지정 (한글은 2칸으로 계산)
+    const strWidth = (s: string) => {
+      let w = 0
+      for (const ch of s) w += /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(ch) ? 2 : 1
+      return w
+    }
+    const COL_MAX: Record<number, number> = { 4: 40, 7: 45 } // 제품명·주소는 줄바꿈으로 처리하니 너무 넓어지지 않게 제한
+    ws['!cols'] = header.map((h, colIdx) => {
+      let max = strWidth(h)
+      for (const row of dataRows) {
+        for (const line of String(row[colIdx] ?? '').split('\n')) {
+          max = Math.max(max, strWidth(line))
+        }
+      }
+      const width = max + 2
+      return { wch: COL_MAX[colIdx] ? Math.min(width, COL_MAX[colIdx]) : width }
+    })
+
+    // 병합된 행은 엑셀이 줄바꿈에 맞춰 행 높이를 자동으로 못 맞추므로, 줄 수에 맞춰 직접 지정
+    const ROW_HEIGHT_PT = 15 // 엑셀 기본 한 줄 높이
+    ws['!rows'] = [{}, ...dataRows.map(row => {
+      const lines = (String(row[4]).match(/\n/g)?.length ?? 0) + 1
+      return { hpt: ROW_HEIGHT_PT * lines }
+    })]
+
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '수기엑셀')
     XLSX.writeFile(wb, `수기엑셀_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
