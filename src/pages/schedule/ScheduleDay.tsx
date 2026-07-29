@@ -9,6 +9,8 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { supabase } from '../../lib/supabase'
+// 셀 서식(자동 줄바꿈 등) 쓰기가 필요해서 일반 xlsx 대신 씀 — 일반 xlsx는 스타일 쓰기를 지원 안 함
+import * as XLSX from 'xlsx-js-style'
 
 declare global {
   interface Window { kakao: any }
@@ -24,12 +26,15 @@ interface StopItem {
   id: string
   product_name: string
   quantity: number
+  supplier_name: string | null
 }
 
 interface Stop {
   order_id: string
   cafe24_order_no: string
   customer_name: string
+  orderer_name: string | null // 주문자(구매자) 원본 — customer_name은 위에서 수령인 표시용으로 덮어씀
+  receiver_phone: string | null
   address: string | null
   crew_size: number | null
   route_order: number | null
@@ -58,6 +63,17 @@ interface DayWaypoint {
   route_order: number
 }
 
+// 주문과 무관하게 1회성으로 넣는 배송지 (예: 2인 배송에서 지원기사가 합류하는 곳)
+interface AdhocStop {
+  id: string
+  route_id: string
+  route_order: number
+  name: string
+  phone: string | null
+  address: string | null
+  reason: string | null
+}
+
 interface RouteLane {
   id: string
   label: string
@@ -71,10 +87,10 @@ interface DriverInfo {
   name: string
 }
 
-// 주문 배송건과 프리셋 경유지(NK빌딩 등)를 하나의 루트로 합친 표현
+// 주문 배송건과 프리셋 경유지(NK빌딩 등), 1회성 기타 배송지를 하나의 루트로 합친 표현
 interface RouteStop {
   id: string
-  kind: 'order' | 'preset'
+  kind: 'order' | 'preset' | 'adhoc'
   name: string
   address: string | null
   crew_size: number | null
@@ -84,6 +100,9 @@ interface RouteStop {
   items: StopItem[]
   route_order: number
   route_id: string
+  orderer_name?: string | null
+  phone?: string | null
+  reason?: string | null
 }
 
 function regionOf(address: string | null) {
@@ -119,11 +138,12 @@ function SortableStop({ stop, index, color, onRemove, onTimeChange }: {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id })
   const style = { transform: CSS.Transform.toString(transform), transition }
   const isPreset = stop.kind === 'preset'
+  const isAdhoc = stop.kind === 'adhoc'
 
   return (
-    <div ref={setNodeRef} style={style} className={`flex items-center gap-2 border rounded-lg p-2 group ${isPreset ? 'bg-amber-50 border-amber-200' : 'bg-white'}`}>
+    <div ref={setNodeRef} style={style} className={`flex items-center gap-2 border rounded-lg p-2 group ${isPreset ? 'bg-amber-50 border-amber-200' : isAdhoc ? 'bg-purple-50 border-purple-200' : 'bg-white'}`}>
       {/* 고객 약속시간/지원기사 합류시간 — 동선 맨 앞에 표시 */}
-      {isPreset ? (
+      {isPreset || isAdhoc ? (
         <span className="w-[4.5rem] shrink-0" />
       ) : (
         <input
@@ -142,6 +162,8 @@ function SortableStop({ stop, index, color, onRemove, onTimeChange }: {
         <div className="flex items-center gap-1.5">
           {isPreset ? (
             <span className="text-[10px] px-1 rounded font-bold shrink-0 bg-amber-100 text-amber-700">경유지</span>
+          ) : isAdhoc ? (
+            <span className="text-[10px] px-1 rounded font-bold shrink-0 bg-purple-100 text-purple-700">기타</span>
           ) : (
             <span className={`text-[10px] px-1 rounded font-bold shrink-0 ${
               stop.crew_size === 2 ? 'bg-orange-100 text-orange-600' : 'bg-gray-200 text-gray-600'
@@ -152,7 +174,12 @@ function SortableStop({ stop, index, color, onRemove, onTimeChange }: {
           <span className="text-sm font-medium text-gray-800 truncate">{stop.name}</span>
         </div>
         <div className="text-[11px] text-gray-400 truncate">{stop.address}</div>
-        {!isPreset && stop.items.map(i => (
+        {isAdhoc && (stop.phone || stop.reason) && (
+          <div className="text-[11px] text-gray-400 truncate">
+            {[stop.phone, stop.reason].filter(Boolean).join(' · ')}
+          </div>
+        )}
+        {!isPreset && !isAdhoc && stop.items.map(i => (
           <div key={i.id} className="text-[11px] text-gray-500 truncate">
             {i.product_name} ×{i.quantity}
           </div>
@@ -177,6 +204,7 @@ export default function ScheduleDay() {
   const [stops, setStops] = useState<Stop[]>([])
   const [presets, setPresets] = useState<PresetLocation[]>([])
   const [dayWaypoints, setDayWaypoints] = useState<DayWaypoint[]>([])
+  const [adhocStops, setAdhocStops] = useState<AdhocStop[]>([])
   const [routes, setRoutes] = useState<RouteLane[]>([])
   const [routeVisibility, setRouteVisibility] = useState<Record<string, boolean>>({})
   const [drivers, setDrivers] = useState<DriverInfo[]>([])
@@ -186,6 +214,8 @@ export default function ScheduleDay() {
   const [loading, setLoading] = useState(true)
   const [assignModal, setAssignModal] = useState<Stop | null>(null)
   const [modalRouteId, setModalRouteId] = useState('')
+  const [adhocModal, setAdhocModal] = useState<RouteLane | null>(null)
+  const [adhocForm, setAdhocForm] = useState({ name: '', phone: '', address: '', reason: '' })
 
   const mapRef = useRef<HTMLDivElement>(null)
   const mapObjRef = useRef<any>(null)
@@ -219,6 +249,8 @@ export default function ScheduleDay() {
         items: s.items,
         route_order: s.route_order ?? 999,
         route_id: s.route_id!,
+        orderer_name: s.orderer_name,
+        phone: s.receiver_phone,
       }))
     const waypointPart: RouteStop[] = dayWaypoints
       .filter(w => w.preset_key !== PINNED_KEY)
@@ -240,8 +272,23 @@ export default function ScheduleDay() {
         }
       })
       .filter((x): x is RouteStop => x !== null)
-    return [...orderPart, ...waypointPart]
-  }, [stops, dayWaypoints, presets])
+    const adhocPart: RouteStop[] = adhocStops.map(a => ({
+      id: `adhoc:${a.id}`,
+      kind: 'adhoc',
+      name: a.name,
+      address: a.address,
+      crew_size: null,
+      lat: null,
+      lng: null,
+      visit_time: null,
+      items: [],
+      route_order: a.route_order,
+      route_id: a.route_id,
+      phone: a.phone,
+      reason: a.reason,
+    }))
+    return [...orderPart, ...waypointPart, ...adhocPart]
+  }, [stops, dayWaypoints, presets, adhocStops])
 
   function stopsForRoute(routeId: string) {
     return routeStopsAll.filter(s => s.route_id === routeId).sort((a, b) => a.route_order - b.route_order)
@@ -295,6 +342,12 @@ export default function ScheduleDay() {
       .eq('date', date)
     setDayWaypoints(waypointData ?? [])
 
+    const { data: adhocData } = await supabase
+      .from('schedule_adhoc_stops')
+      .select('id, route_id, route_order, name, phone, address, reason')
+      .eq('date', date)
+    setAdhocStops(adhocData ?? [])
+
     if (jikbae) await loadAll(jikbae.id, routeData ?? [])
     setLoading(false)
   }
@@ -308,6 +361,8 @@ export default function ScheduleDay() {
           order_id: o.id,
           cafe24_order_no: o.cafe24_order_no,
           customer_name: o.receiver_name || o.customer_name,
+          orderer_name: o.customer_name,
+          receiver_phone: o.receiver_phone,
           address: o.address,
           crew_size: o.crew_size,
           route_order: o.route_order,
@@ -318,13 +373,13 @@ export default function ScheduleDay() {
           items: [],
         }
       }
-      map[o.id].items.push({ id: row.id, product_name: row.product_name, quantity: row.quantity })
+      map[o.id].items.push({ id: row.id, product_name: row.product_name, quantity: row.quantity, supplier_name: row.supplier_name })
     }
     return Object.values(map)
   }
 
   async function loadAll(bid: string, routesForDate: RouteLane[]) {
-    const SELECT = 'id, product_name, quantity, orders!inner(id, cafe24_order_no, customer_name, receiver_name, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time)'
+    const SELECT = 'id, product_name, quantity, supplier_name, orders!inner(id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time)'
 
     const { data: scheduledData } = await supabase
       .from('order_items')
@@ -443,9 +498,12 @@ export default function ScheduleDay() {
     list.forEach((s, i) => {
       if (s.kind === 'order') {
         supabase.from('orders').update({ route_order: i + 1, route_id: routeId }).eq('id', s.id).then(() => {})
-      } else {
+      } else if (s.kind === 'preset') {
         const key = s.id.split(':')[2]
         supabase.from('schedule_day_waypoints').update({ route_order: i + 1 }).eq('route_id', routeId).eq('preset_key', key).then(() => {})
+      } else {
+        const adhocId = s.id.split(':')[1]
+        supabase.from('schedule_adhoc_stops').update({ route_order: i + 1, route_id: routeId }).eq('id', adhocId).then(() => {})
       }
     })
     setStops(prev => prev.map(p => {
@@ -455,6 +513,10 @@ export default function ScheduleDay() {
     setDayWaypoints(prev => prev.map(w => {
       const idx = list.findIndex(l => l.id === `preset:${routeId}:${w.preset_key}`)
       return idx >= 0 ? { ...w, route_order: idx + 1, route_id: routeId } : w
+    }))
+    setAdhocStops(prev => prev.map(a => {
+      const idx = list.findIndex(l => l.id === `adhoc:${a.id}`)
+      return idx >= 0 ? { ...a, route_order: idx + 1, route_id: routeId } : a
     }))
   }
 
@@ -503,11 +565,128 @@ export default function ScheduleDay() {
     if (stop.kind === 'order') {
       await supabase.from('orders').update({ scheduled_date: null, crew_size: null, route_order: null, route_id: null, visit_time: null }).eq('id', stop.id)
       if (batchId) loadAll(batchId, routes)
-    } else {
+    } else if (stop.kind === 'preset') {
       const [, routeId, key] = stop.id.split(':')
       await supabase.from('schedule_day_waypoints').delete().eq('route_id', routeId).eq('preset_key', key)
       setDayWaypoints(prev => prev.filter(w => !(w.route_id === routeId && w.preset_key === key)))
+    } else {
+      const adhocId = stop.id.split(':')[1]
+      await supabase.from('schedule_adhoc_stops').delete().eq('id', adhocId)
+      setAdhocStops(prev => prev.filter(a => a.id !== adhocId))
     }
+  }
+
+  function openAdhocModal(route: RouteLane) {
+    setAdhocForm({ name: '', phone: '', address: '', reason: '' })
+    setAdhocModal(route)
+  }
+
+  async function confirmAddAdhoc() {
+    if (!adhocModal || !adhocForm.name.trim() || !date) return
+    const route_order = stopsForRoute(adhocModal.id).length + 1
+    const { data } = await supabase.from('schedule_adhoc_stops')
+      .insert({
+        date,
+        route_id: adhocModal.id,
+        route_order,
+        name: adhocForm.name.trim(),
+        phone: adhocForm.phone.trim() || null,
+        address: adhocForm.address.trim() || null,
+        reason: adhocForm.reason.trim() || null,
+      })
+      .select('id, route_id, route_order, name, phone, address, reason')
+      .single()
+    if (data) setAdhocStops(prev => [...prev, data])
+    setAdhocModal(null)
+  }
+
+  // 이 루트의 현재 배송 순서를 직배 수기 엑셀과 동일한 양식으로 다운로드
+  function downloadRouteExcel(route: RouteLane) {
+    const laneStops = stopsForRoute(route.id)
+    const pinned = pinnedForRoute(route.id)
+    if (!laneStops.length && !pinned) { alert('이 루트에 배정된 배송건이 없습니다.'); return }
+
+    const header = ['배송 담당자', '판매담당자', '고객명', '번호', '제품명', '도착시간', '연락처', '주소']
+    const lines: { groupKey: string; cells: string[] }[] = []
+
+    if (pinned) {
+      lines.push({ groupKey: `pinned-${route.id}`, cells: ['', '', `${pinned.name} 출발`, '', '', '', '', pinned.address ?? ''] })
+    }
+
+    for (const stop of laneStops) {
+      if (stop.kind === 'preset') {
+        lines.push({ groupKey: stop.id, cells: ['', '', stop.name, '', '', '', '', stop.address ?? ''] })
+      } else if (stop.kind === 'adhoc') {
+        lines.push({ groupKey: stop.id, cells: ['', '', stop.name, '', stop.reason ?? '', '', stop.phone ?? '', stop.address ?? ''] })
+      } else {
+        const total = stop.items.length
+        stop.items.forEach((item, idx) => {
+          lines.push({
+            groupKey: stop.id,
+            cells: [
+              '',
+              stop.orderer_name ?? '',
+              stop.name,
+              total > 1 ? `${idx + 1}-${total}` : '',
+              item.supplier_name ? `${item.product_name} x ${item.quantity}ea\n${item.supplier_name}` : `${item.product_name} x ${item.quantity}ea`,
+              stop.visit_time ?? '',
+              stop.phone ?? '',
+              stop.address ?? '',
+            ],
+          })
+        })
+      }
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet([header, ...lines.map(l => l.cells)])
+
+    // 제품명 셀에 상품명\n공급사명 줄바꿈이 들어가므로 자동 줄바꿈 서식 적용
+    for (let i = 0; i < lines.length; i++) {
+      const cellRef = XLSX.utils.encode_cell({ r: i + 1, c: 4 })
+      if (ws[cellRef]) ws[cellRef].s = { alignment: { wrapText: true, vertical: 'top' } }
+    }
+
+    // 같은 배송지(주문/경유지/기타)의 여러 상품 행은 판매담당자/고객명/연락처/주소가 똑같으니 셀 병합
+    const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = []
+    const mergeCols = [1, 2, 6, 7]
+    let runStart = 0
+    for (let i = 1; i <= lines.length; i++) {
+      const sameGroup = i < lines.length && lines[i].groupKey === lines[runStart].groupKey
+      if (!sameGroup) {
+        if (i - runStart > 1) {
+          for (const c of mergeCols) merges.push({ s: { r: runStart + 1, c }, e: { r: i, c } })
+        }
+        runStart = i
+      }
+    }
+    ws['!merges'] = merges
+
+    // 열 너비 자동 지정 (한글은 2칸으로 계산), 제품명·주소는 상한선
+    const strWidth = (s: string) => {
+      let w = 0
+      for (const ch of s) w += /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(ch) ? 2 : 1
+      return w
+    }
+    const COL_MAX: Record<number, number> = { 4: 40, 7: 45 }
+    ws['!cols'] = header.map((h, colIdx) => {
+      let max = strWidth(h)
+      for (const l of lines) {
+        for (const line of String(l.cells[colIdx] ?? '').split('\n')) max = Math.max(max, strWidth(line))
+      }
+      const width = max + 2
+      return { wch: COL_MAX[colIdx] ? Math.min(width, COL_MAX[colIdx]) : width }
+    })
+
+    // 병합된 행은 엑셀이 줄바꿈에 맞춰 행 높이를 자동으로 못 맞추므로, 줄 수에 맞춰 직접 지정
+    const ROW_HEIGHT_PT = 15
+    ws['!rows'] = [{}, ...lines.map(l => {
+      const lineCount = (String(l.cells[4]).match(/\n/g)?.length ?? 0) + 1
+      return { hpt: ROW_HEIGHT_PT * lineCount }
+    })]
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, route.label.slice(0, 28) || '루트')
+    XLSX.writeFile(wb, `루트_${route.label}_${date}.xlsx`)
   }
 
   async function toggleWaypoint(route: RouteLane, preset: PresetLocation) {
@@ -750,7 +929,12 @@ export default function ScheduleDay() {
                             onChange={e => renameRoute(route, e.target.value)}
                             className="text-sm font-semibold text-gray-800 border-none focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 w-20"
                           />
-                          <div className="flex gap-1 ml-auto">
+                          <div className="flex gap-1 ml-auto items-center">
+                            <button
+                              onClick={() => downloadRouteExcel(route)}
+                              title="이 루트를 직배 수기 엑셀과 동일한 양식으로 다운로드"
+                              className="px-2 py-0.5 rounded-lg text-[11px] font-medium border border-gray-300 text-gray-600 hover:bg-gray-50"
+                            >⬇ 엑셀</button>
                             {waypointPresets.map(p => {
                               const active = dayWaypoints.some(w => w.route_id === route.id && w.preset_key === p.key)
                               const verb = WAYPOINT_VERB[p.key] ?? '경유'
@@ -766,6 +950,10 @@ export default function ScheduleDay() {
                                 </button>
                               )
                             })}
+                            <button
+                              onClick={() => openAdhocModal(route)}
+                              className="px-2 py-0.5 rounded-lg text-[11px] font-medium border border-purple-300 text-purple-600 hover:bg-purple-50"
+                            >+ 기타 배송지</button>
                           </div>
                           <button
                             onClick={() => removeRoute(route)}
@@ -856,6 +1044,51 @@ export default function ScheduleDay() {
             <div className="flex gap-2">
               <button onClick={() => setAssignModal(null)} className="flex-1 py-2 text-sm text-gray-500 border rounded-lg hover:bg-gray-50">취소</button>
               <button onClick={confirmAssign} className="flex-1 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 font-medium">확정</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {adhocModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+            <h3 className="font-bold text-gray-800 mb-1">기타 배송지 추가</h3>
+            <p className="text-sm text-gray-500 mb-4">{adhocModal.label}에 1회성 배송지를 추가합니다.</p>
+
+            <div className="space-y-3 mb-6">
+              <input
+                value={adhocForm.name}
+                onChange={e => setAdhocForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="이름"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <input
+                value={adhocForm.phone}
+                onChange={e => setAdhocForm(f => ({ ...f, phone: e.target.value }))}
+                placeholder="연락처"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <input
+                value={adhocForm.address}
+                onChange={e => setAdhocForm(f => ({ ...f, address: e.target.value }))}
+                placeholder="배송지"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <input
+                value={adhocForm.reason}
+                onChange={e => setAdhocForm(f => ({ ...f, reason: e.target.value }))}
+                placeholder="사유"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button onClick={() => setAdhocModal(null)} className="flex-1 py-2 text-sm text-gray-500 border rounded-lg hover:bg-gray-50">취소</button>
+              <button
+                onClick={confirmAddAdhoc}
+                disabled={!adhocForm.name.trim()}
+                className="flex-1 py-2 text-sm text-white bg-purple-600 rounded-lg hover:bg-purple-700 font-medium disabled:opacity-50"
+              >추가</button>
             </div>
           </div>
         </div>
