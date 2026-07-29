@@ -289,29 +289,34 @@ export default function SoumBatch() {
   }
 
   // 직배(수기 배차) 용 — 배송담당자는 현장에서 손으로 채워 넣는 칸이라 빈 칸으로 둠.
-  // 번호는 "이 배치 전체 주문 중 몇 번째"를 뜻해서, 같은 주문의 상품 행들은 같은 번호를 공유함
+  // 번호는 "같은 주문(고객) 안에서 몇 번째 상품인지" — 단건 주문은 구분 필요 없어 빈 칸
   function downloadDirectManual() {
     if (!items.length) {
       alert('이 배치에 상품이 없습니다.')
       return
     }
 
-    const orderNos = [...new Set(items.map(i => i.cafe24_order_no))]
-    const total = orderNos.length
-    const orderIndex: Record<string, number> = {}
-    orderNos.forEach((no, idx) => { orderIndex[no] = idx + 1 })
+    const countByOrder: Record<string, number> = {}
+    for (const item of items) {
+      countByOrder[item.cafe24_order_no] = (countByOrder[item.cafe24_order_no] ?? 0) + 1
+    }
+    const seenIndex: Record<string, number> = {}
 
     const header = ['배송 담당자', '판매담당자', '고객명', '번호', '제품명', '도착시간', '연락처', '주소']
-    const dataRows = items.map(item => [
-      '',
-      item.customer_name,
-      item.receiver_name || item.customer_name,
-      `${orderIndex[item.cafe24_order_no]}-${total}`,
-      `${item.product_name} x ${item.quantity}ea`,
-      item.visit_time ?? '',
-      item.receiver_phone ?? '',
-      item.address ?? '',
-    ])
+    const dataRows = items.map(item => {
+      const total = countByOrder[item.cafe24_order_no]
+      seenIndex[item.cafe24_order_no] = (seenIndex[item.cafe24_order_no] ?? 0) + 1
+      return [
+        '',
+        item.customer_name,
+        item.receiver_name || item.customer_name,
+        total > 1 ? `${seenIndex[item.cafe24_order_no]}-${total}` : '',
+        `${item.product_name} x ${item.quantity}ea`,
+        item.visit_time ?? '',
+        item.receiver_phone ?? '',
+        item.address ?? '',
+      ]
+    })
 
     const d = new Date()
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
