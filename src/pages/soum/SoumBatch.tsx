@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import * as XLSX from 'xlsx'
+// 셀 서식(자동 줄바꿈 등) 쓰기가 필요해서 일반 xlsx 대신 씀 — 일반 xlsx는 스타일 쓰기를 지원 안 함
+import * as XLSX from 'xlsx-js-style'
 import { supabase } from '../../lib/supabase'
 
 interface Batch {
@@ -321,6 +322,12 @@ export default function SoumBatch() {
     const d = new Date()
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows])
+
+    // 제품명 셀에 상품명\n공급사명 처럼 줄바꿈이 들어가므로 자동 줄바꿈 서식 적용
+    for (let i = 0; i < items.length; i++) {
+      const cellRef = XLSX.utils.encode_cell({ r: i + 1, c: 4 })
+      if (ws[cellRef]) ws[cellRef].s = { alignment: { wrapText: true, vertical: 'top' } }
+    }
 
     // 같은 주문(고객)의 여러 상품 행은 판매담당자/고객명/연락처/주소가 다 똑같으니 셀 병합
     // — items가 이미 cafe24_order_no 기준으로 정렬돼 있어서 연속된 행끼리만 묶으면 됨
