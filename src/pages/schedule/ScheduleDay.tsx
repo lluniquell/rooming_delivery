@@ -80,6 +80,8 @@ interface RouteLane {
   crew_size: 1 | 2
   sort_order: number
   driver_ids: string[]
+  closed: boolean
+  closed_at: string | null
 }
 
 interface DriverInfo {
@@ -131,17 +133,17 @@ function loadKakaoSdk(): Promise<void> {
   })
 }
 
-function SortableStop({ stop, index, color, onRemove, onTimeChange }: {
-  stop: RouteStop; index: number; color: string; onRemove: (s: RouteStop) => void
+function SortableStop({ stop, index, color, locked, onRemove, onTimeChange }: {
+  stop: RouteStop; index: number; color: string; locked: boolean; onRemove: (s: RouteStop) => void
   onTimeChange: (s: RouteStop, time: string) => void
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id })
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id, disabled: locked })
   const style = { transform: CSS.Transform.toString(transform), transition }
   const isPreset = stop.kind === 'preset'
   const isAdhoc = stop.kind === 'adhoc'
 
   return (
-    <div ref={setNodeRef} style={style} className={`flex items-center gap-2 border rounded-lg p-2 group ${isPreset ? 'bg-amber-50 border-amber-200' : isAdhoc ? 'bg-purple-50 border-purple-200' : 'bg-white'}`}>
+    <div ref={setNodeRef} style={style} className={`flex items-center gap-2 border rounded-lg p-2 group ${isPreset ? 'bg-amber-50 border-amber-200' : isAdhoc ? 'bg-purple-50 border-purple-200' : 'bg-white'} ${locked ? 'opacity-70' : ''}`}>
       {/* 고객 약속시간/지원기사 합류시간 — 동선 맨 앞에 표시 */}
       {isPreset || isAdhoc ? (
         <span className="w-[4.5rem] shrink-0" />
@@ -151,10 +153,11 @@ function SortableStop({ stop, index, color, onRemove, onTimeChange }: {
           value={stop.visit_time ?? ''}
           onChange={e => onTimeChange(stop, e.target.value)}
           onClick={e => e.stopPropagation()}
-          className="w-[4.5rem] shrink-0 text-xs border rounded px-1 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400"
+          disabled={locked}
+          className="w-[4.5rem] shrink-0 text-xs border rounded px-1 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50"
         />
       )}
-      <span {...attributes} {...listeners} className="cursor-grab text-gray-300 text-lg leading-none px-1">⠿</span>
+      <span {...(locked ? {} : { ...attributes, ...listeners })} className={`text-gray-300 text-lg leading-none px-1 ${locked ? '' : 'cursor-grab'}`}>⠿</span>
       <span className="w-6 h-6 rounded-full text-white text-xs font-bold flex items-center justify-center shrink-0" style={{ backgroundColor: color }}>
         {index + 1}
       </span>
@@ -185,10 +188,12 @@ function SortableStop({ stop, index, color, onRemove, onTimeChange }: {
           </div>
         ))}
       </div>
-      <button
-        onClick={() => onRemove(stop)}
-        className="text-gray-300 hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity"
-      >✕</button>
+      {!locked && (
+        <button
+          onClick={() => onRemove(stop)}
+          className="text-gray-300 hover:text-red-400 text-xs px-1 opacity-0 group-hover:opacity-100 transition-opacity"
+        >✕</button>
+      )}
     </div>
   )
 }
@@ -208,8 +213,7 @@ export default function ScheduleDay() {
   const [routes, setRoutes] = useState<RouteLane[]>([])
   const [routeVisibility, setRouteVisibility] = useState<Record<string, boolean>>({})
   const [drivers, setDrivers] = useState<DriverInfo[]>([])
-  const [closed, setClosed] = useState(false)
-  const [registering, setRegistering] = useState(false)
+  const [registeringRouteId, setRegisteringRouteId] = useState<string | null>(null)
   const [geocoding, setGeocoding] = useState(false)
   const [loading, setLoading] = useState(true)
   const [assignModal, setAssignModal] = useState<Stop | null>(null)
@@ -320,9 +324,6 @@ export default function ScheduleDay() {
       .eq('is_active', true)
       .order('name')
     setDrivers(driverData ?? [])
-
-    const { data: dayRow } = await supabase.from('schedule_days').select('closed').eq('date', date).maybeSingle()
-    setClosed(!!dayRow?.closed)
 
     const { data: routeData } = await supabase
       .from('schedule_routes')
@@ -534,6 +535,10 @@ export default function ScheduleDay() {
     const destRouteId = overIsLane ? overId.replace('lane:', '') : routeStopsAll.find(s => s.id === overId)?.route_id
     if (!destRouteId) return
 
+    // 마감(잠금)된 루트는 내용 변경 불가 — 옮겨오는 것도, 옮겨나가는 것도 막음
+    if (routes.find(r => r.id === activeStop.route_id)?.closed) return
+    if (routes.find(r => r.id === destRouteId)?.closed) return
+
     // 경유지(선진/NK)는 자기 루트 안에서만 순서 변경, 다른 루트로는 이동 불가
     if (activeStop.kind === 'preset' && destRouteId !== activeStop.route_id) return
 
@@ -742,6 +747,7 @@ export default function ScheduleDay() {
   }
 
   async function removeRoute(route: RouteLane) {
+    if (route.closed) return
     if (stopsForRoute(route.id).length > 0) {
       alert('이 루트에 배정된 배송건이 있어 삭제할 수 없습니다. 먼저 다른 루트로 옮기거나 배정 해제하세요.')
       return
@@ -757,9 +763,10 @@ export default function ScheduleDay() {
   }
 
   function openAssignModal(stop: Stop) {
-    if (!routes.length) { alert('먼저 루트를 추가해주세요.'); return }
+    const openRoutes = routes.filter(r => !r.closed)
+    if (!openRoutes.length) { alert('배정 가능한 루트가 없습니다. 먼저 루트를 추가하거나, 마감되지 않은 루트가 있는지 확인해주세요.'); return }
     setAssignModal(stop)
-    setModalRouteId(routes[0].id)
+    setModalRouteId(openRoutes[0].id)
   }
 
   async function confirmAssign() {
@@ -773,37 +780,39 @@ export default function ScheduleDay() {
     if (batchId) loadAll(batchId, routes)
   }
 
-  async function toggleClosed() {
+  // 루트 마감(잠금) — 이 루트에 배정된 직배 주문들만 카페24에 배송대기로 등록하고, 이후 이 루트의
+  // 내용(주문/경유지/기타 배송지 추가·삭제·순서변경)은 잠김. 마감 취소로 다시 잠금 해제 가능
+  async function toggleRouteClosed(route: RouteLane) {
     if (!date) return
-    const next = !closed
+    const next = !route.closed
     if (next) {
-      // 마감 시 이 날짜에 루트 배정된 직배 주문들을 카페24에 배송대기로 일괄 등록
-      const routedOrders = stops.filter(s => s.route_id)
-      if (routedOrders.length) {
-        setRegistering(true)
+      const routeOrders = stops.filter(s => s.route_id === route.id)
+      if (routeOrders.length) {
+        setRegisteringRouteId(route.id)
         const trackingNo = `직배${date.replace(/-/g, '')}`
         try {
           const res = await fetch('/api/cafe24/shipments?action=standby', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              orders: routedOrders.map(s => ({ order_no: s.cafe24_order_no, tracking_no: trackingNo })),
+              orders: routeOrders.map(s => ({ order_no: s.cafe24_order_no, tracking_no: trackingNo })),
               delivery_method: '직배',
               carrier_code: '0001',
             }),
           })
           const data = await res.json()
           if (data.errors?.length) {
-            alert(`카페24 배송대기 등록 ${data.updated ?? 0}건 / 전체 ${data.total ?? routedOrders.length}건\n실패:\n${data.errors.slice(0, 5).join('\n')}`)
+            alert(`카페24 배송대기 등록 ${data.updated ?? 0}건 / 전체 ${data.total ?? routeOrders.length}건\n실패:\n${data.errors.slice(0, 5).join('\n')}`)
           }
         } catch {
           alert('카페24 등록 중 네트워크 오류가 발생했습니다.')
         }
-        setRegistering(false)
+        setRegisteringRouteId(null)
       }
     }
-    await supabase.from('schedule_days').upsert({ date, closed: next, closed_at: next ? new Date().toISOString() : null })
-    setClosed(next)
+    const closed_at = next ? new Date().toISOString() : null
+    await supabase.from('schedule_routes').update({ closed: next, closed_at }).eq('id', route.id)
+    setRoutes(prev => prev.map(r => r.id === route.id ? { ...r, closed: next, closed_at } : r))
   }
 
   const crew1 = stops.filter(s => s.crew_size === 1).length
@@ -820,22 +829,13 @@ export default function ScheduleDay() {
           </span>
           {geocoding && <span className="text-xs text-gray-400">좌표 변환 중...</span>}
         </div>
-        <button
-          onClick={toggleClosed}
-          disabled={registering}
-          className={`px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 ${
-            closed ? 'bg-gray-200 text-gray-700 hover:bg-gray-300' : 'bg-red-600 text-white hover:bg-red-700'
-          }`}
-        >
-          {registering ? '카페24 등록 중...' : closed ? '마감 취소' : '마감'}
-        </button>
       </div>
 
       {loading ? (
         <div className="text-center text-gray-400 py-20 text-sm">불러오는 중...</div>
       ) : (
         <div className="flex gap-4">
-          {!closed && unrouted.length > 0 && (
+          {routes.some(r => !r.closed) && unrouted.length > 0 && (
             <div className="w-72 shrink-0">
               <div className="bg-white rounded-xl border overflow-hidden">
                 <div className="px-3 py-2.5 border-b bg-red-50 text-sm font-medium text-red-700">
@@ -909,7 +909,7 @@ export default function ScheduleDay() {
                     return (
                       <div
                         key={route.id}
-                        className="bg-white rounded-xl border p-2.5"
+                        className={`bg-white rounded-xl border p-2.5 ${route.closed ? 'opacity-80' : ''}`}
                         onDragOver={e => e.preventDefault()}
                         onDrop={e => {
                           const driverId = e.dataTransfer.getData('text/driver-id')
@@ -929,6 +929,9 @@ export default function ScheduleDay() {
                             onChange={e => renameRoute(route, e.target.value)}
                             className="text-sm font-semibold text-gray-800 border-none focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 w-20"
                           />
+                          {route.closed && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-gray-200 text-gray-600 shrink-0">🔒 마감</span>
+                          )}
                           <div className="flex gap-1 ml-auto items-center">
                             <button
                               onClick={() => downloadRouteExcel(route)}
@@ -942,7 +945,8 @@ export default function ScheduleDay() {
                                 <button
                                   key={p.key}
                                   onClick={() => toggleWaypoint(route, p)}
-                                  className={`px-2 py-0.5 rounded-lg text-[11px] font-medium border transition-colors ${
+                                  disabled={route.closed}
+                                  className={`px-2 py-0.5 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                                     active ? 'bg-amber-500 text-white border-amber-500' : 'text-amber-600 border-amber-300 hover:bg-amber-50'
                                   }`}
                                 >
@@ -952,12 +956,23 @@ export default function ScheduleDay() {
                             })}
                             <button
                               onClick={() => openAdhocModal(route)}
-                              className="px-2 py-0.5 rounded-lg text-[11px] font-medium border border-purple-300 text-purple-600 hover:bg-purple-50"
+                              disabled={route.closed}
+                              className="px-2 py-0.5 rounded-lg text-[11px] font-medium border border-purple-300 text-purple-600 hover:bg-purple-50 disabled:opacity-40 disabled:cursor-not-allowed"
                             >+ 기타 배송지</button>
                           </div>
                           <button
+                            onClick={() => toggleRouteClosed(route)}
+                            disabled={registeringRouteId === route.id}
+                            className={`px-2 py-0.5 rounded-lg text-[11px] font-medium disabled:opacity-50 ${
+                              route.closed ? 'bg-gray-200 text-gray-700 hover:bg-gray-300' : 'bg-red-600 text-white hover:bg-red-700'
+                            }`}
+                          >
+                            {registeringRouteId === route.id ? '카페24 등록 중...' : route.closed ? '🔓 마감 취소' : '🔒 마감'}
+                          </button>
+                          <button
                             onClick={() => removeRoute(route)}
-                            className="text-gray-300 hover:text-red-400 text-xs px-1"
+                            disabled={route.closed}
+                            className="text-gray-300 hover:text-red-400 text-xs px-1 disabled:opacity-30 disabled:cursor-not-allowed"
                           >삭제</button>
                         </div>
 
@@ -993,7 +1008,7 @@ export default function ScheduleDay() {
                               <div className="p-4 text-center text-xs text-gray-300">이 루트에 배정된 배송건이 없습니다</div>
                             ) : (
                               laneStops.map((s, i) => (
-                                <SortableStop key={s.id} stop={s} index={i} color={color} onRemove={removeStop} onTimeChange={updateVisitTime} />
+                                <SortableStop key={s.id} stop={s} index={i} color={color} locked={route.closed} onRemove={removeStop} onTimeChange={updateVisitTime} />
                               ))
                             )}
                           </LaneDropZone>
@@ -1006,6 +1021,24 @@ export default function ScheduleDay() {
             </div>
 
             <div className="bg-white rounded-xl border overflow-hidden">
+              {routes.length > 0 && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b bg-gray-50">
+                  {routes.map(route => {
+                    const visible = routeVisibility[route.id] !== false
+                    return (
+                      <label key={route.id} className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={visible}
+                          onChange={() => setRouteVisibility(prev => ({ ...prev, [route.id]: !visible }))}
+                        />
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: colorForRoute(route.id) }} />
+                        {route.label}
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
               {KAKAO_JS_KEY ? (
                 <div ref={mapRef} className="w-full h-full min-h-[400px]" />
               ) : (
@@ -1027,7 +1060,7 @@ export default function ScheduleDay() {
             <div className="mb-6">
               <p className="text-xs font-medium text-gray-500 mb-2">루트 선택</p>
               <div className="flex flex-wrap gap-2">
-                {routes.map(r => (
+                {routes.filter(r => !r.closed).map(r => (
                   <button
                     key={r.id}
                     onClick={() => setModalRouteId(r.id)}
