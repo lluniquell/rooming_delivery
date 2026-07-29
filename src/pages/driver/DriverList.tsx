@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 
@@ -23,20 +23,37 @@ function statusOf(s: Stop): 'pending' | 'done' | 'failed' {
   return 'pending'
 }
 
+// 로컬(KST) 기준 날짜 — toISOString은 UTC라 오전 9시 전에 하루 밀림
+function fmtDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function addDays(dateStr: string, delta: number) {
+  const d = new Date(`${dateStr}T00:00:00`)
+  d.setDate(d.getDate() + delta)
+  return fmtDate(d)
+}
+function displayDate(dateStr: string) {
+  const d = new Date(`${dateStr}T00:00:00`)
+  const days = ['일', '월', '화', '수', '목', '금', '토']
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 (${days[d.getDay()]})`
+}
+
 export default function DriverList() {
   const [stops, setStops] = useState<Stop[]>([])
-  const today = new Date().toISOString().slice(0, 10)
+  const todayStr = fmtDate(new Date())
+  const [viewDate, setViewDate] = useState(todayStr)
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      // 오늘 내가 배정된 루트들을 먼저 찾고, 그 루트에 걸린 주문을 순서대로 가져옴
+      // 그 날짜에 내가 배정된 루트들을 먼저 찾고, 그 루트에 걸린 주문을 순서대로 가져옴
       const { data: routeRows } = await supabase
         .from('schedule_routes')
         .select('id')
-        .eq('date', today)
+        .eq('date', viewDate)
         .contains('driver_ids', [user.id])
       const routeIds = (routeRows ?? []).map(r => r.id)
       if (!routeIds.length) { setStops([]); return }
@@ -45,7 +62,7 @@ export default function DriverList() {
         .from('orders')
         .select('id, customer_name, receiver_name, address, route_order, delivered_at, delivery_memo')
         .in('route_id', routeIds)
-        .eq('scheduled_date', today)
+        .eq('scheduled_date', viewDate)
         .order('route_order', { ascending: true, nullsFirst: false })
       setStops((data ?? []).map((o: any) => ({
         id: o.id,
@@ -56,14 +73,45 @@ export default function DriverList() {
       })))
     }
     load()
-  }, [today])
+  }, [viewDate])
+
+  function handleTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0]
+    touchStart.current = { x: t.clientX, y: t.clientY }
+  }
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (!touchStart.current) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - touchStart.current.x
+    const dy = t.clientY - touchStart.current.y
+    touchStart.current = null
+    // 세로 스크롤과 헷갈리지 않도록 가로 이동이 충분히 크고 세로 이동보다 뚜렷할 때만 날짜 전환
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) {
+      setViewDate(d => addDays(d, dx < 0 ? 1 : -1))
+    }
+  }
 
   return (
-    <div>
-      <h2 className="text-lg font-bold text-gray-800 mb-4">오늘 배송 목록</h2>
+    <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      <div className="flex items-center justify-between mb-4">
+        <button
+          onClick={() => setViewDate(d => addDays(d, -1))}
+          className="w-9 h-9 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600 text-lg active:bg-gray-200"
+        >‹</button>
+        <div className="text-center">
+          <h2 className="text-lg font-bold text-gray-800">{displayDate(viewDate)} 배송 목록</h2>
+          {viewDate !== todayStr && (
+            <button onClick={() => setViewDate(todayStr)} className="text-xs text-blue-600 mt-0.5">오늘로 이동</button>
+          )}
+        </div>
+        <button
+          onClick={() => setViewDate(d => addDays(d, 1))}
+          className="w-9 h-9 flex items-center justify-center rounded-lg bg-gray-100 text-gray-600 text-lg active:bg-gray-200"
+        >›</button>
+      </div>
       <div className="space-y-3">
         {stops.length === 0 && (
-          <p className="text-center py-12 text-gray-400">오늘 배정된 배송이 없습니다.</p>
+          <p className="text-center py-12 text-gray-400">배정된 배송이 없습니다.</p>
         )}
         {stops.map((s, i) => {
           const status = statusOf(s)
