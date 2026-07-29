@@ -234,9 +234,10 @@ export default function SoumBatch() {
   // CJ "루밍" 지정형 레이아웃용 (내품수량 필드가 있는 커스텀 양식) — 박스수량은 항상 1,
   // 실제 수량은 내품수량 컬럼에 넣음
   function downloadCJUpload1() {
-    const cjItems = items.filter(i => i.delivery_method === 'CJ')
+    // 이미 운송장이 등록된 상품(재출력 아니고 새로 뽑는 용도)은 제외
+    const cjItems = items.filter(i => i.delivery_method === 'CJ' && !i.tracking_number)
     if (!cjItems.length) {
-      alert('이 배치에 CJ 배정 상품이 없습니다.')
+      alert('이 배치에 운송장 미등록 CJ 상품이 없습니다.')
       return
     }
 
