@@ -132,7 +132,7 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
   // 지우고 item_codes만 같은 tracking_no로 새 그룹을 만들어 그 그룹만 배송중 전환한다.
   // (실제로 이 필터를 무시하고 그룹 전체를 전환해버려 정상 출고분까지 상태가 꼬인 적 있음 — 2026-07-26)
   const { order_nos, orders } = req.body ?? {}
-  const targets: { order_no: string; item_codes?: string[]; tracking_no?: string }[] =
+  const targets: { order_no: string; item_codes?: string[]; tracking_no?: string; carrier_code?: string }[] =
     Array.isArray(orders) ? orders
     : Array.isArray(order_nos) ? order_nos.map((o: string) => ({ order_no: o }))
     : []
@@ -145,7 +145,7 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
     let updated = 0
     const errors: string[] = []
 
-    for (const { order_no: orderNo, item_codes, tracking_no } of targets) {
+    for (const { order_no: orderNo, item_codes, tracking_no, carrier_code } of targets) {
       if (!orderNo) continue
       try {
         // shipping_code는 D-{주문번호}-00으로 고정이 아님 — 상품(라인)이 서로 다른
@@ -174,35 +174,43 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
         for (const shippingCode of touchedGroups) {
           const groupItems = groupOf[shippingCode] ?? []
           const isFullGroup = groupItems.every(code => targetSet.has(code))
+          // shipping_code는 등록 안 된 상품에도 기본값이 항상 붙어있어서, 실제 등록 여부는
+          // 그 그룹 상품의 tracking_no 존재 여부로 판단해야 함 (2026-07-29 실제로 이 체크가
+          // 없어서 미등록 그룹에 DELETE를 시도하다 실패해 등록/전환 자체가 통째로 스킵된 적 있음)
+          const groupTrackingNo = allItems.find((i: any) => i.shipping_code === shippingCode)?.tracking_no as string | undefined
 
-          if (isFullGroup) {
+          if (isFullGroup && groupTrackingNo) {
+            // 이미 등록된 그룹 전체가 대상 — 그대로 배송중 전환
             const r = await cafe24Req('PUT', `/api/v2/admin/orders/${orderNo}/shipments/${shippingCode}`, token,
               { shop_no: 1, request: { status: 'shipping' } })
             if (!r.ok || r.data.error) {
               errors.push(`${orderNo} (${shippingCode}): ${r.data.error?.message ?? JSON.stringify(r.data).slice(0, 150)}`)
             }
           } else if (!tracking_no) {
-            errors.push(`${orderNo} (${shippingCode}): 그룹 일부만 전환하려면 tracking_no가 필요합니다`)
+            errors.push(`${orderNo} (${shippingCode}): 미등록 그룹이거나 그룹 일부만 전환하려면 tracking_no가 필요합니다`)
           } else {
-            // 그룹 일부만 대상 — 기존 등록을 지우고 대상 상품만 같은 운송장번호로 새 그룹 생성 후 전환
+            // 그룹 일부만 대상이거나, 아직 등록 자체가 안 된 그룹 — 등록돼 있었으면 지우고
+            // 대상 상품만 같은 운송장번호로 새로 등록한 뒤 전환 (등록 자체가 없었으면 삭제는 생략)
             const targetCodes = groupItems.filter(code => targetSet.has(code))
-            const delRes = await cafe24Req('DELETE', `/api/v2/admin/orders/${orderNo}/shipments/${shippingCode}?shop_no=1`, token)
-            if (!delRes.ok) {
-              errors.push(`${orderNo} (${shippingCode}): 기존 운송장 등록 삭제 실패`)
-              continue
+            if (groupTrackingNo) {
+              const delRes = await cafe24Req('DELETE', `/api/v2/admin/orders/${orderNo}/shipments/${shippingCode}?shop_no=1`, token)
+              if (!delRes.ok) {
+                errors.push(`${orderNo} (${shippingCode}): 기존 운송장 등록 삭제 실패`)
+                continue
+              }
             }
             const postRes = await cafe24Req('POST', `/api/v2/admin/orders/${orderNo}/shipments`, token, {
               shop_no: 1,
               request: {
                 status: 'standby',
                 tracking_no,
-                shipping_company_code: CJ_CARRIER_CODE,
+                shipping_company_code: carrier_code ?? CJ_CARRIER_CODE,
                 order_item_code: targetCodes,
               },
             })
             const newCode = postRes.data?.shipments?.[0]?.shipping_code
             if (!postRes.ok || !newCode) {
-              errors.push(`${orderNo}: 부분 운송장 재등록 실패 — ${JSON.stringify(postRes.data).slice(0, 150)}`)
+              errors.push(`${orderNo}: 운송장 등록 실패 — ${JSON.stringify(postRes.data).slice(0, 150)}`)
               continue
             }
             const putRes = await cafe24Req('PUT', `/api/v2/admin/orders/${orderNo}/shipments/${newCode}`, token,
