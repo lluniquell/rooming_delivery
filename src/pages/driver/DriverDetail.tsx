@@ -123,6 +123,15 @@ export default function DriverDetail() {
       setMessage('카페24 배송중 전환 중 네트워크 오류가 발생했습니다.')
     }
 
+    // 채널톡 알림 — 실패해도 배송 완료 처리 자체는 이미 끝난 상태라 조용히 넘어감
+    try {
+      await fetch('/api/channeltalk/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: order.id }),
+      })
+    } catch { /* 알림 실패는 배송 완료 처리에 영향 없음 */ }
+
     setProcessing(false)
     navigate('/')
   }
