@@ -39,9 +39,10 @@ async function cafe24Req(method: string, path: string, token: string, body?: any
   return { ok: res.ok, data }
 }
 
-// CJ 운송장 등록 — 이 주문에서 CJ로 배정된 상품에만 정확히 등록 (POST ?action=standby)
+// 운송장 등록 — 이 주문에서 해당 배송방법으로 배정된 상품에만 정확히 등록 (POST ?action=standby)
+// CJ 운송장 업로드뿐 아니라 직배 루트 마감 시 등록에도 재사용됨(delivery_method로 구분)
 async function handleStandby(req: VercelRequest, res: VercelResponse) {
-  const { orders, carrier_code } = req.body ?? {}
+  const { orders, carrier_code, delivery_method } = req.body ?? {}
   if (!Array.isArray(orders) || !orders.length) {
     return res.status(400).json({ error: 'orders 배열이 필요합니다. [{ order_no, tracking_no }]' })
   }
@@ -49,6 +50,7 @@ async function handleStandby(req: VercelRequest, res: VercelResponse) {
   try {
     const token = await getToken()
     const code = (carrier_code ?? CJ_CARRIER_CODE).trim()
+    const method = delivery_method ?? 'CJ'
 
     let updated = 0
     const errors: string[] = []
@@ -63,15 +65,15 @@ async function handleStandby(req: VercelRequest, res: VercelResponse) {
           .maybeSingle()
         if (!orderRow) { errors.push(`${order_no}: 주문을 찾을 수 없음`); continue }
 
-        // 이 주문에서 CJ로 배정된 상품 행만 대상으로 함 — 같은 주문에 경동/직배 상품이
-        // 섞여 있어도 그쪽 상품은 절대 건드리지 않기 위함
+        // 이 주문에서 해당 배송방법으로 배정된 상품 행만 대상으로 함 — 같은 주문에 다른
+        // 배송방법 상품이 섞여 있어도 그쪽 상품은 절대 건드리지 않기 위함
         const { data: cjItems } = await supabase
           .from('order_items')
           .select('id, cafe24_item_code')
           .eq('order_id', orderRow.id)
-          .eq('delivery_method', 'CJ')
+          .eq('delivery_method', method)
           .eq('status', 'confirmed')
-        if (!cjItems?.length) { errors.push(`${order_no}: CJ 배정 상품 없음`); continue }
+        if (!cjItems?.length) { errors.push(`${order_no}: ${method} 배정 상품 없음`); continue }
 
         const itemCodes = cjItems.map(i => i.cafe24_item_code).filter(Boolean) as string[]
         if (!itemCodes.length) { errors.push(`${order_no}: cafe24_item_code 없음 (재수집 필요)`); continue }

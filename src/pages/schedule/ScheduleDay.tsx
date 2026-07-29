@@ -181,6 +181,7 @@ export default function ScheduleDay() {
   const [routeVisibility, setRouteVisibility] = useState<Record<string, boolean>>({})
   const [drivers, setDrivers] = useState<DriverInfo[]>([])
   const [closed, setClosed] = useState(false)
+  const [registering, setRegistering] = useState(false)
   const [geocoding, setGeocoding] = useState(false)
   const [loading, setLoading] = useState(true)
   const [assignModal, setAssignModal] = useState<Stop | null>(null)
@@ -594,7 +595,34 @@ export default function ScheduleDay() {
   }
 
   async function toggleClosed() {
+    if (!date) return
     const next = !closed
+    if (next) {
+      // 마감 시 이 날짜에 루트 배정된 직배 주문들을 카페24에 배송대기로 일괄 등록
+      const routedOrders = stops.filter(s => s.route_id)
+      if (routedOrders.length) {
+        setRegistering(true)
+        const trackingNo = `직배${date.replace(/-/g, '')}`
+        try {
+          const res = await fetch('/api/cafe24/shipments?action=standby', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orders: routedOrders.map(s => ({ order_no: s.cafe24_order_no, tracking_no: trackingNo })),
+              delivery_method: '직배',
+              carrier_code: '0001',
+            }),
+          })
+          const data = await res.json()
+          if (data.errors?.length) {
+            alert(`카페24 배송대기 등록 ${data.updated ?? 0}건 / 전체 ${data.total ?? routedOrders.length}건\n실패:\n${data.errors.slice(0, 5).join('\n')}`)
+          }
+        } catch {
+          alert('카페24 등록 중 네트워크 오류가 발생했습니다.')
+        }
+        setRegistering(false)
+      }
+    }
     await supabase.from('schedule_days').upsert({ date, closed: next, closed_at: next ? new Date().toISOString() : null })
     setClosed(next)
   }
@@ -615,11 +643,12 @@ export default function ScheduleDay() {
         </div>
         <button
           onClick={toggleClosed}
-          className={`px-4 py-2 rounded-lg text-sm font-medium ${
+          disabled={registering}
+          className={`px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 ${
             closed ? 'bg-gray-200 text-gray-700 hover:bg-gray-300' : 'bg-red-600 text-white hover:bg-red-700'
           }`}
         >
-          {closed ? '마감 취소' : '마감'}
+          {registering ? '카페24 등록 중...' : closed ? '마감 취소' : '마감'}
         </button>
       </div>
 
