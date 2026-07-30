@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 // 셀 서식(자동 줄바꿈 등) 쓰기가 필요해서 일반 xlsx 대신 씀 — 일반 xlsx는 스타일 쓰기를 지원 안 함
 import * as XLSX from 'xlsx-js-style'
 import { supabase } from '../../lib/supabase'
@@ -82,6 +82,32 @@ function splitAddressDetail(address: string | null): string {
   const road = address.slice(0, m.index).trim()
   const detail = m[0].trim()
   return `${road}\n${detail}`
+}
+
+interface OrderGroup {
+  cafe24_order_no: string
+  customer_name: string
+  receiver_name: string | null
+  items: Item[]
+}
+
+// items가 이미 cafe24_order_no 기준으로 정렬돼 있어서, 순서 그대로 훑으면서 묶으면 됨
+function groupItemsByOrder(items: Item[]): OrderGroup[] {
+  const map: Record<string, OrderGroup> = {}
+  const orderNos: string[] = []
+  for (const item of items) {
+    if (!map[item.cafe24_order_no]) {
+      map[item.cafe24_order_no] = {
+        cafe24_order_no: item.cafe24_order_no,
+        customer_name: item.customer_name,
+        receiver_name: item.receiver_name,
+        items: [],
+      }
+      orderNos.push(item.cafe24_order_no)
+    }
+    map[item.cafe24_order_no].items.push(item)
+  }
+  return orderNos.map(no => map[no])
 }
 
 // 출력 시점 표시용 — YYYYMMDD HH:MM:SS
@@ -288,6 +314,7 @@ export default function SoumBatch() {
 
   const activeBatch = batches.find(b => b.id === activeBatchId)
   const pickingList = buildPickingList()
+  const orderGroups = groupItemsByOrder(items)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // CJ "루밍" 지정형 레이아웃용 (내품수량 필드가 있는 커스텀 양식) — 박스수량은 항상 1,
@@ -775,41 +802,63 @@ export default function SoumBatch() {
                 </tr>
               </thead>
               <tbody>
-                {items.map(item => (
-                  <tr key={item.id} className="border-b last:border-0 hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap">{item.cafe24_order_no}</td>
-                    <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{item.customer_name}</td>
-                    <td className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap">{item.receiver_name || '-'}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
-                      {item.brand && <span className="text-gray-400 text-xs mr-1.5">[{item.brand}]</span>}
-                      {item.product_name}
-                      {item.option_info && <span className="text-gray-400 text-xs ml-1.5">{item.option_info}</span>}
-                    </td>
-                    <td className="px-4 py-3 text-center font-semibold text-gray-800">{item.quantity}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{item.delivery_method ?? '-'}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[item.status] ?? 'bg-gray-100 text-gray-500'}`}>
-                        {STATUS_LABEL[item.status] ?? item.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => moveToUnassigned(item.id)}
-                        title="이 주문의 상품 전체를 미배정으로 되돌립니다"
-                        className="text-xs text-gray-300 hover:text-indigo-400 transition-colors mr-3"
-                      >
-                        미배정으로
-                      </button>
-                      <button
-                        onClick={() => moveToHold(item.id)}
-                        title="이 주문의 상품 전체를 보류로 옮깁니다"
-                        className="text-xs text-gray-300 hover:text-orange-400 transition-colors"
-                      >
-                        보류로
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {orderGroups.map(group => {
+                  const last = group.items.length - 1
+                  return (
+                    <Fragment key={group.cafe24_order_no}>
+                      {group.items.map((item, idx) => (
+                        <tr
+                          key={item.id}
+                          className={`hover:bg-gray-50 ${idx === last ? 'border-b-2 border-gray-200' : 'border-b border-gray-100'}`}
+                        >
+                          {idx === 0 && (
+                            <>
+                              <td rowSpan={group.items.length} className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap align-top">
+                                {group.cafe24_order_no}
+                              </td>
+                              <td rowSpan={group.items.length} className="px-4 py-3 text-gray-700 whitespace-nowrap align-top">
+                                {group.customer_name}
+                              </td>
+                              <td rowSpan={group.items.length} className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap align-top">
+                                {group.receiver_name || '-'}
+                              </td>
+                            </>
+                          )}
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {item.brand && <span className="text-gray-400 text-xs mr-1.5">[{item.brand}]</span>}
+                            {item.product_name}
+                            {item.option_info && <span className="text-gray-400 text-xs ml-1.5">{item.option_info}</span>}
+                          </td>
+                          <td className="px-4 py-3 text-center font-semibold text-gray-800">{item.quantity}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{item.delivery_method ?? '-'}</td>
+                          <td className="px-4 py-3">
+                            <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[item.status] ?? 'bg-gray-100 text-gray-500'}`}>
+                              {STATUS_LABEL[item.status] ?? item.status}
+                            </span>
+                          </td>
+                          {idx === 0 && (
+                            <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top">
+                              <button
+                                onClick={() => moveToUnassigned(item.id)}
+                                title="이 주문의 상품 전체를 미배정으로 되돌립니다"
+                                className="text-xs text-gray-300 hover:text-indigo-400 transition-colors mr-3"
+                              >
+                                미배정으로
+                              </button>
+                              <button
+                                onClick={() => moveToHold(item.id)}
+                                title="이 주문의 상품 전체를 보류로 옮깁니다"
+                                className="text-xs text-gray-300 hover:text-orange-400 transition-colors"
+                              >
+                                보류로
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           )}
