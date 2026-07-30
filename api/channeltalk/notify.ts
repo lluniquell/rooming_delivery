@@ -16,26 +16,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'CHANNEL_TALK_ACCESS_KEY / CHANNEL_TALK_ACCESS_SECRET / CHANNEL_TALK_GROUP_NAME 환경변수가 설정되지 않았습니다.' })
   }
 
-  const { order_id } = req.body ?? {}
-  if (!order_id) return res.status(400).json({ error: 'order_id 필요' })
+  const { kind, id, driver_name } = req.body ?? {}
+  if (!kind || !id) return res.status(400).json({ error: 'kind, id 필요' })
+  if (kind !== 'order' && kind !== 'adhoc') return res.status(400).json({ error: "kind는 'order' 또는 'adhoc'" })
 
-  const { data: order } = await supabase
-    .from('orders')
-    .select('cafe24_order_no, customer_name, receiver_name, address')
-    .eq('id', order_id)
-    .maybeSingle()
-  if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' })
+  let headerName: string
+  let orderNoSuffix = ''
+  let address: string | null = null
+  let photoUrls: string[] = []
 
-  const { data: photos } = await supabase
-    .from('delivery_photos')
-    .select('storage_path')
-    .eq('order_id', order_id)
-  const photoUrls = (photos ?? []).map(p => `${SUPABASE_URL}/storage/v1/object/public/delivery-photos/${p.storage_path}`)
+  if (kind === 'order') {
+    const { data: order } = await supabase
+      .from('orders')
+      .select('cafe24_order_no, customer_name, receiver_name, address')
+      .eq('id', id)
+      .maybeSingle()
+    if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' })
+    headerName = order.receiver_name || order.customer_name
+    orderNoSuffix = ` (${order.cafe24_order_no})`
+    address = order.address
 
-  const name = order.receiver_name || order.customer_name
+    const { data: photos } = await supabase.from('delivery_photos').select('storage_path').eq('order_id', id)
+    photoUrls = (photos ?? []).map(p => `${SUPABASE_URL}/storage/v1/object/public/delivery-photos/${p.storage_path}`)
+  } else {
+    const { data: adhoc } = await supabase
+      .from('schedule_adhoc_stops')
+      .select('name, address')
+      .eq('id', id)
+      .maybeSingle()
+    if (!adhoc) return res.status(404).json({ error: '기타 배송지를 찾을 수 없습니다.' })
+    headerName = adhoc.name
+    address = adhoc.address
+
+    const { data: photos } = await supabase.from('delivery_photos').select('storage_path').eq('adhoc_stop_id', id)
+    photoUrls = (photos ?? []).map(p => `${SUPABASE_URL}/storage/v1/object/public/delivery-photos/${p.storage_path}`)
+  }
+
+  const label = kind === 'order' ? '배송완료' : '처리완료'
   const lines = [
-    `[배송완료] ${name} (${order.cafe24_order_no})`,
-    order.address ?? '',
+    `${label}(${driver_name ?? '알 수 없음'}) ${headerName}${orderNoSuffix}`,
+    address ?? '',
     ...(photoUrls.length ? ['', '사진:', ...photoUrls] : []),
   ]
 

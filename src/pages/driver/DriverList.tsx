@@ -56,6 +56,7 @@ export default function DriverList() {
   const [pinned, setPinned] = useState<{ name: string; address: string | null } | null>(null)
   const [photoTakenAdhoc, setPhotoTakenAdhoc] = useState<Set<string>>(new Set())
   const [uploadingAdhocId, setUploadingAdhocId] = useState<string | null>(null)
+  const [driverName, setDriverName] = useState('')
   const todayStr = fmtDate(new Date())
   const [viewDate, setViewDate] = useState(todayStr)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
@@ -64,6 +65,9 @@ export default function DriverList() {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+
+      const { data: driverRow } = await supabase.from('drivers').select('name').eq('id', user.id).maybeSingle()
+      if (driverRow) setDriverName(driverRow.name)
 
       // 그 날짜에 내가 배정된 루트들을 먼저 찾음 (배송원 한 명은 하루에 한 루트에만 배정됨)
       const { data: routeRows } = await supabase
@@ -161,6 +165,15 @@ export default function DriverList() {
       const { error: insertError } = await supabase.from('delivery_photos').insert({ adhoc_stop_id: stopId, storage_path: path })
       if (insertError) { alert(`사진 저장 실패: ${insertError.message}`); return }
       setPhotoTakenAdhoc(prev => new Set([...prev, stopId]))
+
+      // 채널톡 알림 — 실패해도 사진 저장 자체는 이미 끝난 상태라 조용히 넘어감
+      try {
+        await fetch('/api/channeltalk/notify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: 'adhoc', id: stopId, driver_name: driverName }),
+        })
+      } catch { /* 알림 실패는 사진 저장에 영향 없음 */ }
     } finally {
       setUploadingAdhocId(null)
     }

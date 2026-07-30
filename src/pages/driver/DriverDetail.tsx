@@ -34,6 +34,7 @@ export default function DriverDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [order, setOrder] = useState<OrderStop | null>(null)
+  const [driverName, setDriverName] = useState('')
   const [photoTaken, setPhotoTaken] = useState<Set<string>>(new Set())
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null)
   const [memo, setMemo] = useState('')
@@ -44,6 +45,12 @@ export default function DriverDetail() {
   useEffect(() => {
     if (!id) return
     async function load() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: driverRow } = await supabase.from('drivers').select('name').eq('id', user.id).maybeSingle()
+        if (driverRow) setDriverName(driverRow.name)
+      }
+
       const { data: o } = await supabase
         .from('orders')
         .select('id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, delivered_at, delivery_memo')
@@ -128,7 +135,7 @@ export default function DriverDetail() {
       await fetch('/api/channeltalk/notify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_id: order.id }),
+        body: JSON.stringify({ kind: 'order', id: order.id, driver_name: driverName }),
       })
     } catch { /* 알림 실패는 배송 완료 처리에 영향 없음 */ }
 
