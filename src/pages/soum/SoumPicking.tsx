@@ -326,11 +326,23 @@ export default function SoumPicking() {
     setItems(prev => prev.map(i => idSet.has(i.id) ? { ...i, picked_at: value } : i))
   }
 
-  // 미성에서 찾기 — 미성은 박스 단위로 가져오는 경우가 많아서 주문에 필요한 수량과 실제
-  // 이동 수량이 다를 수 있음. 화면에 보이던 order_item들은 일단 미성 배치로 옮겨 파킹해두고
-  // (남는 만큼은 NK 창고 재고로 남음), 실제 이동 수량은 이카운트 재고이동 참고용으로 별도 기록
-  async function fetchFromMiseong(row: PickingRow, qtyInput: string) {
+  // 미성에서 찾기 — NK에 없는 상품을 미성 배치로 옮겨 파킹만 해둠 (수량은 여기선 안 물어봄,
+  // 실제 이동 수량은 미성에서 실물을 픽킹할 때 그 화면에서 정함)
+  async function moveToMiseong(row: PickingRow) {
     if (!miseongBatch) { alert('미성 배치가 없습니다.'); return }
+    if (!confirm(`${row.product_name}을(를) 미성 배치로 옮길까요?`)) return
+
+    const { error } = await supabase.from('order_items').update({ batch_id: miseongBatch.id }).in('id', row.item_ids)
+    if (error) { alert(`미성 배치 이동 실패: ${error.message}`); return }
+
+    const idSet = new Set(row.item_ids)
+    setItems(prev => prev.filter(i => !idSet.has(i.id)))
+  }
+
+  // 미성 배치 화면에서 실제 피킹 완료 처리 — 미성은 박스 단위로 가져오는 경우가 많아서
+  // 주문에 필요한 수량과 실제 이동 수량이 다를 수 있어, 확인하는 시점에 수량을 직접
+  // 입력받아 이카운트 재고이동 기록에 남기고 나서 확인(picked_at) 처리함
+  async function confirmMiseongPickup(row: PickingRow, qtyInput: string) {
     const qty = Number(qtyInput)
     if (!qty || qty <= 0) { alert('이동 수량을 입력해주세요.'); return }
 
@@ -342,11 +354,10 @@ export default function SoumPicking() {
     })
     if (logError) { alert(`미성 이동 기록 실패: ${logError.message}`); return }
 
-    const { error: moveError } = await supabase.from('order_items').update({ batch_id: miseongBatch.id }).in('id', row.item_ids)
-    if (moveError) { alert(`미성 배치 이동 실패: ${moveError.message}`); return }
-
+    const value = new Date().toISOString()
+    await supabase.from('order_items').update({ picked_at: value }).in('id', row.item_ids)
     const idSet = new Set(row.item_ids)
-    setItems(prev => prev.filter(i => !idSet.has(i.id)))
+    setItems(prev => prev.map(i => idSet.has(i.id) ? { ...i, picked_at: value } : i))
     setMiseongFetchKey(null)
     setMiseongQtyValue('')
   }
@@ -519,28 +530,9 @@ export default function SoumPicking() {
             {/* NK에 없으면 미성에서 대신 가져오는 경우가 있어서, 로케이션과 무관하게
                 모든 상품에 이 옵션을 열어둠 (미성 배치 화면 자체에서는 의미 없으니 제외) */}
             {!isMiseongView && !done && (
-              miseongFetchKey === row.key ? (
-                <div className="flex items-center gap-1">
-                  <input
-                    autoFocus
-                    type="number"
-                    min={1}
-                    value={miseongQtyValue}
-                    onChange={e => setMiseongQtyValue(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') fetchFromMiseong(row, miseongQtyValue) }}
-                    className="w-14 border rounded px-1.5 py-0.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
-                  />
-                  <button onClick={() => fetchFromMiseong(row, miseongQtyValue)} className="text-[11px] font-medium text-white bg-amber-600 rounded px-1.5 py-0.5">확정</button>
-                  <button onClick={() => setMiseongFetchKey(null)} className="text-[11px] text-gray-400 px-1">취소</button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => { setMiseongFetchKey(row.key); setMiseongQtyValue(String(row.quantity)) }}
-                  className="text-[11px] text-amber-600"
-                >
-                  🚚 미성
-                </button>
-              )
+              <button onClick={() => moveToMiseong(row)} className="text-[11px] text-amber-600">
+                🚚 미성
+              </button>
             )}
           </div>
 
@@ -550,6 +542,27 @@ export default function SoumPicking() {
               className="text-xs font-medium text-gray-500 border border-gray-300 rounded-lg px-2 py-1 shrink-0"
             >
               ×{row.quantity} · 되돌리기
+            </button>
+          ) : isMiseongView && miseongFetchKey === row.key ? (
+            <div className="flex items-center gap-1 shrink-0">
+              <input
+                autoFocus
+                type="number"
+                min={1}
+                value={miseongQtyValue}
+                onChange={e => setMiseongQtyValue(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') confirmMiseongPickup(row, miseongQtyValue) }}
+                className="w-16 border rounded px-1.5 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+              <button onClick={() => confirmMiseongPickup(row, miseongQtyValue)} className="text-xs font-medium text-white bg-amber-600 rounded-lg px-2 py-1">확정</button>
+              <button onClick={() => setMiseongFetchKey(null)} className="text-xs text-gray-400 px-1">취소</button>
+            </div>
+          ) : isMiseongView ? (
+            <button
+              onClick={() => { setMiseongFetchKey(row.key); setMiseongQtyValue(String(row.quantity)) }}
+              className="text-xl font-bold text-gray-800 bg-green-50 border border-green-200 rounded-lg px-2.5 py-0.5 shrink-0"
+            >
+              ×{row.quantity}
             </button>
           ) : (
             <button
