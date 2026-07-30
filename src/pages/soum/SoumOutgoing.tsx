@@ -62,11 +62,16 @@ export default function SoumOutgoing() {
     })
   }, [])
 
-  // 주문 admin_memo(text[])에 "출고 검수 담당자 : 이름"을 이어붙임 — 기존 메모는 유지
-  async function appendMemo(orderId: string, text: string) {
-    const { data } = await supabase.from('orders').select('admin_memo').eq('id', orderId).maybeSingle()
-    const next = [...(data?.admin_memo ?? []), text]
-    await supabase.from('orders').update({ admin_memo: next }).eq('id', orderId)
+  // 카페24 주문 메모에 직접 기록 — orders.admin_memo는 카페24 메모를 그대로 캐시해오는
+  // 것뿐이라(주문수집할 때마다 통째로 덮어씀) 로컬 DB에만 써두면 다음 수집 때 사라짐
+  async function postMemoToCafe24(orderNo: string, text: string) {
+    try {
+      await fetch('/api/cafe24/shipments?action=memo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_no: orderNo, content: text }),
+      })
+    } catch { /* 메모 등록 실패해도 출고 처리 자체엔 영향 없음 */ }
   }
 
   async function loadPending() {
@@ -149,8 +154,8 @@ export default function SoumOutgoing() {
     } catch {
       setMessage('카페24 배송중 전환 실패: 네트워크 오류')
     }
-    if (orderInfo && staffName) {
-      appendMemo(orderInfo.id, `출고 검수 담당자 : ${staffName}`).then(() => {})
+    if (staffName) {
+      postMemoToCafe24(orderNo, `출고 검수 담당자 : ${staffName}`)
     }
     loadPending()
   }

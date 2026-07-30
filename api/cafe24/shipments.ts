@@ -311,6 +311,25 @@ async function handleWebhook(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+// 카페24 주문 메모 등록 (POST ?action=memo) — shop_no는 쿼리스트링이 아니라 바디에만 넣어야 함
+// ("Query String is not available for POST, PUT Method." 에러 남)
+async function handleMemo(req: VercelRequest, res: VercelResponse) {
+  const { order_no, content } = req.body ?? {}
+  if (!order_no || !content) return res.status(400).json({ error: 'order_no, content 필요' })
+
+  try {
+    const token = await getToken()
+    const { ok, data } = await cafe24Req('POST', `/api/v2/admin/orders/${order_no}/memos`, token, {
+      shop_no: 1,
+      request: { content },
+    })
+    if (!ok) return res.status(502).json({ error: data })
+    res.status(200).json({ ok: true, memo: data })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
 
@@ -318,5 +337,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'standby') return handleStandby(req, res)
   if (action === 'transit') return handleTransit(req, res)
   if (action === 'unregister') return handleUnregister(req, res)
+  if (action === 'memo') return handleMemo(req, res)
   return handleWebhook(req, res)
 }
