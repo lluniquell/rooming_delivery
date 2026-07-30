@@ -54,6 +54,17 @@ const STATUS_COLOR: Record<string, string> = {
 // 각 자리는 숫자/문자 상관없이 올 수 있음 (예: NK-01-02-03, NK-A1-B2-C3)
 const LOC_REGEX = /[A-Z]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}/
 
+// 배치 이름으로 배송방법을 유추 — SoumOrders.tsx의 동일 함수와 같은 규칙
+// (보류에서 다른 배치로 옮길 때, 그 배치에 맞는 배송방법으로 다시 맞춰줌)
+function methodOfBatch(name: string): string | null {
+  if (name.includes('CJ')) return 'CJ'
+  if (name.includes('경동')) return '경동'
+  if (name.includes('직배')) return '직배'
+  if (name.includes('팀무버')) return '팀무버'
+  if (name.includes('업체배송')) return '업체배송'
+  return null
+}
+
 // 엑셀 열 너비 자동 계산용 — 한글은 2칸으로 계산
 function strWidth(s: string) {
   let w = 0
@@ -217,6 +228,29 @@ export default function SoumBatch() {
     setBatches(prev => prev.map(b => {
       if (b.id === activeBatchId) return { ...b, item_count: Math.max(0, b.item_count - ids.length) }
       if (b.id === holdBatch.id) return { ...b, item_count: b.item_count + ids.length }
+      return b
+    }))
+  }
+
+  // 보류 배치에서 다른(실제) 배치로 다시 배정 — 보류에 다시 보내는 건 의미 없어서 보류
+  // 배치 화면에서만 "보류로" 대신 이 버튼을 씀. 배치 이름에 맞춰 배송방법도 다시 맞춰줌
+  async function moveToOtherBatch(itemId: string, targetBatchId: string) {
+    const targetBatch = batches.find(b => b.id === targetBatchId)
+    if (!targetBatch) return
+    const target = items.find(i => i.id === itemId)
+    if (!target) return
+    const orderItems = items.filter(i => i.cafe24_order_no === target.cafe24_order_no)
+    const ids = orderItems.map(i => i.id)
+    const method = methodOfBatch(targetBatch.name)
+
+    await supabase.from('order_items')
+      .update({ batch_id: targetBatchId, ...(method && { delivery_method: method }) })
+      .in('id', ids)
+
+    setItems(prev => prev.filter(i => !ids.includes(i.id)))
+    setBatches(prev => prev.map(b => {
+      if (b.id === activeBatchId) return { ...b, item_count: Math.max(0, b.item_count - ids.length) }
+      if (b.id === targetBatchId) return { ...b, item_count: b.item_count + ids.length }
       return b
     }))
   }
@@ -845,13 +879,27 @@ export default function SoumBatch() {
                               >
                                 미배정으로
                               </button>
-                              <button
-                                onClick={() => moveToHold(item.id)}
-                                title="이 주문의 상품 전체를 보류로 옮깁니다"
-                                className="text-xs text-gray-300 hover:text-orange-400 transition-colors"
-                              >
-                                보류로
-                              </button>
+                              {activeBatch?.type === 'hold' ? (
+                                <select
+                                  defaultValue=""
+                                  onChange={e => { if (e.target.value) moveToOtherBatch(item.id, e.target.value) }}
+                                  title="이 주문의 상품 전체를 다른 배치로 옮깁니다"
+                                  className="text-xs border rounded-lg px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                >
+                                  <option value="" disabled>다른 배치로</option>
+                                  {batches.filter(b => b.type !== 'hold').map(b => (
+                                    <option key={b.id} value={b.id}>{b.batch_no}번 {b.name}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <button
+                                  onClick={() => moveToHold(item.id)}
+                                  title="이 주문의 상품 전체를 보류로 옮깁니다"
+                                  className="text-xs text-gray-300 hover:text-orange-400 transition-colors"
+                                >
+                                  보류로
+                                </button>
+                              )}
                             </td>
                           )}
                         </tr>
