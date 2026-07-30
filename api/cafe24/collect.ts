@@ -108,6 +108,7 @@ function itemRowsOf(order: any, dbOrderId: string) {
     brand: (item.supplier_name ?? '').trim() || null,
     supplier_name: item.supplier_product_name || null,
     location: deriveLocation(item.supplier_product_name || null),
+    product_no: item.product_no ?? null,
     quantity: item.quantity ?? 1,
     inspected_qty: 0,
     status: 'collected',
