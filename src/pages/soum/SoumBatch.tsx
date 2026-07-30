@@ -106,7 +106,8 @@ export default function SoumBatch() {
   useEffect(() => { loadBatches() }, [])
 
   async function loadBatches() {
-    const { data: batchData } = await supabase.from('batches').select('*').order('batch_no')
+    // 미성 배치는 소품팀 피킹 화면 전용 임시 보관소라 여기(배치현황)엔 안 보이게 함
+    const { data: batchData } = await supabase.from('batches').select('*').neq('type', 'miseong').order('batch_no')
     if (!batchData) return
 
     const { data: itemData } = await supabase

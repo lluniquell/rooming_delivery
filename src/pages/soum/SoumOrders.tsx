@@ -410,7 +410,7 @@ export default function SoumOrders() {
     const { data } = await supabase
       .from('batches')
       .select('*')
-      .neq('type', 'hold')
+      .not('type', 'in', '(hold,miseong)')
       .order('batch_no')
     setBatches(data ?? [])
   }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import * as XLSX from 'xlsx'
 
 interface Batch {
   id: string
@@ -128,11 +129,18 @@ export default function SoumPicking() {
   const [barcodeInputValue, setBarcodeInputValue] = useState('')
   const [thumbnail, setThumbnail] = useState<ThumbnailState | null>(null)
   const [showDone, setShowDone] = useState(false)
+  const [miseongBatch, setMiseongBatch] = useState<Batch | null>(null)
+  const [miseongFetchKey, setMiseongFetchKey] = useState<string | null>(null)
+  const [miseongQtyValue, setMiseongQtyValue] = useState('')
 
   useEffect(() => { loadBatches() }, [])
 
   async function loadBatches() {
-    const { data: batchData } = await supabase.from('batches').select('id, batch_no, name, type').order('batch_no')
+    // 미성 배치는 소품팀 피킹 화면 전용 임시 보관소라 일반 배치 목록엔 안 섞고 따로 고정 노출
+    const { data: miseong } = await supabase.from('batches').select('id, batch_no, name, type').eq('type', 'miseong').maybeSingle()
+    setMiseongBatch(miseong ?? null)
+
+    const { data: batchData } = await supabase.from('batches').select('id, batch_no, name, type').neq('type', 'miseong').order('batch_no')
     if (!batchData) { setBatches([]); return }
 
     // 확인 안 된(picked_at null) 상품 중 아직 남은 수량(quantity > inspected_qty)이 있는
@@ -289,6 +297,59 @@ export default function SoumPicking() {
     setItems(prev => prev.map(i => idSet.has(i.id) ? { ...i, picked_at: value } : i))
   }
 
+  // 미성에서 찾기 — 미성은 박스 단위로 가져오는 경우가 많아서 주문에 필요한 수량과 실제
+  // 이동 수량이 다를 수 있음. 화면에 보이던 order_item들은 일단 미성 배치로 옮겨 파킹해두고
+  // (남는 만큼은 NK 창고 재고로 남음), 실제 이동 수량은 이카운트 재고이동 참고용으로 별도 기록
+  async function fetchFromMiseong(row: PickingRow, qtyInput: string) {
+    if (!miseongBatch) { alert('미성 배치가 없습니다.'); return }
+    const qty = Number(qtyInput)
+    if (!qty || qty <= 0) { alert('이동 수량을 입력해주세요.'); return }
+
+    const today = new Date()
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+
+    const { error: logError } = await supabase.from('miseong_pickups').insert({
+      picked_date: dateStr,
+      product_code: row.product_code,
+      product_name: row.product_name,
+      quantity: qty,
+    })
+    if (logError) { alert(`미성 이동 기록 실패: ${logError.message}`); return }
+
+    const { error: moveError } = await supabase.from('order_items').update({ batch_id: miseongBatch.id }).in('id', row.item_ids)
+    if (moveError) { alert(`미성 배치 이동 실패: ${moveError.message}`); return }
+
+    const idSet = new Set(row.item_ids)
+    setItems(prev => prev.filter(i => !idSet.has(i.id)))
+    setMiseongFetchKey(null)
+    setMiseongQtyValue('')
+  }
+
+  // 당일 미성에서 피킹한(이동한) 상품 목록 — 이카운트 재고이동 등록용
+  async function downloadMiseongExcel() {
+    const today = new Date()
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    const { data } = await supabase
+      .from('miseong_pickups')
+      .select('product_code, product_name, quantity')
+      .eq('picked_date', dateStr)
+      .order('product_code')
+    if (!data?.length) { alert('오늘 미성에서 이동한 상품이 없습니다.'); return }
+
+    const merged: Record<string, { product_code: string; product_name: string; quantity: number }> = {}
+    for (const row of data) {
+      if (merged[row.product_code]) merged[row.product_code].quantity += row.quantity
+      else merged[row.product_code] = { ...row }
+    }
+
+    const header = ['상품코드', '상품명', '수량']
+    const rows = Object.values(merged).map(r => [r.product_code, r.product_name, r.quantity])
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '미성이동')
+    XLSX.writeFile(wb, `미성이동_${dateStr}.xlsx`)
+  }
+
   // 루밍 온라인몰 상품 상세페이지에서 썸네일(og:image)만 가져옴 — 카페24 관리자 상품 API
   // 권한 없이도 되는 방식이라, 수집 시 저장해둔 product_no로 공개 페이지를 직접 조회
   async function showThumbnail(row: PickingRow) {
@@ -307,7 +368,8 @@ export default function SoumPicking() {
     }
   }
 
-  const activeBatch = batches.find(b => b.id === activeBatchId)
+  const activeBatch = activeBatchId === miseongBatch?.id ? miseongBatch : batches.find(b => b.id === activeBatchId)
+  const isMiseongView = !!miseongBatch && activeBatchId === miseongBatch.id
   const activeItems = items.filter(i => !i.picked_at)
   const doneItems = items.filter(i => i.picked_at)
   const pickingList = buildPickingList(activeItems, sort, barcodeMap)
@@ -317,6 +379,14 @@ export default function SoumPicking() {
     return (
       <div className="max-w-md mx-auto">
         <h2 className="text-lg font-bold text-gray-800 mb-4">피킹 — 배치 선택</h2>
+        {miseongBatch && (
+          <button
+            onClick={() => selectBatch(miseongBatch.id)}
+            className="w-full text-left bg-amber-50 rounded-xl border border-amber-200 p-4 hover:bg-amber-100 transition-colors mb-3"
+          >
+            <span className="font-medium text-amber-800">🚚 미성 (임시 보관)</span>
+          </button>
+        )}
         {batches.length === 0 ? (
           <p className="text-center text-gray-400 py-12">배치가 없습니다.</p>
         ) : (
@@ -395,6 +465,29 @@ export default function SoumPicking() {
             >
               ×{row.quantity} · 되돌리기
             </button>
+          ) : !isMiseongView && row.location === '미성' ? (
+            miseongFetchKey === row.key ? (
+              <div className="flex items-center gap-1 shrink-0">
+                <input
+                  autoFocus
+                  type="number"
+                  min={1}
+                  value={miseongQtyValue}
+                  onChange={e => setMiseongQtyValue(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') fetchFromMiseong(row, miseongQtyValue) }}
+                  className="w-16 border rounded px-1.5 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
+                />
+                <button onClick={() => fetchFromMiseong(row, miseongQtyValue)} className="text-xs font-medium text-white bg-amber-600 rounded-lg px-2 py-1">확정</button>
+                <button onClick={() => setMiseongFetchKey(null)} className="text-xs text-gray-400 px-1">취소</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setMiseongFetchKey(row.key); setMiseongQtyValue(String(row.quantity)) }}
+                className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-300 rounded-lg px-2.5 py-1.5 shrink-0"
+              >
+                🚚 미성에서 찾기 (×{row.quantity})
+              </button>
+            )
           ) : (
             <button
               onClick={() => confirmPicked(row, true)}
@@ -429,9 +522,13 @@ export default function SoumPicking() {
           ← 배치 선택
         </button>
         <h2 className="text-base font-bold text-gray-800 flex-1 text-center truncate">
-          {activeBatch?.batch_no}번 {activeBatch?.name}
+          {isMiseongView ? '🚚 미성 (임시 보관)' : `${activeBatch?.batch_no}번 ${activeBatch?.name}`}
         </h2>
-        <span className="w-14 shrink-0" />
+        {isMiseongView ? (
+          <button onClick={downloadMiseongExcel} className="text-xs font-medium text-amber-700 shrink-0">엑셀</button>
+        ) : (
+          <span className="w-14 shrink-0" />
+        )}
       </div>
 
       <div className="flex gap-2 mb-3">
