@@ -45,6 +45,7 @@ export default function SoumOutgoing() {
   const [pendingList, setPendingList] = useState<PendingOrder[]>([])
   const [showPending, setShowPending] = useState(false)
   const [holdBatchId, setHoldBatchId] = useState<string | null>(null)
+  const [staffName, setStaffName] = useState('')
 
   const invoiceRef = useRef<HTMLInputElement>(null)
   const barcodeRef = useRef<HTMLInputElement>(null)
@@ -54,7 +55,19 @@ export default function SoumOutgoing() {
     loadPending()
     supabase.from('batches').select('id').eq('type', 'hold').maybeSingle()
       .then(({ data }) => setHoldBatchId(data?.id ?? null))
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('drivers').select('name').eq('id', user.id).maybeSingle()
+        .then(({ data }) => { if (data) setStaffName(data.name) })
+    })
   }, [])
+
+  // 주문 admin_memo(text[])에 "출고 검수 담당자 : 이름"을 이어붙임 — 기존 메모는 유지
+  async function appendMemo(orderId: string, text: string) {
+    const { data } = await supabase.from('orders').select('admin_memo').eq('id', orderId).maybeSingle()
+    const next = [...(data?.admin_memo ?? []), text]
+    await supabase.from('orders').update({ admin_memo: next }).eq('id', orderId)
+  }
 
   async function loadPending() {
     // 운송장 등록됐고 아직 출고 안 된 상품이 있는 주문 — 운송장번호는 상품(order_item) 자신의
@@ -135,6 +148,9 @@ export default function SoumOutgoing() {
       }
     } catch {
       setMessage('카페24 배송중 전환 실패: 네트워크 오류')
+    }
+    if (orderInfo && staffName) {
+      appendMemo(orderInfo.id, `출고 검수 담당자 : ${staffName}`).then(() => {})
     }
     loadPending()
   }
