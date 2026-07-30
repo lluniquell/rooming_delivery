@@ -524,36 +524,39 @@ export default function SoumPicking() {
             >
               ×{row.quantity} · 되돌리기
             </button>
-          ) : !isMiseongView && row.location === '미성' ? (
-            miseongFetchKey === row.key ? (
-              <div className="flex items-center gap-1 shrink-0">
-                <input
-                  autoFocus
-                  type="number"
-                  min={1}
-                  value={miseongQtyValue}
-                  onChange={e => setMiseongQtyValue(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') fetchFromMiseong(row, miseongQtyValue) }}
-                  className="w-16 border rounded px-1.5 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
-                <button onClick={() => fetchFromMiseong(row, miseongQtyValue)} className="text-xs font-medium text-white bg-amber-600 rounded-lg px-2 py-1">확정</button>
-                <button onClick={() => setMiseongFetchKey(null)} className="text-xs text-gray-400 px-1">취소</button>
-              </div>
-            ) : (
-              <button
-                onClick={() => { setMiseongFetchKey(row.key); setMiseongQtyValue(String(row.quantity)) }}
-                className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-300 rounded-lg px-2.5 py-1.5 shrink-0"
-              >
-                🚚 미성에서 찾기 (×{row.quantity})
-              </button>
-            )
+          ) : miseongFetchKey === row.key ? (
+            <div className="flex items-center gap-1 shrink-0">
+              <input
+                autoFocus
+                type="number"
+                min={1}
+                value={miseongQtyValue}
+                onChange={e => setMiseongQtyValue(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') fetchFromMiseong(row, miseongQtyValue) }}
+                className="w-16 border rounded px-1.5 py-1 text-sm text-center focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+              <button onClick={() => fetchFromMiseong(row, miseongQtyValue)} className="text-xs font-medium text-white bg-amber-600 rounded-lg px-2 py-1">확정</button>
+              <button onClick={() => setMiseongFetchKey(null)} className="text-xs text-gray-400 px-1">취소</button>
+            </div>
           ) : (
-            <button
-              onClick={() => confirmPicked(row, true)}
-              className="text-xl font-bold text-gray-800 bg-green-50 border border-green-200 rounded-lg px-2.5 py-0.5 shrink-0"
-            >
-              ×{row.quantity}
-            </button>
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <button
+                onClick={() => confirmPicked(row, true)}
+                className="text-xl font-bold text-gray-800 bg-green-50 border border-green-200 rounded-lg px-2.5 py-0.5"
+              >
+                ×{row.quantity}
+              </button>
+              {/* NK에 없으면 미성에서 대신 가져오는 경우가 있어서, 로케이션과 무관하게
+                  모든 상품에 이 옵션을 열어둠 (미성 배치 화면 자체에서는 의미 없으니 제외) */}
+              {!isMiseongView && (
+                <button
+                  onClick={() => { setMiseongFetchKey(row.key); setMiseongQtyValue(String(row.quantity)) }}
+                  className="text-[11px] text-amber-600 underline decoration-dotted underline-offset-2"
+                >
+                  🚚 미성에서 찾기
+                </button>
+              )}
+            </div>
           )}
         </div>
         <button
