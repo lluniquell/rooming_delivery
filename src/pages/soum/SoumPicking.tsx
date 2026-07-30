@@ -128,8 +128,23 @@ export default function SoumPicking() {
   useEffect(() => { loadBatches() }, [])
 
   async function loadBatches() {
-    const { data } = await supabase.from('batches').select('id, batch_no, name, type').order('batch_no')
-    setBatches(data ?? [])
+    const { data: batchData } = await supabase.from('batches').select('id, batch_no, name, type').order('batch_no')
+    if (!batchData) { setBatches([]); return }
+
+    // 확인 안 된(picked_at null) 상품 중 아직 남은 수량(quantity > inspected_qty)이 있는
+    // 배치만 선택 목록에 노출 — 피킹할 게 없는 배치는 목록에서 아예 뺌
+    const { data: itemData } = await supabase
+      .from('order_items')
+      .select('batch_id, quantity, inspected_qty')
+      .eq('status', 'confirmed')
+      .is('picked_at', null)
+
+    const batchesWithStock = new Set<string>()
+    for (const it of (itemData ?? []) as any[]) {
+      if (it.batch_id && it.quantity - it.inspected_qty > 0) batchesWithStock.add(it.batch_id)
+    }
+
+    setBatches(batchData.filter(b => batchesWithStock.has(b.id)))
   }
 
   async function selectBatch(batchId: string) {
