@@ -22,6 +22,7 @@ const logisticsItems: { to: string; label: string }[] = []
 
 const propItems = [
   { to: '/admin/soum/outgoing', label: '출고 검수 (CJ 운송장)' },
+  { to: '/admin/soum/picking', label: '피킹' },
   { to: '/admin/barcodes', label: '바코드 DB' },
   { to: '/admin/barcode-assign', label: '바코드 채번' },
 ]
