@@ -175,26 +175,37 @@ export default function SoumBatch() {
     setLoading(false)
   }
 
+  // 상품 하나만 옮기면 같은 주문의 나머지 상품이 배치에 남아 배송이 쪼개지므로,
+  // 클릭한 상품이 속한 주문의 상품 전체를 같이 옮김
   async function moveToHold(itemId: string) {
     const holdBatch = batches.find(b => b.type === 'hold')
     if (!holdBatch) return
-    await supabase.from('order_items').update({ batch_id: holdBatch.id }).eq('id', itemId)
+    const target = items.find(i => i.id === itemId)
+    if (!target) return
+    const orderItems = items.filter(i => i.cafe24_order_no === target.cafe24_order_no)
+    const ids = orderItems.map(i => i.id)
+
+    await supabase.from('order_items').update({ batch_id: holdBatch.id }).in('id', ids)
     // 서버 재조회 없이 로컬에서 바로 반영 (매번 전체 배치를 다시 불러오면 느림)
-    setItems(prev => prev.filter(i => i.id !== itemId))
+    setItems(prev => prev.filter(i => !ids.includes(i.id)))
     setBatches(prev => prev.map(b => {
-      if (b.id === activeBatchId) return { ...b, item_count: Math.max(0, b.item_count - 1) }
-      if (b.id === holdBatch.id) return { ...b, item_count: b.item_count + 1 }
+      if (b.id === activeBatchId) return { ...b, item_count: Math.max(0, b.item_count - ids.length) }
+      if (b.id === holdBatch.id) return { ...b, item_count: b.item_count + ids.length }
       return b
     }))
   }
 
-  // 배정을 취소하고 "주문 수집" 화면의 미배정 목록으로 되돌림
+  // 배정을 취소하고 "주문 수집" 화면의 미배정 목록으로 되돌림 — 이것도 상품 단위가 아니라
+  // 같은 주문의 상품 전체를 같이 되돌림
   async function moveToUnassigned(itemId: string) {
-    if (!confirm('이 상품을 배정 취소하고 주문 수집(미배정) 목록으로 되돌릴까요?')) return
-    const item = items.find(i => i.id === itemId)
+    const target = items.find(i => i.id === itemId)
+    if (!target) return
+    const orderItems = items.filter(i => i.cafe24_order_no === target.cafe24_order_no)
+    if (!confirm(`이 주문(${target.cafe24_order_no})의 상품 ${orderItems.length}건을 배정 취소하고 주문 수집(미배정) 목록으로 되돌릴까요?`)) return
 
-    // 카페24에 이미 운송장이 등록돼 있으면(운송장 업로드를 거쳤으면) 거기도 같이 정리
-    if (item?.tracking_number && item.cafe24_item_code) {
+    // 카페24에 이미 운송장이 등록돼 있는 상품이 있으면(운송장 업로드를 거쳤으면) 각각 정리
+    for (const item of orderItems) {
+      if (!item.tracking_number || !item.cafe24_item_code) continue
       try {
         const res = await fetch('/api/cafe24/shipments?action=unregister', {
           method: 'POST',
@@ -203,20 +214,21 @@ export default function SoumBatch() {
         })
         const result = await res.json()
         if (result.error) {
-          alert(`카페24 운송장 정리 실패: ${result.error}\n로컬 미배정은 계속 진행됩니다.`)
+          alert(`카페24 운송장 정리 실패(${item.product_name}): ${result.error}\n로컬 미배정은 계속 진행됩니다.`)
         }
       } catch {
-        alert('카페24 운송장 정리 중 네트워크 오류가 발생했습니다.\n로컬 미배정은 계속 진행됩니다.')
+        alert(`카페24 운송장 정리 중 네트워크 오류가 발생했습니다(${item.product_name}).\n로컬 미배정은 계속 진행됩니다.`)
       }
     }
 
+    const ids = orderItems.map(i => i.id)
     await supabase.from('order_items')
       .update({ status: 'collected', batch_id: null, delivery_method: null, tracking_number: null })
-      .eq('id', itemId)
+      .in('id', ids)
     // 서버 재조회 없이 로컬에서 바로 반영
-    setItems(prev => prev.filter(i => i.id !== itemId))
+    setItems(prev => prev.filter(i => !ids.includes(i.id)))
     setBatches(prev => prev.map(b =>
-      b.id === activeBatchId ? { ...b, item_count: Math.max(0, b.item_count - 1) } : b
+      b.id === activeBatchId ? { ...b, item_count: Math.max(0, b.item_count - ids.length) } : b
     ))
   }
 
@@ -783,12 +795,14 @@ export default function SoumBatch() {
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <button
                         onClick={() => moveToUnassigned(item.id)}
+                        title="이 주문의 상품 전체를 미배정으로 되돌립니다"
                         className="text-xs text-gray-300 hover:text-indigo-400 transition-colors mr-3"
                       >
                         미배정으로
                       </button>
                       <button
                         onClick={() => moveToHold(item.id)}
+                        title="이 주문의 상품 전체를 보류로 옮깁니다"
                         className="text-xs text-gray-300 hover:text-orange-400 transition-colors"
                       >
                         보류로
