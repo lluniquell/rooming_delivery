@@ -9,6 +9,7 @@ interface Batch {
 }
 
 interface Item {
+  id: string
   product_code: string
   product_name: string
   option_info: string | null
@@ -39,6 +40,7 @@ interface PickingRow {
   quantity: number
   product_no: number | null
   barcodes: string[]
+  item_ids: string[]
 }
 
 interface ThumbnailState {
@@ -88,6 +90,7 @@ function buildPickingList(items: Item[], sort: 'location' | 'brand', barcodeMap:
     const key = `${item.product_code}__${item.option_info ?? ''}`
     if (merged[key]) {
       merged[key].quantity += remaining
+      merged[key].item_ids.push(item.id)
     } else {
       merged[key] = {
         key,
@@ -101,6 +104,7 @@ function buildPickingList(items: Item[], sort: 'location' | 'brand', barcodeMap:
         quantity: remaining,
         product_no: item.product_no,
         barcodes: barcodeValues,
+        item_ids: [item.id],
       }
     }
   }
@@ -152,7 +156,7 @@ export default function SoumPicking() {
     setLoading(true)
     const { data } = await supabase
       .from('order_items')
-      .select('product_code, product_name, option_info, brand, supplier_name, location, product_no, quantity, inspected_qty, picked_at')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, location, product_no, quantity, inspected_qty, picked_at')
       .eq('batch_id', batchId)
       .eq('status', 'confirmed')
     const rows = (data ?? []) as Item[]
@@ -171,6 +175,60 @@ export default function SoumPicking() {
     }
     setLoading(false)
   }
+
+  // 여러 명이 같은 배치를 동시에 피킹할 때, 한쪽에서 확인 처리한 게 다른 쪽 화면에도
+  // 실시간으로 반영되도록 구독 — 배치를 바꾸거나 화면을 나가면 구독 해제
+  useEffect(() => {
+    if (!activeBatchId) return
+
+    const channel = supabase
+      .channel(`picking-${activeBatchId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items', filter: `batch_id=eq.${activeBatchId}` }, payload => {
+        if (payload.eventType === 'DELETE') {
+          const old = payload.old as { id: string }
+          setItems(prev => prev.filter(i => i.id !== old.id))
+          return
+        }
+        const row = payload.new as any
+        setItems(prev => {
+          if (row.status !== 'confirmed') return prev.filter(i => i.id !== row.id)
+          const mapped: Item = {
+            id: row.id,
+            product_code: row.product_code,
+            product_name: row.product_name,
+            option_info: row.option_info,
+            brand: row.brand,
+            supplier_name: row.supplier_name,
+            location: row.location,
+            product_no: row.product_no,
+            quantity: row.quantity,
+            inspected_qty: row.inspected_qty,
+            picked_at: row.picked_at,
+          }
+          const exists = prev.some(i => i.id === row.id)
+          return exists ? prev.map(i => i.id === row.id ? mapped : i) : [...prev, mapped]
+        })
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'barcodes' }, payload => {
+        setBarcodeMap(prev => {
+          if (payload.eventType === 'DELETE') {
+            const old = payload.old as { id: string; product_code: string }
+            if (!prev[old.product_code]) return prev
+            return { ...prev, [old.product_code]: prev[old.product_code].filter(b => b.id !== old.id) }
+          }
+          const row = payload.new as any
+          const rows = prev[row.product_code] ? [...prev[row.product_code]] : []
+          const idx = rows.findIndex(b => b.id === row.id)
+          const entry: BarcodeRow = { id: row.id, barcode: row.barcode, location: row.location }
+          if (idx >= 0) rows[idx] = entry
+          else rows.push(entry)
+          return { ...prev, [row.product_code]: rows }
+        })
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [activeBatchId])
 
   // 같은 상품(product_code)의 바코드DB 로케이션을 한 번에 반영 — 바코드DB(BarcodeDB.tsx)와
   // 동일한 저장소를 쓰므로 여기서 고치면 그 화면에도 반영됨 (그 반대도 마찬가지)
@@ -220,19 +278,15 @@ export default function SoumPicking() {
     setBarcodeInputValue('')
   }
 
-  // 수량 확인 — 같은 상품(product_code + option_info)의 모든 행을 한 번에 확인 처리, 이 화면
-  // 목록에서만 숨김 (배치현황의 기존 픽킹리스트나 출고검수 inspected_qty는 그대로 유지)
+  // 수량 확인 — 화면에 실제로 보이던 order_item id들만 대상으로 확인 처리 (product_code로
+  // 뭉뚱그려 잡으면, 확인 누르는 그 순간 사이에 다른 화면에서 이 배치에 같은 상품이 새로
+  // 배정돼도 그것까지 같이 확인 처리돼버림 — 2026-07-30 발견). 이 화면 목록에서만 숨겨지고
+  // 배치현황의 기존 픽킹리스트나 출고검수 inspected_qty는 그대로 유지됨
   async function confirmPicked(row: PickingRow, picked: boolean) {
-    if (!activeBatchId) return
     const value = picked ? new Date().toISOString() : null
-    let query = supabase.from('order_items').update({ picked_at: value }).eq('batch_id', activeBatchId).eq('product_code', row.product_code)
-    query = row.option_info_raw ? query.eq('option_info', row.option_info_raw) : query.is('option_info', null)
-    await query
-    setItems(prev => prev.map(i =>
-      i.product_code === row.product_code && (i.option_info ?? null) === row.option_info_raw
-        ? { ...i, picked_at: value }
-        : i
-    ))
+    await supabase.from('order_items').update({ picked_at: value }).in('id', row.item_ids)
+    const idSet = new Set(row.item_ids)
+    setItems(prev => prev.map(i => idSet.has(i.id) ? { ...i, picked_at: value } : i))
   }
 
   // 루밍 온라인몰 상품 상세페이지에서 썸네일(og:image)만 가져옴 — 카페24 관리자 상품 API
