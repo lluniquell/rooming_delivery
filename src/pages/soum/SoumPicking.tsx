@@ -18,6 +18,13 @@ interface Item {
   product_no: number | null
   quantity: number
   inspected_qty: number
+  picked_at: string | null
+}
+
+interface BarcodeRow {
+  id: string
+  barcode: string | null
+  location: string | null
 }
 
 interface PickingRow {
@@ -31,6 +38,7 @@ interface PickingRow {
   supplier_note: string
   quantity: number
   product_no: number | null
+  barcodes: string[]
 }
 
 interface ThumbnailState {
@@ -44,7 +52,7 @@ interface ThumbnailState {
 // 각 자리는 숫자/문자 상관없이 올 수 있음 (예: NK-01-02-03, NK-A1-B2-C3) — SoumBatch.tsx와 동일한 규칙
 const LOC_REGEX = /[A-Z]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}/
 
-function buildPickingList(items: Item[], sort: 'location' | 'brand'): PickingRow[] {
+function buildPickingList(items: Item[], sort: 'location' | 'brand', barcodeMap: Record<string, BarcodeRow[]>): PickingRow[] {
   const merged: Record<string, PickingRow> = {}
 
   for (const item of items) {
@@ -52,17 +60,21 @@ function buildPickingList(items: Item[], sort: 'location' | 'brand'): PickingRow
     const remaining = item.quantity - item.inspected_qty
     if (remaining <= 0) continue
 
+    const bcRows = barcodeMap[item.product_code] ?? []
+    const bcLocation = bcRows.map(b => b.location).find(l => !!l) ?? null
+    const barcodeValues = bcRows.map(b => b.barcode).filter((b): b is string => !!b)
+
     const supplier = item.supplier_name ?? ''
     const codeMatch = supplier.match(LOC_REGEX)?.[0]
     const hasMiseong = supplier.includes('미성')
 
-    // 주문수집 시 이미 파싱해서 저장해둔 값을 우선 사용, 없는 옛 데이터만 그때 계산
-    let location = item.location ?? ''
+    // 로케이션 우선순위: 바코드DB(barcodes.location) > 주문수집 시 저장해둔 값 > 그때그때 계산
+    let location = bcLocation ?? item.location ?? ''
     let stripPattern: RegExp | string = ''
-    if (!item.location && codeMatch) {
+    if (!bcLocation && !item.location && codeMatch) {
       location = codeMatch
       stripPattern = LOC_REGEX
-    } else if (!item.location && hasMiseong) {
+    } else if (!bcLocation && !item.location && hasMiseong) {
       location = '미성'
       stripPattern = '미성'
     } else if (codeMatch) {
@@ -88,6 +100,7 @@ function buildPickingList(items: Item[], sort: 'location' | 'brand'): PickingRow
         supplier_note,
         quantity: remaining,
         product_no: item.product_no,
+        barcodes: barcodeValues,
       }
     }
   }
@@ -102,11 +115,15 @@ export default function SoumPicking() {
   const [batches, setBatches] = useState<Batch[]>([])
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null)
   const [items, setItems] = useState<Item[]>([])
+  const [barcodeMap, setBarcodeMap] = useState<Record<string, BarcodeRow[]>>({})
   const [sort, setSort] = useState<'location' | 'brand'>('location')
   const [loading, setLoading] = useState(false)
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [addingBarcodeKey, setAddingBarcodeKey] = useState<string | null>(null)
+  const [barcodeInputValue, setBarcodeInputValue] = useState('')
   const [thumbnail, setThumbnail] = useState<ThumbnailState | null>(null)
+  const [showDone, setShowDone] = useState(false)
 
   useEffect(() => { loadBatches() }, [])
 
@@ -120,27 +137,87 @@ export default function SoumPicking() {
     setLoading(true)
     const { data } = await supabase
       .from('order_items')
-      .select('product_code, product_name, option_info, brand, supplier_name, location, product_no, quantity, inspected_qty')
+      .select('product_code, product_name, option_info, brand, supplier_name, location, product_no, quantity, inspected_qty, picked_at')
       .eq('batch_id', batchId)
       .eq('status', 'confirmed')
-    setItems((data ?? []) as Item[])
+    const rows = (data ?? []) as Item[]
+    setItems(rows)
+
+    const codes = [...new Set(rows.map(r => r.product_code))]
+    if (codes.length) {
+      const { data: bcData } = await supabase.from('barcodes').select('id, barcode, product_code, location').in('product_code', codes)
+      const map: Record<string, BarcodeRow[]> = {}
+      for (const b of (bcData ?? []) as any[]) {
+        (map[b.product_code] ??= []).push({ id: b.id, barcode: b.barcode, location: b.location })
+      }
+      setBarcodeMap(map)
+    } else {
+      setBarcodeMap({})
+    }
     setLoading(false)
   }
 
-  // 같은 상품(product_code + option_info)의 모든 행에 로케이션을 한 번에 반영 — 이 배치 안에서만
+  // 같은 상품(product_code)의 바코드DB 로케이션을 한 번에 반영 — 바코드DB(BarcodeDB.tsx)와
+  // 동일한 저장소를 쓰므로 여기서 고치면 그 화면에도 반영됨 (그 반대도 마찬가지)
   async function updateLocation(row: PickingRow, newLocation: string) {
-    if (!activeBatchId) return
     const value = newLocation.trim() || null
-    let query = supabase.from('order_items').update({ location: value }).eq('batch_id', activeBatchId).eq('product_code', row.product_code)
+    const existingRows = barcodeMap[row.product_code] ?? []
+    if (existingRows.length) {
+      await supabase.from('barcodes').update({ location: value }).eq('product_code', row.product_code)
+    } else {
+      await supabase.from('barcodes').insert({ product_code: row.product_code, product_name: row.product_name, location: value })
+    }
+    setBarcodeMap(prev => {
+      const rows = prev[row.product_code] ?? []
+      return {
+        ...prev,
+        [row.product_code]: rows.length
+          ? rows.map(r => ({ ...r, location: value }))
+          : [{ id: `temp-${row.product_code}`, barcode: null, location: value }],
+      }
+    })
+    setEditingKey(null)
+  }
+
+  // 바코드가 없는 상품에 새 바코드 등록 — 바코드 없이 로케이션만 있는 행이 있으면 그 행을 채움
+  // (SoumOutgoing.tsx의 미등록 바코드 등록 로직과 동일한 방식)
+  async function addBarcode(row: PickingRow, value: string) {
+    const code = value.trim()
+    if (!code) return
+    const existingRows = barcodeMap[row.product_code] ?? []
+    const emptyRow = existingRows.find(r => !r.barcode)
+    if (emptyRow) {
+      const { error } = await supabase.from('barcodes').update({ barcode: code, product_name: row.product_name }).eq('id', emptyRow.id)
+      if (error) { alert(`바코드 등록 실패: ${error.message}`); return }
+    } else {
+      const { error } = await supabase.from('barcodes')
+        .upsert({ barcode: code, product_code: row.product_code, product_name: row.product_name, location: row.location || null }, { onConflict: 'barcode' })
+      if (error) { alert(`바코드 등록 실패: ${error.message}`); return }
+    }
+    setBarcodeMap(prev => {
+      const rows = prev[row.product_code] ?? []
+      const next = emptyRow
+        ? rows.map(r => r.id === emptyRow.id ? { ...r, barcode: code } : r)
+        : [...rows, { id: `temp-${code}`, barcode: code, location: row.location || null }]
+      return { ...prev, [row.product_code]: next }
+    })
+    setAddingBarcodeKey(null)
+    setBarcodeInputValue('')
+  }
+
+  // 수량 확인 — 같은 상품(product_code + option_info)의 모든 행을 한 번에 확인 처리, 이 화면
+  // 목록에서만 숨김 (배치현황의 기존 픽킹리스트나 출고검수 inspected_qty는 그대로 유지)
+  async function confirmPicked(row: PickingRow, picked: boolean) {
+    if (!activeBatchId) return
+    const value = picked ? new Date().toISOString() : null
+    let query = supabase.from('order_items').update({ picked_at: value }).eq('batch_id', activeBatchId).eq('product_code', row.product_code)
     query = row.option_info_raw ? query.eq('option_info', row.option_info_raw) : query.is('option_info', null)
     await query
-
     setItems(prev => prev.map(i =>
       i.product_code === row.product_code && (i.option_info ?? null) === row.option_info_raw
-        ? { ...i, location: value }
+        ? { ...i, picked_at: value }
         : i
     ))
-    setEditingKey(null)
   }
 
   // 루밍 온라인몰 상품 상세페이지에서 썸네일(og:image)만 가져옴 — 카페24 관리자 상품 API
@@ -162,7 +239,10 @@ export default function SoumPicking() {
   }
 
   const activeBatch = batches.find(b => b.id === activeBatchId)
-  const pickingList = buildPickingList(items, sort)
+  const activeItems = items.filter(i => !i.picked_at)
+  const doneItems = items.filter(i => i.picked_at)
+  const pickingList = buildPickingList(activeItems, sort, barcodeMap)
+  const doneList = buildPickingList(doneItems, sort, barcodeMap)
 
   if (!activeBatchId) {
     return (
@@ -187,11 +267,94 @@ export default function SoumPicking() {
     )
   }
 
+  function renderRow(row: PickingRow, done: boolean) {
+    return (
+      <div key={row.key} className={`bg-white rounded-xl border p-3.5 ${done ? 'opacity-60' : ''}`}>
+        <div className="flex items-center justify-between mb-1.5 gap-2">
+          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+            {editingKey === row.key ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  autoFocus
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') updateLocation(row, editValue) }}
+                  className="w-28 border rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="로케이션"
+                />
+                <button onClick={() => updateLocation(row, editValue)} className="text-xs font-medium text-white bg-indigo-600 rounded px-2 py-1">저장</button>
+                <button onClick={() => setEditingKey(null)} className="text-xs text-gray-400 px-1">취소</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setEditingKey(row.key); setEditValue(row.location) }}
+                className="font-mono text-sm font-bold text-indigo-600 underline decoration-dotted underline-offset-2"
+              >
+                {row.location || '위치 입력'}
+              </button>
+            )}
+
+            {row.barcodes.length > 0 ? (
+              <span className="font-mono text-[11px] text-gray-400">{row.barcodes.join(', ')}</span>
+            ) : addingBarcodeKey === row.key ? (
+              <div className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  value={barcodeInputValue}
+                  onChange={e => setBarcodeInputValue(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addBarcode(row, barcodeInputValue) }}
+                  className="w-24 border rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="바코드"
+                />
+                <button onClick={() => addBarcode(row, barcodeInputValue)} className="text-[11px] font-medium text-white bg-indigo-600 rounded px-1.5 py-0.5">등록</button>
+                <button onClick={() => setAddingBarcodeKey(null)} className="text-[11px] text-gray-400 px-1">취소</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setAddingBarcodeKey(row.key); setBarcodeInputValue('') }}
+                className="text-[11px] text-gray-400 border border-gray-300 rounded px-1.5 py-0.5"
+              >
+                + 바코드
+              </button>
+            )}
+          </div>
+
+          {done ? (
+            <button
+              onClick={() => confirmPicked(row, false)}
+              className="text-xs font-medium text-gray-500 border border-gray-300 rounded-lg px-2 py-1 shrink-0"
+            >
+              ×{row.quantity} · 되돌리기
+            </button>
+          ) : (
+            <button
+              onClick={() => confirmPicked(row, true)}
+              className="text-xl font-bold text-gray-800 bg-green-50 border border-green-200 rounded-lg px-2.5 py-0.5 shrink-0"
+            >
+              ×{row.quantity}
+            </button>
+          )}
+        </div>
+        <button
+          onClick={() => showThumbnail(row)}
+          className="text-sm font-medium text-gray-800 text-left underline decoration-dotted underline-offset-2"
+        >
+          {row.product_name}
+        </button>
+        {row.option_info && <div className="text-xs text-gray-400 mt-0.5">{row.option_info}</div>}
+        <div className="flex items-center justify-between mt-1.5">
+          <span className="text-xs text-gray-500">{row.brand || '-'}</span>
+          {row.supplier_note && <span className="text-xs text-gray-400 truncate ml-2">{row.supplier_note}</span>}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-md mx-auto">
       <div className="flex items-center gap-2 mb-3">
         <button
-          onClick={() => { setActiveBatchId(null); setItems([]) }}
+          onClick={() => { setActiveBatchId(null); setItems([]); setBarcodeMap({}) }}
           className="text-sm text-blue-600 shrink-0"
         >
           ← 배치 선택
@@ -223,50 +386,24 @@ export default function SoumPicking() {
 
       {loading ? (
         <p className="text-center text-gray-400 py-12">불러오는 중...</p>
-      ) : pickingList.length === 0 ? (
+      ) : pickingList.length === 0 && doneItems.length === 0 ? (
         <p className="text-center text-gray-400 py-12">피킹할 상품이 없습니다.</p>
       ) : (
         <div className="space-y-2">
-          <p className="text-xs text-gray-400 px-1">총 {pickingList.length}종</p>
-          {pickingList.map(row => (
-            <div key={row.key} className="bg-white rounded-xl border p-3.5">
-              <div className="flex items-center justify-between mb-1.5">
-                {editingKey === row.key ? (
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      autoFocus
-                      value={editValue}
-                      onChange={e => setEditValue(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter') updateLocation(row, editValue) }}
-                      className="w-32 border rounded px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                      placeholder="로케이션"
-                    />
-                    <button onClick={() => updateLocation(row, editValue)} className="text-xs font-medium text-white bg-indigo-600 rounded px-2 py-1">저장</button>
-                    <button onClick={() => setEditingKey(null)} className="text-xs text-gray-400 px-1">취소</button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => { setEditingKey(row.key); setEditValue(row.location) }}
-                    className="font-mono text-sm font-bold text-indigo-600 underline decoration-dotted underline-offset-2"
-                  >
-                    {row.location || '위치 입력'}
-                  </button>
-                )}
-                <span className="text-xl font-bold text-gray-800">×{row.quantity}</span>
-              </div>
-              <button
-                onClick={() => showThumbnail(row)}
-                className="text-sm font-medium text-gray-800 text-left underline decoration-dotted underline-offset-2"
-              >
-                {row.product_name}
+          <div className="flex items-center justify-between px-1">
+            <p className="text-xs text-gray-400">총 {pickingList.length}종</p>
+            {doneItems.length > 0 && (
+              <button onClick={() => setShowDone(v => !v)} className="text-xs text-gray-500 underline">
+                확인완료 {doneList.length}종 {showDone ? '숨기기' : '보기'}
               </button>
-              {row.option_info && <div className="text-xs text-gray-400 mt-0.5">{row.option_info}</div>}
-              <div className="flex items-center justify-between mt-1.5">
-                <span className="text-xs text-gray-500">{row.brand || '-'}</span>
-                {row.supplier_note && <span className="text-xs text-gray-400 truncate ml-2">{row.supplier_note}</span>}
-              </div>
-            </div>
-          ))}
+            )}
+          </div>
+          {pickingList.length === 0 ? (
+            <p className="text-center text-gray-400 py-8 text-sm">남은 상품이 없습니다.</p>
+          ) : (
+            pickingList.map(row => renderRow(row, false))
+          )}
+          {showDone && doneList.map(row => renderRow(row, true))}
         </div>
       )}
 
