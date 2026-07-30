@@ -563,9 +563,9 @@ export default function SoumPicking() {
           {row.product_name}
         </button>
         {row.option_info && <div className="text-xs text-gray-400 mt-0.5">{row.option_info}</div>}
-        <div className="flex items-center justify-between mt-1.5">
+        <div className="mt-1.5">
           <span className="text-xs text-gray-500">{row.brand || '-'}</span>
-          {row.supplier_note && <span className="text-xs text-gray-400 truncate ml-2">{row.supplier_note}</span>}
+          {row.supplier_note && <div className="text-xs text-gray-400 mt-0.5 break-words">{row.supplier_note}</div>}
         </div>
       </div>
     )
