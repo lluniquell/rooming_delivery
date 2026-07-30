@@ -73,6 +73,17 @@ async function fetchMemos(orderNo: string, token: string): Promise<string[]> {
   }
 }
 
+// 픽킹리스트 로케이션 추출 — SoumBatch.tsx의 buildPickingList()와 동일한 규칙
+// (공급사 상품명에 로케이션 코드가 텍스트로 박혀있는 걸 여기서 미리 파싱해서 저장)
+const LOC_REGEX = /[A-Z]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}/
+function deriveLocation(supplierName: string | null): string | null {
+  if (!supplierName) return null
+  const codeMatch = supplierName.match(LOC_REGEX)?.[0]
+  if (codeMatch) return codeMatch
+  if (supplierName.includes('미성')) return '미성'
+  return null
+}
+
 function receiverFieldsOf(order: any) {
   const r = order.receivers?.[0]
   if (!r) return {}
@@ -96,6 +107,7 @@ function itemRowsOf(order: any, dbOrderId: string) {
     option_info: item.option_value || null,
     brand: (item.supplier_name ?? '').trim() || null,
     supplier_name: item.supplier_product_name || null,
+    location: deriveLocation(item.supplier_product_name || null),
     quantity: item.quantity ?? 1,
     inspected_qty: 0,
     status: 'collected',

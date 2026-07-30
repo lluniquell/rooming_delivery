@@ -19,6 +19,7 @@ interface Item {
   option_info: string | null
   brand: string | null
   supplier_name: string | null
+  location: string | null
   quantity: number
   inspected_qty: number
   delivery_method: string | null
@@ -138,7 +139,7 @@ export default function SoumBatch() {
     setLoading(true)
     const { data } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, tm_barcode, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no)')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, tm_barcode, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no)')
       .eq('batch_id', batchId)
       .eq('status', 'confirmed')
     const rows = ((data ?? []) as any[])
@@ -149,6 +150,7 @@ export default function SoumBatch() {
         option_info: row.option_info,
         brand: row.brand,
         supplier_name: row.supplier_name,
+        location: row.location,
         quantity: row.quantity,
         inspected_qty: row.inspected_qty,
         delivery_method: row.delivery_method,
@@ -233,13 +235,19 @@ export default function SoumBatch() {
       const codeMatch = supplier.match(LOC_REGEX)?.[0]
       const hasMiseong = supplier.includes('미성')
 
-      let location = ''
+      // 주문수집 시 이미 파싱해서 저장해둔 값을 우선 사용 — 아직 재수집 전이라 저장된 값이
+      // 없는 옛 데이터만 화면에서 그때그때 다시 계산 (하위호환)
+      let location = item.location ?? ''
       let stripPattern: RegExp | string = ''
-      if (codeMatch) {
+      if (!item.location && codeMatch) {
         location = codeMatch
         stripPattern = LOC_REGEX
-      } else if (hasMiseong) {
+      } else if (!item.location && hasMiseong) {
         location = '미성'
+        stripPattern = '미성'
+      } else if (codeMatch) {
+        stripPattern = LOC_REGEX
+      } else if (hasMiseong) {
         stripPattern = '미성'
       }
 
