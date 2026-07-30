@@ -44,6 +44,13 @@ interface PickingRow {
   item_ids: string[]
 }
 
+interface MiseongPickup {
+  id: string
+  product_code: string
+  product_name: string
+  quantity: number
+}
+
 interface ThumbnailState {
   row: PickingRow
   loading: boolean
@@ -54,6 +61,12 @@ interface ThumbnailState {
 
 // 각 자리는 숫자/문자 상관없이 올 수 있음 (예: NK-01-02-03, NK-A1-B2-C3) — SoumBatch.tsx와 동일한 규칙
 const LOC_REGEX = /[A-Z]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}/
+
+// 로컬(KST) 기준 오늘 날짜 문자열
+function todayStr() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function buildPickingList(items: Item[], sort: 'location' | 'brand', barcodeMap: Record<string, BarcodeRow[]>): PickingRow[] {
   const merged: Record<string, PickingRow> = {}
@@ -132,6 +145,9 @@ export default function SoumPicking() {
   const [miseongBatch, setMiseongBatch] = useState<Batch | null>(null)
   const [miseongFetchKey, setMiseongFetchKey] = useState<string | null>(null)
   const [miseongQtyValue, setMiseongQtyValue] = useState('')
+  const [miseongPickupsToday, setMiseongPickupsToday] = useState<MiseongPickup[]>([])
+  const [showAddMiseong, setShowAddMiseong] = useState(false)
+  const [addForm, setAddForm] = useState({ product_code: '', product_name: '', quantity: '' })
 
   useEffect(() => { loadBatches() }, [])
 
@@ -181,7 +197,20 @@ export default function SoumPicking() {
     } else {
       setBarcodeMap({})
     }
+
+    if (miseongBatch && batchId === miseongBatch.id) {
+      await loadMiseongPickupsToday()
+    }
     setLoading(false)
+  }
+
+  async function loadMiseongPickupsToday() {
+    const { data } = await supabase
+      .from('miseong_pickups')
+      .select('id, product_code, product_name, quantity')
+      .eq('picked_date', todayStr())
+      .order('created_at', { ascending: false })
+    setMiseongPickupsToday((data ?? []) as MiseongPickup[])
   }
 
   // 여러 명이 같은 배치를 동시에 피킹할 때, 한쪽에서 확인 처리한 게 다른 쪽 화면에도
@@ -305,11 +334,8 @@ export default function SoumPicking() {
     const qty = Number(qtyInput)
     if (!qty || qty <= 0) { alert('이동 수량을 입력해주세요.'); return }
 
-    const today = new Date()
-    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-
     const { error: logError } = await supabase.from('miseong_pickups').insert({
-      picked_date: dateStr,
+      picked_date: todayStr(),
       product_code: row.product_code,
       product_name: row.product_name,
       quantity: qty,
@@ -325,10 +351,43 @@ export default function SoumPicking() {
     setMiseongQtyValue('')
   }
 
+  // 미성 배치 화면에서 특정 주문과 무관하게 상품을 임의로 추가(예: 다음에 필요할 걸 미리
+  // 가져온 경우) — order_item과 연결이 없으니 이카운트 재고이동 기록(miseong_pickups)에만 남김
+  async function addMiseongManual() {
+    const product_code = addForm.product_code.trim()
+    const product_name = addForm.product_name.trim()
+    const quantity = Number(addForm.quantity)
+    if (!product_code || !product_name || !quantity || quantity <= 0) {
+      alert('상품코드/상품명/수량을 모두 입력해주세요.')
+      return
+    }
+    const { error } = await supabase.from('miseong_pickups').insert({
+      picked_date: todayStr(),
+      product_code,
+      product_name,
+      quantity,
+    })
+    if (error) { alert(`추가 실패: ${error.message}`); return }
+    setAddForm({ product_code: '', product_name: '', quantity: '' })
+    setShowAddMiseong(false)
+    loadMiseongPickupsToday()
+  }
+
+  async function removeMiseongPickup(id: string) {
+    await supabase.from('miseong_pickups').delete().eq('id', id)
+    setMiseongPickupsToday(prev => prev.filter(p => p.id !== id))
+  }
+
+  // 상품코드로 기존 주문 데이터에서 상품명을 찾아 자동으로 채워줌 (있으면)
+  async function lookupProductName(code: string) {
+    if (!code.trim() || addForm.product_name.trim()) return
+    const { data } = await supabase.from('order_items').select('product_name').eq('product_code', code.trim()).limit(1).maybeSingle()
+    if (data?.product_name) setAddForm(f => ({ ...f, product_name: data.product_name }))
+  }
+
   // 당일 미성에서 피킹한(이동한) 상품 목록 — 이카운트 재고이동 등록용
   async function downloadMiseongExcel() {
-    const today = new Date()
-    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    const dateStr = todayStr()
     const { data } = await supabase
       .from('miseong_pickups')
       .select('product_code, product_name, quantity')
@@ -525,11 +584,31 @@ export default function SoumPicking() {
           {isMiseongView ? '🚚 미성 (임시 보관)' : `${activeBatch?.batch_no}번 ${activeBatch?.name}`}
         </h2>
         {isMiseongView ? (
-          <button onClick={downloadMiseongExcel} className="text-xs font-medium text-amber-700 shrink-0">엑셀</button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => setShowAddMiseong(true)} className="text-xs font-medium text-amber-700">+ 추가</button>
+            <button onClick={downloadMiseongExcel} className="text-xs font-medium text-amber-700">엑셀</button>
+          </div>
         ) : (
           <span className="w-14 shrink-0" />
         )}
       </div>
+
+      {isMiseongView && miseongPickupsToday.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3">
+          <p className="text-xs font-medium text-amber-700 mb-2">오늘 미성 이동 기록 {miseongPickupsToday.length}건</p>
+          <div className="space-y-1">
+            {miseongPickupsToday.map(p => (
+              <div key={p.id} className="flex items-center justify-between text-xs text-amber-900">
+                <span className="truncate">{p.product_name} <span className="font-mono text-amber-500">{p.product_code}</span></span>
+                <span className="flex items-center gap-2 shrink-0 ml-2">
+                  ×{p.quantity}
+                  <button onClick={() => removeMiseongPickup(p.id)} className="text-amber-400 hover:text-red-500">✕</button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-2 mb-3">
         <button
@@ -590,6 +669,50 @@ export default function SoumPicking() {
             ) : (
               <p className="text-center text-gray-400 py-16 text-sm">{thumbnail.error ?? '이미지를 찾을 수 없습니다.'}</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {showAddMiseong && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setShowAddMiseong(false)}
+        >
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs p-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-bold text-gray-800">미성 상품 추가</span>
+              <button onClick={() => setShowAddMiseong(false)} className="text-gray-400 text-xl leading-none px-1">×</button>
+            </div>
+            <div className="space-y-2">
+              <input
+                autoFocus
+                value={addForm.product_code}
+                onChange={e => setAddForm(f => ({ ...f, product_code: e.target.value }))}
+                onBlur={e => lookupProductName(e.target.value)}
+                placeholder="상품코드"
+                className="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+              <input
+                value={addForm.product_name}
+                onChange={e => setAddForm(f => ({ ...f, product_name: e.target.value }))}
+                placeholder="상품명"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+              <input
+                type="number"
+                min={1}
+                value={addForm.quantity}
+                onChange={e => setAddForm(f => ({ ...f, quantity: e.target.value }))}
+                placeholder="수량"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+              />
+            </div>
+            <button
+              onClick={addMiseongManual}
+              className="w-full mt-3 py-2 rounded-lg text-sm font-medium text-white bg-amber-600 hover:bg-amber-700"
+            >
+              추가
+            </button>
           </div>
         </div>
       )}
