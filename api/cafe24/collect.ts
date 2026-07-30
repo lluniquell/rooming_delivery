@@ -294,6 +294,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               .select('id, product_code, cafe24_item_code, order_status, labels')
               .eq('order_id', existed.id)
             const pool = [...(order.items ?? [])]
+            const matchedCodes = new Set<string>()
             for (const row of existingItems ?? []) {
               let match = row.cafe24_item_code
                 ? pool.find((i: any) => i.order_item_code === row.cafe24_item_code)
@@ -303,12 +304,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 if (idx >= 0) match = pool.splice(idx, 1)[0]
               }
               if (!match) continue
+              if (match.order_item_code) matchedCodes.add(match.order_item_code)
               const patch: Record<string, any> = {}
               if (!row.cafe24_item_code && match.order_item_code) patch.cafe24_item_code = match.order_item_code
               if (match.order_status && match.order_status !== row.order_status) patch.order_status = match.order_status
               if (JSON.stringify(match.labels ?? []) !== JSON.stringify(row.labels ?? [])) patch.labels = match.labels ?? []
               if (Object.keys(patch).length) {
                 await supabase.from('order_items').update(patch).eq('id', row.id)
+              }
+            }
+
+            // 교환/부분 클레임 등으로 주문에 나중에 새로 생긴 라인아이템은 위 매칭에 전혀
+            // 안 걸려서 계속 누락됐음(2026-07-30 발견, 20260729-0000782) — 안 걸린 것만 새로 추가
+            const newLiveItems = (order.items ?? []).filter((i: any) => i.order_item_code && !matchedCodes.has(i.order_item_code))
+            if (newLiveItems.length) {
+              const newRows = itemRowsOf({ ...order, items: newLiveItems }, existed.id)
+              if (newRows.length) {
+                const { error } = await supabase.from('order_items').insert(newRows)
+                if (error) throw new Error(`신규 상품 저장 실패: ${error.message}`)
+                itemsBackfilled += newRows.length
               }
             }
           }
