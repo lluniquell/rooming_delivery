@@ -130,7 +130,7 @@ export default function BarcodeDB() {
     }
 
     const toInsert: { product_code: string; product_name: string; barcode: string | null; location: string | null }[] = []
-    const toUpdate: { id: number; product_code: string; product_name: string; barcode: string | null; location: string | null }[] = []
+    const toUpdate: { id: number; product_code: string; product_name: string; barcode: string | null; location: string | null; isNewBarcode: boolean }[] = []
     const conflictList: UploadConflict[] = []
 
     for (const r of csvRows) {
@@ -139,7 +139,7 @@ export default function BarcodeDB() {
         if (byBarcode) {
           const newLocation = r.location ?? byBarcode.location
           if (byBarcode.product_code !== r.product_code || byBarcode.product_name !== r.product_name || newLocation !== byBarcode.location) {
-            toUpdate.push({ id: byBarcode.id, product_code: r.product_code, product_name: r.product_name, barcode: r.barcode, location: newLocation })
+            toUpdate.push({ id: byBarcode.id, product_code: r.product_code, product_name: r.product_name, barcode: r.barcode, location: newLocation, isNewBarcode: false })
           }
           continue
         }
@@ -158,7 +158,7 @@ export default function BarcodeDB() {
         const emptySlot = existingRows.find(x => !x.barcode)
         if (emptySlot) {
           const newLocation = r.location ?? emptySlot.location
-          toUpdate.push({ id: emptySlot.id, product_code: r.product_code, product_name: r.product_name, barcode: r.barcode, location: newLocation })
+          toUpdate.push({ id: emptySlot.id, product_code: r.product_code, product_name: r.product_name, barcode: r.barcode, location: newLocation, isNewBarcode: true })
           continue
         }
         conflictList.push({
@@ -174,7 +174,7 @@ export default function BarcodeDB() {
       for (const row of existingRows) {
         const newLocation = r.location ?? row.location
         if (row.product_name !== r.product_name || newLocation !== row.location) {
-          toUpdate.push({ id: row.id, product_code: row.product_code, product_name: r.product_name, barcode: row.barcode, location: newLocation })
+          toUpdate.push({ id: row.id, product_code: row.product_code, product_name: r.product_name, barcode: row.barcode, location: newLocation, isNewBarcode: false })
         }
       }
     }
@@ -183,13 +183,44 @@ export default function BarcodeDB() {
     // 중복 기재된 경우) 마지막 값만 반영 — 한 upsert 배치 안에 같은 id가 중복되면 오류가 남
     const dedupedUpdates = [...new Map(toUpdate.map(u => [u.id, u])).values()]
 
+    // CSV 안에서 같은(새) 바코드가 서로 다른 상품에 중복 기재된 경우 — 그대로 insert/update를
+    // 실행하면 barcode UNIQUE 제약을 어겨서 배치 전체가 실패함. 이미 DB에 있던 바코드는
+    // 먼저 "정상 소유"로 등록해두고, 새로 부여되는 바코드끼리 겹치면 먼저 온 것만 반영하고
+    // 나머지는 반영하지 않은 채 충돌 목록에 남김
+    const claimedBarcode = new Map<string, number>()
+    for (const u of dedupedUpdates) {
+      if (u.barcode && !u.isNewBarcode) claimedBarcode.set(u.barcode, u.id)
+    }
+
+    const finalUpdate: { id: number; product_code: string; product_name: string; barcode: string | null; location: string | null }[] = []
+    for (const u of dedupedUpdates) {
+      if (!u.barcode || !u.isNewBarcode) { finalUpdate.push(u); continue }
+      const owner = claimedBarcode.get(u.barcode)
+      if (owner !== undefined && owner !== u.id) {
+        conflictList.push({ product_code: u.product_code, product_name: u.product_name, csv_barcode: u.barcode, existing_barcodes: '(CSV 내 다른 상품과 바코드 중복)' })
+      } else {
+        claimedBarcode.set(u.barcode, u.id)
+        finalUpdate.push(u)
+      }
+    }
+
+    const finalInsert: typeof toInsert = []
+    for (const r of toInsert) {
+      if (!r.barcode || !claimedBarcode.has(r.barcode)) {
+        if (r.barcode) claimedBarcode.set(r.barcode, -1)
+        finalInsert.push(r)
+      } else {
+        conflictList.push({ product_code: r.product_code, product_name: r.product_name, csv_barcode: r.barcode, existing_barcodes: '(CSV 내 다른 상품과 바코드 중복)' })
+      }
+    }
+
     let errorMsg: string | null = null
-    for (const batch of chunk(toInsert, 500)) {
+    for (const batch of chunk(finalInsert, 500)) {
       const { error } = await supabase.from('barcodes').insert(batch)
       if (error) { errorMsg = error.message; break }
     }
     if (!errorMsg) {
-      for (const batch of chunk(dedupedUpdates, 500)) {
+      for (const batch of chunk(finalUpdate, 500)) {
         const { error } = await supabase.from('barcodes').upsert(batch, { onConflict: 'id' })
         if (error) { errorMsg = error.message; break }
       }
@@ -200,7 +231,7 @@ export default function BarcodeDB() {
     } else {
       setConflicts(conflictList)
       setUploadMsg(
-        `✅ 신규 ${toInsert.length}건, 업데이트 ${dedupedUpdates.length}건${conflictList.length ? `, 충돌 ${conflictList.length}건(아래에서 다운로드)` : ''}`
+        `✅ 신규 ${finalInsert.length}건, 업데이트 ${finalUpdate.length}건${conflictList.length ? `, 충돌 ${conflictList.length}건(아래에서 다운로드)` : ''}`
       )
       fetchBarcodes(0, search)
       setPage(0)
