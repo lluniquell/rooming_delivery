@@ -169,12 +169,14 @@ export default function SoumPicking() {
     if (!batchData) { setBatches([]); return }
 
     // 확인 안 된(picked_at null) 상품 중 아직 남은 수량(quantity > inspected_qty)이 있는
-    // 배치만 선택 목록에 노출 — 피킹할 게 없는 배치는 목록에서 아예 뺌
+    // 배치만 선택 목록에 노출 — 피킹할 게 없는 배치는 목록에서 아예 뺌. 미성으로 보낸
+    // 상품은 원래 배치의 batch_id를 그대로 유지하니 여기서 따로 제외해야 함
     const { data: itemData } = await supabase
       .from('order_items')
       .select('batch_id, quantity, inspected_qty')
       .eq('status', 'confirmed')
       .is('picked_at', null)
+      .is('miseong_sent_at', null)
 
     const batchesWithStock = new Set<string>()
     for (const it of (itemData ?? []) as any[]) {
@@ -187,11 +189,17 @@ export default function SoumPicking() {
   async function selectBatch(batchId: string) {
     setActiveBatchId(batchId)
     setLoading(true)
-    const { data } = await supabase
+
+    // 미성 화면은 실제 batch_id가 아니라 miseong_sent_at이 찍힌 상품을(원래 배치가 뭐든)
+    // 전부 모아서 보여줌 — 미성으로 보낸다고 실제 batch_id는 절대 안 바뀌므로(다른 화면에
+    // 영향 없게 하려고) 이렇게 별도 조건으로 조회해야 함
+    const isMiseong = miseongBatch && batchId === miseongBatch.id
+    let query = supabase
       .from('order_items')
       .select('id, product_code, product_name, option_info, brand, supplier_name, location, product_no, quantity, inspected_qty, picked_at')
-      .eq('batch_id', batchId)
       .eq('status', 'confirmed')
+    query = isMiseong ? query.not('miseong_sent_at', 'is', null) : query.eq('batch_id', batchId).is('miseong_sent_at', null)
+    const { data } = await query
     const rows = (data ?? []) as Item[]
     setItems(rows)
 
@@ -223,38 +231,50 @@ export default function SoumPicking() {
   }
 
   // 여러 명이 같은 배치를 동시에 피킹할 때, 한쪽에서 확인 처리한 게 다른 쪽 화면에도
-  // 실시간으로 반영되도록 구독 — 배치를 바꾸거나 화면을 나가면 구독 해제
+  // 실시간으로 반영되도록 구독 — 배치를 바꾸거나 화면을 나가면 구독 해제.
+  // 미성 화면은 실제 batch_id로 필터링이 안 되니(원래 배치가 제각각이라) 필터 없이
+  // 전체 구독해서 miseong_sent_at으로 클라이언트에서 걸러냄
   useEffect(() => {
     if (!activeBatchId) return
+    const isMiseong = !!miseongBatch && activeBatchId === miseongBatch.id
 
     const channel = supabase
       .channel(`picking-${activeBatchId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'order_items', filter: `batch_id=eq.${activeBatchId}` }, payload => {
-        if (payload.eventType === 'DELETE') {
-          const old = payload.old as { id: string }
-          setItems(prev => prev.filter(i => i.id !== old.id))
-          return
-        }
-        const row = payload.new as any
-        setItems(prev => {
-          if (row.status !== 'confirmed') return prev.filter(i => i.id !== row.id)
-          const mapped: Item = {
-            id: row.id,
-            product_code: row.product_code,
-            product_name: row.product_name,
-            option_info: row.option_info,
-            brand: row.brand,
-            supplier_name: row.supplier_name,
-            location: row.location,
-            product_no: row.product_no,
-            quantity: row.quantity,
-            inspected_qty: row.inspected_qty,
-            picked_at: row.picked_at,
+      .on(
+        'postgres_changes',
+        isMiseong
+          ? { event: '*', schema: 'public', table: 'order_items' }
+          : { event: '*', schema: 'public', table: 'order_items', filter: `batch_id=eq.${activeBatchId}` },
+        payload => {
+          if (payload.eventType === 'DELETE') {
+            const old = payload.old as { id: string }
+            setItems(prev => prev.filter(i => i.id !== old.id))
+            return
           }
-          const exists = prev.some(i => i.id === row.id)
-          return exists ? prev.map(i => i.id === row.id ? mapped : i) : [...prev, mapped]
-        })
-      })
+          const row = payload.new as any
+          const belongsHere = isMiseong
+            ? !!row.miseong_sent_at
+            : row.batch_id === activeBatchId && !row.miseong_sent_at
+          setItems(prev => {
+            if (row.status !== 'confirmed' || !belongsHere) return prev.filter(i => i.id !== row.id)
+            const mapped: Item = {
+              id: row.id,
+              product_code: row.product_code,
+              product_name: row.product_name,
+              option_info: row.option_info,
+              brand: row.brand,
+              supplier_name: row.supplier_name,
+              location: row.location,
+              product_no: row.product_no,
+              quantity: row.quantity,
+              inspected_qty: row.inspected_qty,
+              picked_at: row.picked_at,
+            }
+            const exists = prev.some(i => i.id === row.id)
+            return exists ? prev.map(i => i.id === row.id ? mapped : i) : [...prev, mapped]
+          })
+        }
+      )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'barcodes' }, payload => {
         setBarcodeMap(prev => {
           if (payload.eventType === 'DELETE') {
@@ -274,7 +294,7 @@ export default function SoumPicking() {
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [activeBatchId])
+  }, [activeBatchId, miseongBatch?.id])
 
   // 같은 상품(product_code)의 바코드DB 로케이션을 한 번에 반영 — 바코드DB(BarcodeDB.tsx)와
   // 동일한 저장소를 쓰므로 여기서 고치면 그 화면에도 반영됨 (그 반대도 마찬가지)
@@ -338,11 +358,12 @@ export default function SoumPicking() {
   // 미성에서 찾기 — NK에 없는 상품을 미성 배치로 옮겨 파킹만 해둠 (수량은 여기선 안 물어봄,
   // 실제 이동 수량은 미성에서 실물을 픽킹할 때 그 화면에서 정함)
   async function moveToMiseong(row: PickingRow) {
-    if (!miseongBatch) { alert('미성 배치가 없습니다.'); return }
     if (!confirm(`${row.product_name}을(를) 미성 배치로 옮길까요?`)) return
 
-    const { error } = await supabase.from('order_items').update({ batch_id: miseongBatch.id }).in('id', row.item_ids)
-    if (error) { alert(`미성 배치 이동 실패: ${error.message}`); return }
+    // 실제 batch_id는 절대 안 건드림 — 그래야 배치현황/CJ 엑셀/출고검수 등 다른 화면엔
+    // 원래 배치 그대로 보임. miseong_sent_at만 찍어서 이 화면(피킹)에서만 미성으로 취급
+    const { error } = await supabase.from('order_items').update({ miseong_sent_at: new Date().toISOString() }).in('id', row.item_ids)
+    if (error) { alert(`미성 이동 실패: ${error.message}`); return }
 
     const idSet = new Set(row.item_ids)
     setItems(prev => prev.filter(i => !idSet.has(i.id)))
