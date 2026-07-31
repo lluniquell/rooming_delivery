@@ -76,11 +76,13 @@ export default function SoumOutgoing() {
 
   async function loadPending() {
     // 운송장 등록됐고 아직 출고 안 된 상품이 있는 주문 — 운송장번호는 상품(order_item) 자신의
-    // 값이라, 같은 주문에 다른 배송방법 상품이 섞여 있어도 그건 여기 잡히지 않음
+    // 값이라, 같은 주문에 다른 배송방법 상품이 섞여 있어도 그건 여기 잡히지 않음.
+    // 이 화면은 CJ 전용이라 직배(스케줄러/배송원 앱에서 완료 처리)는 제외
     const { data } = await supabase
       .from('order_items')
       .select('tracking_number, orders!inner(customer_name)')
       .eq('status', 'confirmed')
+      .eq('delivery_method', 'CJ')
       .not('tracking_number', 'is', null)
     const map: Record<string, PendingOrder> = {}
     for (const row of (data ?? []) as any[]) {
@@ -93,12 +95,14 @@ export default function SoumOutgoing() {
 
   async function loadByTracking(tracking: string) {
     // 주문 단위가 아니라, 이 운송장번호를 실제로 가진 상품(order_item) 행만 조회 —
-    // 같은 주문의 다른 배송방법(경동/직배) 상품은 tracking_number가 다르므로 절대 섞이지 않음
+    // 같은 주문의 다른 배송방법(경동/직배) 상품은 tracking_number가 다르므로 절대 섞이지 않음.
+    // 이 화면은 CJ 전용이라 직배는 제외
     const { data: itemData } = await supabase
       .from('order_items')
       .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, cafe24_item_code, order_id, orders!inner(id, cafe24_order_no, customer_name, cancelled_at)')
       .eq('tracking_number', tracking)
       .eq('status', 'confirmed')
+      .eq('delivery_method', 'CJ')
 
     if (!itemData?.length) {
       setMessage('해당 운송장번호의 검수 대기 상품이 없습니다. (이미 출고됐거나 배정 전)')
