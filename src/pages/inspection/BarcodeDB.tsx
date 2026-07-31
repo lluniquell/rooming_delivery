@@ -194,13 +194,14 @@ export default function BarcodeDB() {
 
     const finalUpdate: { id: number; product_code: string; product_name: string; barcode: string | null; location: string | null }[] = []
     for (const u of dedupedUpdates) {
-      if (!u.barcode || !u.isNewBarcode) { finalUpdate.push(u); continue }
+      const { isNewBarcode, ...writeRow } = u
+      if (!u.barcode || !isNewBarcode) { finalUpdate.push(writeRow); continue }
       const owner = claimedBarcode.get(u.barcode)
       if (owner !== undefined && owner !== u.id) {
         conflictList.push({ product_code: u.product_code, product_name: u.product_name, csv_barcode: u.barcode, existing_barcodes: '(CSV 내 다른 상품과 바코드 중복)' })
       } else {
         claimedBarcode.set(u.barcode, u.id)
-        finalUpdate.push(u)
+        finalUpdate.push(writeRow)
       }
     }
 
