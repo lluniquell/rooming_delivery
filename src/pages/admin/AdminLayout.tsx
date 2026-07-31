@@ -33,11 +33,16 @@ const devItems = [
   { to: '/admin/soum/dashboard', label: '소품팀 대시보드' },
 ]
 
+const showroomItems = [
+  { to: '/admin/showroom/inventory', label: '재고 위치' },
+]
+
 export const PERMISSION_GROUPS: { key: Permission; label: string; items: { to: string; label: string }[] }[] = [
   { key: 'orders', label: '주문', items: orderItems },
   { key: 'schedule', label: '스케줄러', items: scheduleItems },
   { key: 'logistics', label: '물류팀', items: logisticsItems },
   { key: 'soum', label: '소품팀', items: propItems },
+  { key: 'showroom', label: '쇼룸', items: showroomItems },
 ]
 
 // 계정 관리 화면에서 고를 수 있는 권한 목록 — '관리자'는 실제 메뉴가 아니라
@@ -49,6 +54,7 @@ export const ASSIGNABLE_PERMISSIONS: { key: Permission; label: string }[] = [
   { key: 'schedule', label: '스케줄러' },
   { key: 'logistics', label: '물류팀' },
   { key: 'soum', label: '소품팀' },
+  { key: 'showroom', label: '쇼룸' },
   { key: 'driver', label: '배송팀' },
 ]
 
