@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import * as XLSX from 'xlsx'
 
@@ -49,6 +49,12 @@ interface MiseongPickup {
   product_code: string
   product_name: string
   quantity: number
+}
+
+interface ProductCandidate {
+  product_code: string
+  product_name: string
+  barcode: string | null
 }
 
 interface ThumbnailState {
@@ -148,6 +154,9 @@ export default function SoumPicking() {
   const [miseongPickupsToday, setMiseongPickupsToday] = useState<MiseongPickup[]>([])
   const [showAddMiseong, setShowAddMiseong] = useState(false)
   const [addForm, setAddForm] = useState({ product_code: '', product_name: '', quantity: '' })
+  const [productQuery, setProductQuery] = useState('')
+  const [productResults, setProductResults] = useState<ProductCandidate[]>([])
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { loadBatches() }, [])
 
@@ -363,13 +372,15 @@ export default function SoumPicking() {
   }
 
   // 미성 배치 화면에서 특정 주문과 무관하게 상품을 임의로 추가(예: 다음에 필요할 걸 미리
-  // 가져온 경우) — order_item과 연결이 없으니 이카운트 재고이동 기록(miseong_pickups)에만 남김
+  // 가져온 경우) — order_item과 연결이 없으니 이카운트 재고이동 기록(miseong_pickups)에만 남김.
+  // 상품코드는 현장에서 알기 어려워서 필수로 안 받음 — 검색해서 고르면 자동으로 채워지고,
+  // 못 고르면 빈 값으로 저장했다가 엑셀 받아서 나중에 채워 넣으면 됨
   async function addMiseongManual() {
     const product_code = addForm.product_code.trim()
     const product_name = addForm.product_name.trim()
     const quantity = Number(addForm.quantity)
-    if (!product_code || !product_name || !quantity || quantity <= 0) {
-      alert('상품코드/상품명/수량을 모두 입력해주세요.')
+    if (!product_name || !quantity || quantity <= 0) {
+      alert('상품명/수량을 입력해주세요.')
       return
     }
     const { error } = await supabase.from('miseong_pickups').insert({
@@ -380,6 +391,8 @@ export default function SoumPicking() {
     })
     if (error) { alert(`추가 실패: ${error.message}`); return }
     setAddForm({ product_code: '', product_name: '', quantity: '' })
+    setProductQuery('')
+    setProductResults([])
     setShowAddMiseong(false)
     loadMiseongPickupsToday()
   }
@@ -389,11 +402,24 @@ export default function SoumPicking() {
     setMiseongPickupsToday(prev => prev.filter(p => p.id !== id))
   }
 
-  // 상품코드로 기존 주문 데이터에서 상품명을 찾아 자동으로 채워줌 (있으면)
-  async function lookupProductName(code: string) {
-    if (!code.trim() || addForm.product_name.trim()) return
-    const { data } = await supabase.from('order_items').select('product_name').eq('product_code', code.trim()).limit(1).maybeSingle()
-    if (data?.product_name) setAddForm(f => ({ ...f, product_name: data.product_name }))
+  // 상품명/상품코드/바코드로 바코드DB에서 검색 — 여기 등록된 상품은 상품코드/상품명을
+  // 직접 타이핑할 필요 없이 목록에서 골라서 채울 수 있음
+  async function searchProducts(q: string) {
+    const query = q.trim()
+    if (!query) { setProductResults([]); return }
+    const { data } = await supabase
+      .from('barcodes')
+      .select('product_code, product_name, barcode')
+      .or(`barcode.ilike.%${query}%,product_name.ilike.%${query}%,product_code.ilike.%${query}%`)
+      .limit(8)
+    const seen = new Set<string>()
+    const deduped: ProductCandidate[] = []
+    for (const row of (data ?? []) as ProductCandidate[]) {
+      if (seen.has(row.product_code)) continue
+      seen.add(row.product_code)
+      deduped.push(row)
+    }
+    setProductResults(deduped)
   }
 
   // 당일 미성에서 피킹한(이동한) 상품 목록 — 이카운트 재고이동 등록용
@@ -693,22 +719,49 @@ export default function SoumPicking() {
       {showAddMiseong && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          onClick={() => setShowAddMiseong(false)}
+          onClick={() => { setShowAddMiseong(false); setProductQuery(''); setProductResults([]) }}
         >
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-xs p-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-bold text-gray-800">미성 상품 추가</span>
-              <button onClick={() => setShowAddMiseong(false)} className="text-gray-400 text-xl leading-none px-1">×</button>
+              <button onClick={() => { setShowAddMiseong(false); setProductQuery(''); setProductResults([]) }} className="text-gray-400 text-xl leading-none px-1">×</button>
             </div>
             <div className="space-y-2">
-              <input
-                autoFocus
-                value={addForm.product_code}
-                onChange={e => setAddForm(f => ({ ...f, product_code: e.target.value }))}
-                onBlur={e => lookupProductName(e.target.value)}
-                placeholder="상품코드"
-                className="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-400"
-              />
+              <div className="relative">
+                <input
+                  autoFocus
+                  value={productQuery}
+                  onChange={e => {
+                    const v = e.target.value
+                    setProductQuery(v)
+                    if (searchTimeout.current) clearTimeout(searchTimeout.current)
+                    searchTimeout.current = setTimeout(() => searchProducts(v), 300)
+                  }}
+                  placeholder="상품명 또는 바코드로 검색"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
+                />
+                {productResults.length > 0 && (
+                  <div className="absolute z-10 left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg divide-y max-h-40 overflow-y-auto">
+                    {productResults.map(p => (
+                      <button
+                        key={p.product_code}
+                        onClick={() => {
+                          setAddForm(f => ({ ...f, product_code: p.product_code, product_name: p.product_name }))
+                          setProductQuery('')
+                          setProductResults([])
+                        }}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-amber-50"
+                      >
+                        <div className="font-medium text-gray-800">{p.product_name}</div>
+                        <div className="text-gray-400 font-mono">{p.product_code}{p.barcode ? ` · ${p.barcode}` : ''}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {addForm.product_code && (
+                <p className="text-[11px] text-gray-400 font-mono px-0.5">코드 자동입력됨: {addForm.product_code}</p>
+              )}
               <input
                 value={addForm.product_name}
                 onChange={e => setAddForm(f => ({ ...f, product_name: e.target.value }))}
