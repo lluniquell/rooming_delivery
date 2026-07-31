@@ -17,6 +17,8 @@ import SoumBatch from './pages/soum/SoumBatch'
 import SoumOutgoing from './pages/soum/SoumOutgoing'
 import SoumShippingStatus from './pages/soum/SoumShippingStatus'
 import SoumPicking from './pages/soum/SoumPicking'
+import SoumStow from './pages/soum/SoumStow'
+import SoumDashboard from './pages/soum/SoumDashboard'
 import ScheduleBoard from './pages/schedule/ScheduleBoard'
 import ScheduleDay from './pages/schedule/ScheduleDay'
 import DriverLayout from './pages/driver/DriverLayout'
@@ -101,6 +103,8 @@ function App() {
           <Route path="soum/shipping-status" element={driver && <RequirePermission perm="orders" driver={driver}><SoumShippingStatus /></RequirePermission>} />
           <Route path="soum/outgoing" element={driver && <RequirePermission perm="soum" driver={driver}><SoumOutgoing /></RequirePermission>} />
           <Route path="soum/picking" element={driver && <RequirePermission perm="soum" driver={driver}><SoumPicking /></RequirePermission>} />
+          <Route path="soum/stow" element={driver && <RequirePermission perm="soum" driver={driver}><SoumStow /></RequirePermission>} />
+          <Route path="soum/dashboard" element={driver && <RequireSuperadmin driver={driver}><SoumDashboard /></RequireSuperadmin>} />
           <Route path="schedule" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleBoard /></RequirePermission>} />
           <Route path="schedule/day/:date" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleDay /></RequirePermission>} />
           <Route path="inspection" element={driver && <RequirePermission perm="soum" driver={driver}><InspectionMain /></RequirePermission>} />

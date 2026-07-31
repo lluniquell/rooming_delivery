@@ -23,12 +23,14 @@ const logisticsItems: { to: string; label: string }[] = []
 const propItems = [
   { to: '/admin/soum/outgoing', label: '출고 검수 (CJ 운송장)' },
   { to: '/admin/soum/picking', label: '피킹' },
+  { to: '/admin/soum/stow', label: '입고 진열' },
   { to: '/admin/barcodes', label: '바코드 DB' },
   { to: '/admin/barcode-assign', label: '바코드 채번' },
 ]
 
 const devItems = [
   { to: '/admin/test', label: '카페24 테스트' },
+  { to: '/admin/soum/dashboard', label: '소품팀 대시보드' },
 ]
 
 export const PERMISSION_GROUPS: { key: Permission; label: string; items: { to: string; label: string }[] }[] = [

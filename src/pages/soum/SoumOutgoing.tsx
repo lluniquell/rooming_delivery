@@ -138,7 +138,7 @@ export default function SoumOutgoing() {
       }).then(() => {})
     }
     await supabase.from('order_items')
-      .update({ status: 'in_transit', shipped_at: new Date().toISOString() })
+      .update({ status: 'in_transit', shipped_at: new Date().toISOString(), shipped_by: staffName || null })
       .in('id', targetItems.map(i => i.id))
     try {
       const itemCodes = targetItems.map(i => i.cafe24_item_code).filter(Boolean) as string[]

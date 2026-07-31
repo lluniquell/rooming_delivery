@@ -156,9 +156,17 @@ export default function SoumPicking() {
   const [addForm, setAddForm] = useState({ product_code: '', product_name: '', quantity: '' })
   const [productQuery, setProductQuery] = useState('')
   const [productResults, setProductResults] = useState<ProductCandidate[]>([])
+  const [staffName, setStaffName] = useState('')
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => { loadBatches() }, [])
+  useEffect(() => {
+    loadBatches()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('drivers').select('name').eq('id', user.id).maybeSingle()
+        .then(({ data }) => { if (data) setStaffName(data.name) })
+    })
+  }, [])
 
   async function loadBatches() {
     // 미성 배치는 소품팀 피킹 화면 전용 임시 보관소라 일반 배치 목록엔 안 섞고 따로 고정 노출
@@ -350,7 +358,7 @@ export default function SoumPicking() {
   // 배치현황의 기존 픽킹리스트나 출고검수 inspected_qty는 그대로 유지됨
   async function confirmPicked(row: PickingRow, picked: boolean) {
     const value = picked ? new Date().toISOString() : null
-    await supabase.from('order_items').update({ picked_at: value }).in('id', row.item_ids)
+    await supabase.from('order_items').update({ picked_at: value, picked_by: picked ? staffName : null }).in('id', row.item_ids)
     const idSet = new Set(row.item_ids)
     setItems(prev => prev.map(i => idSet.has(i.id) ? { ...i, picked_at: value } : i))
   }
@@ -381,11 +389,12 @@ export default function SoumPicking() {
       product_code: row.product_code,
       product_name: row.product_name,
       quantity: qty,
+      picked_by: staffName,
     })
     if (logError) { alert(`미성 이동 기록 실패: ${logError.message}`); return }
 
     const value = new Date().toISOString()
-    await supabase.from('order_items').update({ picked_at: value }).in('id', row.item_ids)
+    await supabase.from('order_items').update({ picked_at: value, picked_by: staffName }).in('id', row.item_ids)
     const idSet = new Set(row.item_ids)
     setItems(prev => prev.map(i => idSet.has(i.id) ? { ...i, picked_at: value } : i))
     setMiseongFetchKey(null)
@@ -409,6 +418,7 @@ export default function SoumPicking() {
       product_code,
       product_name,
       quantity,
+      picked_by: staffName,
     })
     if (error) { alert(`추가 실패: ${error.message}`); return }
     setAddForm({ product_code: '', product_name: '', quantity: '' })
