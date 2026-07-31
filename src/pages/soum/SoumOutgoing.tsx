@@ -438,6 +438,8 @@ export default function SoumOutgoing() {
             value={barcode}
             onChange={e => setBarcode(e.target.value)}
             placeholder="바코드 스캔"
+            inputMode="numeric"
+            pattern="[0-9]*"
             className="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button

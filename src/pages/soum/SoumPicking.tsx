@@ -571,6 +571,8 @@ export default function SoumPicking() {
                   onKeyDown={e => { if (e.key === 'Enter') addBarcode(row, barcodeInputValue) }}
                   className="w-24 border rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
                   placeholder="바코드"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                 />
                 <button onClick={() => addBarcode(row, barcodeInputValue)} className="text-[11px] font-medium text-white bg-indigo-600 rounded px-1.5 py-0.5">등록</button>
                 <button onClick={() => setAddingBarcodeKey(null)} className="text-[11px] text-gray-400 px-1">취소</button>
