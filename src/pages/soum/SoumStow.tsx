@@ -24,6 +24,7 @@ export default function SoumStow() {
   const [scan, setScan] = useState<Scan | null>(null)
   const [locationValue, setLocationValue] = useState('')
   const [quantityValue, setQuantityValue] = useState('1')
+  const [barcodeValue, setBarcodeValue] = useState('')
   const [manualForm, setManualForm] = useState({ product_code: '', product_name: '' })
   const [productQuery, setProductQuery] = useState('')
   const [productResults, setProductResults] = useState<ProductCandidate[]>([])
@@ -57,6 +58,7 @@ export default function SoumStow() {
     setBarcodeInput('')
     setLocationValue('')
     setQuantityValue('1')
+    setBarcodeValue('')
     setManualForm({ product_code: '', product_name: '' })
     setProductQuery('')
     setProductResults([])
@@ -73,6 +75,7 @@ export default function SoumStow() {
       setScan({ mode: 'found', barcode: trimmed, row: data })
       setLocationValue(data.location ?? '')
       setQuantityValue('1')
+      setBarcodeValue(trimmed)
     } else {
       setScan({ mode: 'not_found', barcode: trimmed })
       setLocationValue('')
@@ -103,14 +106,17 @@ export default function SoumStow() {
     if (scan?.mode !== 'found') return
     const location = locationValue.trim()
     const quantity = Number(quantityValue)
+    const barcode = barcodeValue.trim()
+    if (!barcode) { alert('바코드를 입력해주세요.'); return }
     if (!location) { alert('위치를 입력해주세요.'); return }
     if (!quantity || quantity <= 0) { alert('수량을 입력해주세요.'); return }
 
-    if (location !== (scan.row.location ?? '')) {
-      await supabase.from('barcodes').update({ location }).eq('id', scan.row.id)
+    if (location !== (scan.row.location ?? '') || barcode !== scan.barcode) {
+      const { error: updateError } = await supabase.from('barcodes').update({ location, barcode }).eq('id', scan.row.id)
+      if (updateError) { alert(`바코드/위치 수정 실패: ${updateError.message}`); return }
     }
     const { error } = await supabase.from('stow_events').insert({
-      barcode: scan.barcode,
+      barcode,
       product_code: scan.row.product_code,
       product_name: scan.row.product_name,
       location,
@@ -189,11 +195,19 @@ export default function SoumStow() {
         <div className="bg-white rounded-xl border p-4 space-y-3">
           <div>
             <div className="text-sm font-medium text-gray-800">{scan.row.product_name}</div>
-            <div className="text-xs text-gray-400 font-mono">{scan.row.product_code} · {scan.barcode}</div>
+            <div className="text-xs text-gray-400 font-mono">{scan.row.product_code}</div>
             {scan.row.location && (
               <div className="text-xs text-gray-400 mt-0.5">현재 위치: <span className="font-mono">{scan.row.location}</span></div>
             )}
           </div>
+          <input
+            value={barcodeValue}
+            onChange={e => setBarcodeValue(e.target.value)}
+            placeholder="바코드"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            className="w-full border rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          />
           <input
             autoFocus
             value={locationValue}
