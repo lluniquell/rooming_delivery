@@ -389,6 +389,7 @@ export default function SoumPicking() {
       product_code: row.product_code,
       product_name: row.product_name,
       quantity: qty,
+      requested_quantity: row.quantity,
       picked_by: staffName,
     })
     if (logError) { alert(`미성 이동 기록 실패: ${logError.message}`); return }
@@ -418,6 +419,7 @@ export default function SoumPicking() {
       product_code,
       product_name,
       quantity,
+      requested_quantity: quantity,
       picked_by: staffName,
     })
     if (error) { alert(`추가 실패: ${error.message}`); return }
@@ -453,25 +455,33 @@ export default function SoumPicking() {
     setProductResults(deduped)
   }
 
-  // 당일 미성에서 피킹한(이동한) 상품 목록 — 이카운트 재고이동 등록용
+  // 당일 미성에서 피킹한(이동한) 상품 목록 — 이카운트 재고이동 등록용.
+  // 담당자는 실제 피킹한 사람이 아니라 엑셀을 다운로드하는(재고이동 등록하는) 사람 기준.
+  // B105/A100은 이카운트 재고이동 양식의 고정 창고코드, 헤더 없이 데이터 행만 그대로 업로드하는 형식
   async function downloadMiseongExcel() {
     const dateStr = todayStr()
     const { data } = await supabase
       .from('miseong_pickups')
-      .select('product_code, product_name, quantity')
+      .select('product_code, product_name, quantity, requested_quantity')
       .eq('picked_date', dateStr)
       .order('product_code')
     if (!data?.length) { alert('오늘 미성에서 이동한 상품이 없습니다.'); return }
 
-    const merged: Record<string, { product_code: string; product_name: string; quantity: number }> = {}
+    const merged: Record<string, { product_code: string; product_name: string; quantity: number; requested_quantity: number }> = {}
     for (const row of data) {
-      if (merged[row.product_code]) merged[row.product_code].quantity += row.quantity
-      else merged[row.product_code] = { ...row }
+      if (merged[row.product_code]) {
+        merged[row.product_code].quantity += row.quantity
+        merged[row.product_code].requested_quantity += row.requested_quantity ?? row.quantity
+      } else {
+        merged[row.product_code] = { product_code: row.product_code, product_name: row.product_name, quantity: row.quantity, requested_quantity: row.requested_quantity ?? row.quantity }
+      }
     }
 
-    const header = ['상품코드', '상품명', '수량']
-    const rows = Object.values(merged).map(r => [r.product_code, r.product_name, r.quantity])
-    const ws = XLSX.utils.aoa_to_sheet([header, ...rows])
+    const dateSlash = dateStr.replace(/-/g, '/')
+    const rows = Object.values(merged).map(r => [
+      dateSlash, staffName, 'B105', 'A100', r.product_code, r.product_name, '', r.requested_quantity, r.quantity,
+    ])
+    const ws = XLSX.utils.aoa_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '미성이동')
     XLSX.writeFile(wb, `미성이동_${dateStr}.xlsx`)
