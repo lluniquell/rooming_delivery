@@ -173,7 +173,8 @@ export default function SoumPicking() {
     const { data: miseong } = await supabase.from('batches').select('id, batch_no, name, type').eq('type', 'miseong').maybeSingle()
     setMiseongBatch(miseong ?? null)
 
-    const { data: batchData } = await supabase.from('batches').select('id, batch_no, name, type').neq('type', 'miseong').order('batch_no')
+    // 소품팀 피킹은 CJ 배치만 대상 — 경동/직배/업체배송/팀무버/기타/보류 등은 여기서 다루지 않음
+    const { data: batchData } = await supabase.from('batches').select('id, batch_no, name, type').ilike('name', 'CJ%').order('batch_no')
     if (!batchData) { setBatches([]); return }
 
     // 확인 안 된(picked_at null) 상품 중 아직 남은 수량(quantity > inspected_qty)이 있는
@@ -373,6 +374,16 @@ export default function SoumPicking() {
     const { error } = await supabase.from('order_items').update({ miseong_sent_at: new Date().toISOString() }).in('id', row.item_ids)
     if (error) { alert(`미성 이동 실패: ${error.message}`); return }
 
+    const idSet = new Set(row.item_ids)
+    setItems(prev => prev.filter(i => !idSet.has(i.id)))
+  }
+
+  // 미성으로 잘못 보냈거나 다시 원래 배치에서 찾기로 한 경우 — miseong_sent_at만 지워서
+  // 원래 배치 화면으로 되돌림 (batch_id는 애초에 안 건드렸으니 그대로 복귀)
+  async function removeFromMiseong(row: PickingRow) {
+    if (!confirm(`${row.product_name}을(를) 미성에서 빼고 원래 배치로 되돌릴까요?`)) return
+    const { error } = await supabase.from('order_items').update({ miseong_sent_at: null }).in('id', row.item_ids)
+    if (error) { alert(`제외 실패: ${error.message}`); return }
     const idSet = new Set(row.item_ids)
     setItems(prev => prev.filter(i => !idSet.has(i.id)))
   }
@@ -601,6 +612,11 @@ export default function SoumPicking() {
             {!isMiseongView && !done && (
               <button onClick={() => moveToMiseong(row)} className="text-[11px] text-amber-600">
                 🚚 미성
+              </button>
+            )}
+            {isMiseongView && !done && (
+              <button onClick={() => removeFromMiseong(row)} className="text-[11px] text-gray-400">
+                ↩ 미성에서 빼기
               </button>
             )}
           </div>
