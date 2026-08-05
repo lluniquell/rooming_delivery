@@ -32,6 +32,7 @@ interface PendingOrder {
   tracking_number: string
   customer_name: string
   item_count: number
+  ea_count: number
 }
 
 export default function SoumOutgoing() {
@@ -80,15 +81,16 @@ export default function SoumOutgoing() {
     // 이 화면은 CJ 전용이라 직배(스케줄러/배송원 앱에서 완료 처리)는 제외
     const { data } = await supabase
       .from('order_items')
-      .select('tracking_number, orders!inner(customer_name)')
+      .select('tracking_number, quantity, orders!inner(customer_name)')
       .eq('status', 'confirmed')
       .eq('delivery_method', 'CJ')
       .not('tracking_number', 'is', null)
     const map: Record<string, PendingOrder> = {}
     for (const row of (data ?? []) as any[]) {
       const t = row.tracking_number
-      if (!map[t]) map[t] = { tracking_number: t, customer_name: row.orders.customer_name, item_count: 0 }
+      if (!map[t]) map[t] = { tracking_number: t, customer_name: row.orders.customer_name, item_count: 0, ea_count: 0 }
       map[t].item_count++
+      map[t].ea_count += row.quantity
     }
     setPendingList(Object.values(map))
   }
@@ -339,7 +341,7 @@ export default function SoumOutgoing() {
                   <span className="text-sm font-medium text-gray-800">{p.customer_name}</span>
                   <span className="text-xs font-mono text-gray-400 ml-2">{p.tracking_number}</span>
                 </div>
-                <span className="text-xs text-gray-400">{p.item_count}종</span>
+                <span className="text-xs text-gray-400">{p.item_count}종 / {p.ea_count}EA</span>
               </button>
             ))}
           </div>

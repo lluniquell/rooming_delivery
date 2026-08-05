@@ -9,6 +9,7 @@ interface Batch {
   name: string
   type: string
   item_count: number
+  ea_count: number
   order_count: number
 }
 
@@ -149,14 +150,16 @@ export default function SoumBatch() {
 
     const { data: itemData } = await supabase
       .from('order_items')
-      .select('batch_id, orders(cafe24_order_no)')
+      .select('batch_id, quantity, orders(cafe24_order_no)')
       .eq('status', 'confirmed')
 
     const countMap: Record<string, number> = {}
+    const eaMap: Record<string, number> = {}
     const orderSetMap: Record<string, Set<string>> = {}
     for (const it of (itemData ?? []) as any[]) {
       if (!it.batch_id) continue
       countMap[it.batch_id] = (countMap[it.batch_id] ?? 0) + 1
+      eaMap[it.batch_id] = (eaMap[it.batch_id] ?? 0) + it.quantity
       const orderNo = it.orders?.cafe24_order_no
       if (orderNo) {
         if (!orderSetMap[it.batch_id]) orderSetMap[it.batch_id] = new Set()
@@ -167,6 +170,7 @@ export default function SoumBatch() {
     setBatches(batchData.map(b => ({
       ...b,
       item_count: countMap[b.id] ?? 0,
+      ea_count: eaMap[b.id] ?? 0,
       order_count: orderSetMap[b.id]?.size ?? 0,
     })))
   }
@@ -747,7 +751,7 @@ export default function SoumBatch() {
             }`}>
               {batch.order_count}건
             </div>
-            <div className="text-xs text-gray-400">SKU {batch.item_count}개</div>
+            <div className="text-xs text-gray-400">SKU {batch.item_count}개 / EA {batch.ea_count}개</div>
           </button>
         ))}
       </div>
@@ -759,7 +763,7 @@ export default function SoumBatch() {
             <span className="font-medium text-gray-800">
               {activeBatch?.batch_no}번 {activeBatch?.name}
               <span className="text-gray-400 font-normal ml-2 text-sm">
-                주문 {new Set(items.map(i => i.cafe24_order_no)).size}건 / SKU {items.length}개
+                주문 {new Set(items.map(i => i.cafe24_order_no)).size}건 / SKU {items.length}개 / EA {items.reduce((sum, i) => sum + i.quantity, 0)}개
               </span>
             </span>
             {items.length > 0 && (

@@ -32,6 +32,7 @@ interface PendingInvoice {
   invoice_no: string
   customer_name: string
   item_count: number
+  ea_count: number
 }
 
 export default function InspectionMain() {
@@ -87,14 +88,15 @@ export default function InspectionMain() {
   async function loadPending() {
     const { data } = await supabase
       .from('inspection_items')
-      .select('invoice_no, customer_name')
+      .select('invoice_no, customer_name, quantity')
     if (!data) return
     const map: Record<string, PendingInvoice> = {}
     for (const row of data) {
       if (!map[row.invoice_no]) {
-        map[row.invoice_no] = { invoice_no: row.invoice_no, customer_name: row.customer_name, item_count: 0 }
+        map[row.invoice_no] = { invoice_no: row.invoice_no, customer_name: row.customer_name, item_count: 0, ea_count: 0 }
       }
       map[row.invoice_no].item_count++
+      map[row.invoice_no].ea_count += row.quantity
     }
     setPendingList(Object.values(map))
   }
@@ -380,7 +382,7 @@ export default function InspectionMain() {
                   <span className="text-sm font-medium text-gray-800">{p.customer_name}</span>
                   <span className="text-xs font-mono text-gray-400 ml-2">{p.invoice_no}</span>
                 </div>
-                <span className="text-xs text-gray-400">{p.item_count}종</span>
+                <span className="text-xs text-gray-400">{p.item_count}종 / {p.ea_count}EA</span>
               </button>
             ))}
           </div>
