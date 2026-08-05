@@ -131,37 +131,39 @@ const OrderRow = memo(function OrderRow({
   const allChecked = activeItems.length > 0 && activeItems.every(i => selected.has(i.id))
   return (
     <div className={`border-b last:border-0 ${groupDone ? 'invisible pointer-events-none' : ''}`}>
-      {/* 주문 헤더 */}
+      {/* 주문 헤더 — 폰에서는 정보 줄과 배치 버튼 줄을 분리(세로로 쌓음), 배치 버튼은 터치하기 쉽게 크게 */}
       <div
         onClick={() => onToggleGroup(group)}
-        className="px-4 py-2 bg-gray-50/60 flex items-center gap-3 cursor-pointer hover:bg-gray-100"
+        className="px-4 py-2.5 bg-gray-50/60 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 cursor-pointer hover:bg-gray-100"
       >
-        <input
-          type="checkbox"
-          checked={allChecked}
-          onChange={() => onToggleGroup(group)}
-          onClick={e => e.stopPropagation()}
-          className="rounded"
-        />
-        <span className="font-mono text-xs text-gray-500">{group.cafe24_order_no}</span>
-        <ChannelBadge placeName={group.order_place_name} />
-        <span className="text-gray-600 text-sm">{group.customer_name}</span>
-        <span className="font-medium text-gray-800 text-sm">{group.receiver_name || '-'}</span>
-        {group.address && (
-          <span className="text-xs text-gray-400 shrink-0">{regionOf(group.address)}</span>
-        )}
-        <span className="text-xs text-gray-400">
-          {group.order_date ? new Date(group.order_date).toLocaleDateString('ko-KR') : '-'}
-        </span>
-        {group.admin_memo && group.admin_memo.length > 0 && (
-          <span
-            title={group.admin_memo.join('\n')}
-            className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 shrink-0"
-          >
-            📝 메모 {group.admin_memo.length}
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          <input
+            type="checkbox"
+            checked={allChecked}
+            onChange={() => onToggleGroup(group)}
+            onClick={e => e.stopPropagation()}
+            className="rounded w-[18px] h-[18px] shrink-0"
+          />
+          <span className="font-mono text-xs text-gray-500">{group.cafe24_order_no}</span>
+          <ChannelBadge placeName={group.order_place_name} />
+          <span className="text-gray-600 text-sm">{group.customer_name}</span>
+          <span className="font-medium text-gray-800 text-sm">{group.receiver_name || '-'}</span>
+          {group.address && (
+            <span className="text-xs text-gray-400 shrink-0">{regionOf(group.address)}</span>
+          )}
+          <span className="text-xs text-gray-400">
+            {group.order_date ? new Date(group.order_date).toLocaleDateString('ko-KR') : '-'}
           </span>
-        )}
-        <div className="flex gap-1 ml-auto" onClick={e => e.stopPropagation()}>
+          {group.admin_memo && group.admin_memo.length > 0 && (
+            <span
+              title={group.admin_memo.join('\n')}
+              className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700 shrink-0"
+            >
+              📝 메모 {group.admin_memo.length}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center flex-wrap gap-1.5 sm:gap-1 sm:ml-auto sm:justify-end" onClick={e => e.stopPropagation()}>
           {isAssigning && (
             <span className="text-xs text-gray-400 self-center mr-1">배정 중...</span>
           )}
@@ -171,62 +173,67 @@ const OrderRow = memo(function OrderRow({
               onClick={() => onQuickAssign(group, b)}
               disabled={isAssigning}
               title={`${b.batch_no}번 ${b.name}으로 배정`}
-              className="px-2 py-1 rounded text-xs font-medium border border-gray-200 text-gray-500 bg-white hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:text-gray-500"
+              className="px-2.5 py-1.5 min-h-[34px] sm:px-2 sm:py-1 sm:min-h-0 rounded text-xs font-medium border border-gray-200 text-gray-500 bg-white hover:bg-indigo-600 hover:text-white hover:border-indigo-600 active:bg-indigo-700 active:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:text-gray-500"
             >
               {b.name}
             </button>
           ))}
         </div>
       </div>
-      {/* 상품 행 */}
+      {/* 상품 행 — 폰에서는 상품 정보와 배송방법/위치/수량을 두 줄로 나눔 */}
       {group.items.map(item => {
         const done = assignedIds.has(item.id)
         return (
           <div
             key={item.id}
             onClick={() => onToggleItem(item.id)}
-            className={`pl-10 pr-4 py-2.5 flex items-center gap-3 cursor-pointer border-t border-gray-100 transition-colors ${
+            className={`pl-4 sm:pl-10 pr-4 py-2.5 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3 cursor-pointer border-t border-gray-100 transition-colors ${
               done ? 'invisible pointer-events-none' : selected.has(item.id) ? 'bg-blue-50' : 'hover:bg-gray-50'
             }`}
           >
-            <input
-              type="checkbox"
-              checked={selected.has(item.id)}
-              onChange={() => onToggleItem(item.id)}
-              onClick={e => e.stopPropagation()}
-              className="rounded"
-            />
-            <span className="text-xs text-gray-400 w-24 shrink-0">{item.brand ?? '-'}</span>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm text-gray-800">
-                {item.product_name}
-                {item.option_info && <span className="text-gray-400 text-xs ml-2">{item.option_info}</span>}
-              </div>
-              {item.supplier_name && (
-                <div className="text-[10px] text-gray-400 truncate">{item.supplier_name}</div>
-              )}
-              {item.labels && item.labels.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-0.5">
-                  {item.labels.map((l, idx) => (
-                    <span key={idx} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 text-rose-700">
-                      {l}
-                    </span>
-                  ))}
+            <div className="flex items-center gap-3 min-w-0">
+              <input
+                type="checkbox"
+                checked={selected.has(item.id)}
+                onChange={() => onToggleItem(item.id)}
+                onClick={e => e.stopPropagation()}
+                className="rounded w-[18px] h-[18px] shrink-0"
+              />
+              <span className="text-xs text-gray-400 w-24 shrink-0 hidden sm:inline">{item.brand ?? '-'}</span>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm text-gray-800">
+                  {item.product_name}
+                  {item.option_info && <span className="text-gray-400 text-xs ml-2">{item.option_info}</span>}
                 </div>
-              )}
+                <div className="text-xs text-gray-400 sm:hidden">{item.brand ?? '-'}</div>
+                {item.supplier_name && (
+                  <div className="text-[10px] text-gray-400 truncate">{item.supplier_name}</div>
+                )}
+                {item.labels && item.labels.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-0.5">
+                    {item.labels.map((l, idx) => (
+                      <span key={idx} className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-100 text-rose-700">
+                        {l}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            <span className="flex gap-2 text-[11px] shrink-0">
-              {DELIVERY_METHODS.map(m => {
-                const c = shipStats[item.product_code]?.[m] ?? 0
-                return (
-                  <span key={m} className={c > 0 ? 'text-blue-600 font-semibold' : 'text-gray-300'}>
-                    {m} {c}
-                  </span>
-                )
-              })}
-            </span>
-            <span className="font-mono text-xs text-indigo-600 shrink-0">{locationOf(item)}</span>
-            <span className="text-sm font-semibold text-gray-800 w-10 text-right shrink-0">×{item.quantity}</span>
+            <div className="flex items-center gap-2 flex-wrap pl-8 sm:pl-0 sm:shrink-0">
+              <span className="flex gap-2 text-[11px] shrink-0">
+                {DELIVERY_METHODS.map(m => {
+                  const c = shipStats[item.product_code]?.[m] ?? 0
+                  return (
+                    <span key={m} className={c > 0 ? 'text-blue-600 font-semibold' : 'text-gray-300'}>
+                      {m} {c}
+                    </span>
+                  )
+                })}
+              </span>
+              <span className="font-mono text-xs text-indigo-600 shrink-0">{locationOf(item)}</span>
+              <span className="text-sm font-semibold text-gray-800 shrink-0 ml-auto sm:ml-0 sm:w-10 sm:text-right">×{item.quantity}</span>
+            </div>
           </div>
         )
       })}
@@ -454,7 +461,7 @@ export default function SoumOrders() {
       setProgress({ phase: 'main', current: i + 1, total: days.length })
     }
 
-    // 2단계: 미배정 재확인 — 대상이 많을 때 타임아웃 나서, 50건씩 나눠 반복 호출
+    // 2단계: 주문 상태 재확인 — 대상이 많을 때 타임아웃 나서, 50건씩 나눠 반복 호출
     let notReady = 0
     {
       let offset = 0
@@ -586,9 +593,9 @@ export default function SoumOrders() {
 
   return (
     <div className="max-w-5xl">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
         <h2 className="text-xl font-bold text-gray-800">주문 수집</h2>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {collectMsg && <span className="text-sm text-gray-500">{collectMsg}</span>}
           {lastCollected && (
             <span className="text-xs text-gray-400">
@@ -605,12 +612,12 @@ export default function SoumOrders() {
         </div>
       </div>
 
-      {/* 수집 진행 상태: 메인 수집 → 미배정 재확인(50건씩 나눠 호출) */}
+      {/* 수집 진행 상태: 메인 수집 → 주문 상태 재확인(50건씩 나눠 호출) */}
       {progress && (
         <div className="bg-white rounded-xl border p-3 mb-4">
           <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
             <span className="font-medium text-gray-700">
-              {progress.phase === 'main' ? '메인 수집 중...' : '미배정 재확인 중...'}
+              {progress.phase === 'main' ? '메인 수집 중...' : '주문 상태 재확인 중...'}
             </span>
             {progress.total > 0 && (
               <span>{progress.current} / {progress.total}{progress.phase === 'main' ? '일' : '건'}</span>
@@ -712,7 +719,7 @@ export default function SoumOrders() {
         </div>
       ) : (
         <div className="bg-white rounded-xl border overflow-hidden">
-          <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
+          <div className="px-4 py-3 border-b bg-gray-50 flex flex-wrap items-center justify-between gap-2">
             <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
               <input
                 type="checkbox"
