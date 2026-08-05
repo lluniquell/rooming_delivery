@@ -844,10 +844,12 @@ export default function SoumBatch() {
                   const last = group.items.length - 1
                   return (
                     <Fragment key={group.cafe24_order_no}>
-                      {group.items.map((item, idx) => (
+                      {group.items.map((item, idx) => {
+                        const inspected = item.inspected_qty >= item.quantity
+                        return (
                         <tr
                           key={item.id}
-                          className={`hover:bg-gray-50 ${idx === last ? 'border-b-2 border-gray-200' : 'border-b border-gray-100'}`}
+                          className={`${inspected ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'} ${idx === last ? 'border-b-2 border-gray-200' : 'border-b border-gray-100'}`}
                         >
                           {idx === 0 && (
                             <>
@@ -907,7 +909,8 @@ export default function SoumBatch() {
                             </td>
                           )}
                         </tr>
-                      ))}
+                        )
+                      })}
                     </Fragment>
                   )
                 })}
