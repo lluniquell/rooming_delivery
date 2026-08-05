@@ -846,38 +846,41 @@ export default function SoumBatch() {
                     <Fragment key={group.cafe24_order_no}>
                       {group.items.map((item, idx) => {
                         const inspected = item.inspected_qty >= item.quantity
+                        // 주문번호/주문자명/수령인명/액션 칸은 rowSpan으로 여러 상품 행에 걸쳐있어서,
+                        // tr 전체에 배경색을 주면 이 칸들이 idx===0 행 색으로 통째로 물들어버려
+                        // 아래쪽 상품 행과 안 맞는 것처럼 보임 — 그래서 상품별 칸에만 색을 줌
                         return (
                         <tr
                           key={item.id}
-                          className={`${inspected ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'} ${idx === last ? 'border-b-2 border-gray-200' : 'border-b border-gray-100'}`}
+                          className={`hover:bg-gray-50 ${idx === last ? 'border-b-2 border-gray-200' : 'border-b border-gray-100'}`}
                         >
                           {idx === 0 && (
                             <>
-                              <td rowSpan={group.items.length} className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap align-top">
+                              <td rowSpan={group.items.length} className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap align-top bg-white">
                                 {group.cafe24_order_no}
                               </td>
-                              <td rowSpan={group.items.length} className="px-4 py-3 text-gray-700 whitespace-nowrap align-top">
+                              <td rowSpan={group.items.length} className="px-4 py-3 text-gray-700 whitespace-nowrap align-top bg-white">
                                 {group.customer_name}
                               </td>
-                              <td rowSpan={group.items.length} className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap align-top">
+                              <td rowSpan={group.items.length} className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap align-top bg-white">
                                 {group.receiver_name || '-'}
                               </td>
                             </>
                           )}
-                          <td className="px-4 py-3 text-sm text-gray-700">
+                          <td className={`px-4 py-3 text-sm text-gray-700 ${inspected ? 'bg-blue-50' : ''}`}>
                             {item.brand && <span className="text-gray-400 text-xs mr-1.5">[{item.brand}]</span>}
                             {item.product_name}
                             {item.option_info && <span className="text-gray-400 text-xs ml-1.5">{item.option_info}</span>}
                           </td>
-                          <td className="px-4 py-3 text-center font-semibold text-gray-800">{item.quantity}</td>
-                          <td className="px-4 py-3 text-sm text-gray-600">{item.delivery_method ?? '-'}</td>
-                          <td className="px-4 py-3">
+                          <td className={`px-4 py-3 text-center font-semibold text-gray-800 ${inspected ? 'bg-blue-50' : ''}`}>{item.quantity}</td>
+                          <td className={`px-4 py-3 text-sm text-gray-600 ${inspected ? 'bg-blue-50' : ''}`}>{item.delivery_method ?? '-'}</td>
+                          <td className={`px-4 py-3 ${inspected ? 'bg-blue-50' : ''}`}>
                             <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[item.status] ?? 'bg-gray-100 text-gray-500'}`}>
                               {STATUS_LABEL[item.status] ?? item.status}
                             </span>
                           </td>
                           {idx === 0 && (
-                            <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top">
+                            <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top bg-white">
                               <button
                                 onClick={() => moveToUnassigned(item.id)}
                                 title="이 주문의 상품 전체를 미배정으로 되돌립니다"
