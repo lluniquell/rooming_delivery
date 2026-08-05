@@ -40,18 +40,6 @@ interface Item {
   tm_external_order_no: string | null
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  confirmed: '확정',
-  in_transit: '배송중',
-  delivered: '배송완료',
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  confirmed: 'bg-gray-100 text-gray-600',
-  in_transit: 'bg-blue-100 text-blue-700',
-  delivered: 'bg-green-100 text-green-700',
-}
-
 // 각 자리는 숫자/문자 상관없이 올 수 있음 (예: NK-01-02-03, NK-A1-B2-C3)
 const LOC_REGEX = /[A-Z]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}/
 
@@ -835,7 +823,6 @@ export default function SoumBatch() {
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">상품</th>
                   <th className="text-center px-4 py-2 font-medium text-gray-500 text-xs w-12">수량</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">배송방법</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">상태</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
@@ -874,11 +861,6 @@ export default function SoumBatch() {
                           </td>
                           <td className={`px-4 py-3 text-center font-semibold text-gray-800 ${inspected ? 'bg-blue-50' : ''}`}>{item.quantity}</td>
                           <td className={`px-4 py-3 text-sm text-gray-600 ${inspected ? 'bg-blue-50' : ''}`}>{item.delivery_method ?? '-'}</td>
-                          <td className={`px-4 py-3 ${inspected ? 'bg-blue-50' : ''}`}>
-                            <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_COLOR[item.status] ?? 'bg-gray-100 text-gray-500'}`}>
-                              {STATUS_LABEL[item.status] ?? item.status}
-                            </span>
-                          </td>
                           {idx === 0 && (
                             <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top bg-white">
                               <button

@@ -136,7 +136,32 @@ export default function SoumOutgoing() {
   }
 
   // 상품별 배송방법 카운트 + 상태를 배송중으로 바꾸고 카페24에 배송중 전환 요청
-  async function shipItems(targetItems: InspectItem[], orderNo: string, trackingNo: string) {
+  // 이 주문의 상품이 전부 배송중(또는 그 이후) 상태가 됐으면, 더 이상 우리 쪽에서 쓸 일 없는
+  // 고객 개인정보(주소/연락처 등)를 비움 — 카페24 쪽엔 원본이 그대로 남아있어서 CS는 거기서 확인.
+  // customer_name은 not null 제약이라 null 대신 플레이스홀더로 대체
+  async function clearPiiIfOrderComplete(orderId: string) {
+    const { data: remaining } = await supabase
+      .from('order_items')
+      .select('id')
+      .eq('order_id', orderId)
+      .in('status', ['collected', 'confirmed'])
+      .limit(1)
+    if (remaining?.length) return
+    await supabase.from('orders').update({
+      customer_name: '(비공개)',
+      receiver_name: null,
+      receiver_phone: null,
+      address: null,
+      zipcode: null,
+      lat: null,
+      lng: null,
+      shipping_message: null,
+      delivery_memo: null,
+      admin_memo: null,
+    }).eq('id', orderId)
+  }
+
+  async function shipItems(targetItems: InspectItem[], orderNo: string, trackingNo: string, orderId: string) {
     for (const i of targetItems) {
       supabase.rpc('increment_ship_count', {
         p_code: i.product_code,
@@ -147,6 +172,7 @@ export default function SoumOutgoing() {
     await supabase.from('order_items')
       .update({ status: 'in_transit', shipped_at: new Date().toISOString(), shipped_by: staffName || null })
       .in('id', targetItems.map(i => i.id))
+    clearPiiIfOrderComplete(orderId)
     try {
       const itemCodes = targetItems.map(i => i.cafe24_item_code).filter(Boolean) as string[]
       const res = await fetch('/api/cafe24/shipments?action=transit', {
@@ -169,7 +195,7 @@ export default function SoumOutgoing() {
 
   useEffect(() => {
     if (done && orderInfo) {
-      shipItems(items, orderInfo.cafe24_order_no, orderInfo.tracking_number).then(() => {
+      shipItems(items, orderInfo.cafe24_order_no, orderInfo.tracking_number, orderInfo.id).then(() => {
         setTimeout(() => {
           setDone(false)
           setItems([])
@@ -190,7 +216,7 @@ export default function SoumOutgoing() {
     const remaining = items.length - completed.length
     if (!confirm(`검수 완료된 ${completed.length}건만 배송중으로 처리합니다. 나머지 ${remaining}건은 검수 대기로 남습니다. 진행할까요?`)) return
 
-    await shipItems(completed, orderInfo.cafe24_order_no, orderInfo.tracking_number)
+    await shipItems(completed, orderInfo.cafe24_order_no, orderInfo.tracking_number, orderInfo.id)
     const completedIds = new Set(completed.map(i => i.id))
     setItems(prev => prev.filter(i => !completedIds.has(i.id)))
     setMessage('')
