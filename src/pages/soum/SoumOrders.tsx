@@ -275,6 +275,8 @@ export default function SoumOrders() {
   const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null)
   // 배정된 상품 id — groups 배열에서는 안 지우고 여기만 기록해서 화면에서 invisible 처리함
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set())
+  // 폰에서는 날짜/검색 툴바가 화면을 너무 많이 차지해서 기본적으로 접어둠 (데스크톱은 항상 펼침)
+  const [showFilters, setShowFilters] = useState(false)
 
   // useCallback으로 고정한 핸들러들이 최신 값을 읽을 수 있도록 (stale closure 방지)
   const groupsRef = useRef<OrderGroup[]>(groups)
@@ -609,6 +611,12 @@ export default function SoumOrders() {
           >
             {collecting ? '수집 중...' : '카페24 주문 수집'}
           </button>
+          <button
+            onClick={() => setShowFilters(v => !v)}
+            className="sm:hidden px-3 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600"
+          >
+            {activePreset || '기간'} · 필터 {showFilters ? '▲' : '▼'}
+          </button>
         </div>
       </div>
 
@@ -636,8 +644,8 @@ export default function SoumOrders() {
         </div>
       )}
 
-      {/* 날짜 선택 */}
-      <div className="bg-white rounded-xl border p-3 mb-4 flex flex-wrap items-center gap-2">
+      {/* 날짜 선택 — 폰에서는 필터 토글로 접었다 폈다 함 */}
+      <div className={`bg-white rounded-xl border p-3 mb-4 flex-wrap items-center gap-2 ${showFilters ? 'flex' : 'hidden'} sm:flex`}>
         {PRESETS.map(p => (
           <button
             key={p.label}
@@ -678,8 +686,8 @@ export default function SoumOrders() {
         </button>
       </div>
 
-      {/* 검색 — 숫자/하이픈만 입력하면 주문번호로, 그 외엔 주문자/수령인 이름으로 검색 */}
-      <div className="bg-white rounded-xl border p-3 mb-4 flex items-center gap-2">
+      {/* 검색 — 숫자/하이픈만 입력하면 주문번호로, 그 외엔 주문자/수령인 이름으로 검색. 폰에서는 필터 토글에 같이 묶임 */}
+      <div className={`bg-white rounded-xl border p-3 mb-4 items-center gap-2 ${showFilters ? 'flex' : 'hidden'} sm:flex`}>
         <input
           type="text"
           value={searchQuery}
