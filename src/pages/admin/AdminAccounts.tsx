@@ -71,13 +71,44 @@ export default function AdminAccounts() {
     } else {
       next = [...current.filter(p => p !== 'driver'), key]
     }
-    await supabase.from('drivers').update({ permissions: next }).eq('id', account.id)
+    const { data, error } = await supabase.from('drivers').update({ permissions: next }).eq('id', account.id).select()
+    // RLS 등으로 실제로는 반영이 안 됐는데 에러도 안 나는 경우(0건 반영)를 잡아냄
+    if (error || !data?.length) {
+      alert(`권한 변경 실패: ${error?.message ?? '반영된 행이 없습니다 (권한 문제일 수 있음)'}`)
+      return
+    }
     load()
   }
 
   async function toggleActive(account: Driver) {
-    await supabase.from('drivers').update({ is_active: !account.is_active }).eq('id', account.id)
+    const { data, error } = await supabase.from('drivers').update({ is_active: !account.is_active }).eq('id', account.id).select()
+    if (error || !data?.length) {
+      alert(`상태 변경 실패: ${error?.message ?? '반영된 행이 없습니다 (권한 문제일 수 있음)'}`)
+      return
+    }
     load()
+  }
+
+  async function resetPassword(account: Driver) {
+    const newPassword = prompt(`${account.name}(${account.email})의 새 비밀번호를 입력하세요 (6자 이상)`)
+    if (!newPassword) return
+    if (newPassword.length < 6) { alert('비밀번호는 6자 이상이어야 합니다.'); return }
+
+    const { data: { session } } = await supabase.auth.getSession()
+    const res = await fetch('/api/admin/create-account?action=reset-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({ driver_id: account.id, new_password: newPassword }),
+    })
+    if (res.ok) {
+      alert('비밀번호가 변경되었습니다.')
+    } else {
+      const err = await res.json()
+      alert(`비밀번호 변경 실패: ${err.message}`)
+    }
   }
 
   return (
@@ -192,7 +223,13 @@ export default function AdminAccounts() {
                   </span>
                   {isDriverAccount(a) && <span className="ml-1 text-[10px] text-teal-500">모바일</span>}
                 </td>
-                <td className="px-4 py-3 text-right">
+                <td className="px-4 py-3 text-right whitespace-nowrap">
+                  <button
+                    onClick={() => resetPassword(a)}
+                    className="text-xs text-gray-400 hover:text-indigo-500 mr-3"
+                  >
+                    비밀번호 변경
+                  </button>
                   <button
                     onClick={() => toggleActive(a)}
                     className="text-xs text-gray-400 hover:text-gray-600"

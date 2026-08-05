@@ -6,6 +6,17 @@ const supabase = createClient(
   (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim()
 )
 
+// 계정 비밀번호 재설정 — service role로만 가능한 auth.admin API라 여기 서버쪽에서 처리
+async function handleResetPassword(req: VercelRequest, res: VercelResponse) {
+  const { driver_id, new_password } = req.body ?? {}
+  if (!driver_id || !new_password) {
+    return res.status(400).json({ message: '계정과 새 비밀번호를 입력하세요.' })
+  }
+  const { error } = await supabase.auth.admin.updateUserById(driver_id, { password: new_password })
+  if (error) return res.status(400).json({ message: error.message })
+  res.status(200).json({ ok: true })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
 
@@ -19,6 +30,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!caller?.is_superadmin && !caller?.permissions?.includes('admin')) {
     return res.status(403).json({ message: '계정 관리 권한이 없습니다.' })
   }
+
+  if (req.query.action === 'reset-password') return handleResetPassword(req, res)
 
   const { name, email, password, permissions } = req.body ?? {}
   if (!name || !email || !password) {
