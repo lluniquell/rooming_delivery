@@ -37,6 +37,11 @@ const showroomItems = [
   { to: '/admin/showroom/inventory', label: '재고 위치' },
 ]
 
+const adminItems = [
+  { to: '/admin/accounts', label: '계정 관리' },
+  { to: '/admin/usage', label: '사용량 관리' },
+]
+
 export const PERMISSION_GROUPS: { key: Permission; label: string; items: { to: string; label: string }[] }[] = [
   { key: 'orders', label: '주문', items: orderItems },
   { key: 'schedule', label: '스케줄러', items: scheduleItems },
@@ -166,16 +171,7 @@ export default function AdminLayout({ driver }: Props) {
               <NavGroup key={g.key} label={g.label} items={g.items} />
             ))}
             {driver.is_superadmin && <NavGroup label="테스트" items={devItems} />}
-            {canManageAccounts(driver) && (
-              <NavLink
-                to="/admin/accounts"
-                className={({ isActive }) =>
-                  `px-3 py-1.5 rounded text-sm font-semibold ${isActive ? 'bg-blue-100 text-blue-700' : 'text-gray-700 hover:bg-gray-100'}`
-                }
-              >
-                계정 관리
-              </NavLink>
-            )}
+            {canManageAccounts(driver) && <NavGroup label="관리자" items={adminItems} />}
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm text-gray-500">
