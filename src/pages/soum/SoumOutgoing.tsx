@@ -21,6 +21,7 @@ interface InspectItem {
   inspected_qty: number
   delivery_method: string | null
   cafe24_item_code: string | null
+  product_no: number | null
 }
 
 interface UnregisteredModal {
@@ -101,7 +102,7 @@ export default function SoumOutgoing() {
     // 이 화면은 CJ 전용이라 직배는 제외
     const { data: itemData } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, cafe24_item_code, order_id, orders!inner(id, cafe24_order_no, customer_name, cancelled_at)')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, cafe24_item_code, product_no, order_id, orders!inner(id, cafe24_order_no, customer_name, cancelled_at)')
       .eq('tracking_number', tracking)
       .eq('status', 'confirmed')
       .eq('delivery_method', 'CJ')
@@ -400,7 +401,19 @@ export default function SoumOutgoing() {
                     </td>
                     <td className="px-3 py-3">
                       <div className={`text-sm ${complete ? 'text-green-700 font-medium' : 'text-gray-800'}`}>
-                        {item.product_name}
+                        {item.product_no ? (
+                          <a
+                            href={`https://rooming.co.kr/product/detail.html?product_no=${item.product_no}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="underline decoration-dotted underline-offset-2"
+                          >
+                            {item.product_name}
+                          </a>
+                        ) : (
+                          item.product_name
+                        )}
                       </div>
                       {item.option_info && (
                         <div className="text-xs text-gray-400 mt-0.5">{item.option_info}</div>
