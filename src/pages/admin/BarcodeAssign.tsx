@@ -25,7 +25,12 @@ function buildPrefix(date: Date): string {
   return `200${yy}${mm}${w}`
 }
 
-export default function BarcodeAssign() {
+interface Props {
+  // 채번 실행이 끝나면(barcodes 테이블 반영 완료) 부모(바코드 목록 탭)에 알려서 새로고침시킴
+  onAssigned?: () => void
+}
+
+export default function BarcodeAssign({ onAssigned }: Props) {
   const uploadRef = useRef<HTMLInputElement>(null)
   const [items, setItems] = useState<Item[]>([])
   const [confirmItems, setConfirmItems] = useState<Item[]>([]) // 기존 바코드 있어서 확인 필요
@@ -165,6 +170,7 @@ export default function BarcodeAssign() {
     setItems([])
     setMessage(`✅ ${newRows.length}건 채번 완료`)
     setProcessing(false)
+    onAssigned?.()
   }
 
   function downloadResult() {
@@ -178,7 +184,7 @@ export default function BarcodeAssign() {
   }
 
   return (
-    <div className="max-w-2xl">
+    <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-xl font-bold text-gray-800">바코드 채번</h2>
         <div className="flex items-center gap-2">

@@ -24,8 +24,6 @@ const propItems = [
   { to: '/admin/soum/outgoing', label: '출고 검수 (CJ 운송장)' },
   { to: '/admin/soum/picking', label: '피킹' },
   { to: '/admin/soum/stow', label: '입고 진열' },
-  { to: '/admin/barcodes', label: '바코드 DB' },
-  { to: '/admin/barcode-assign', label: '바코드 채번' },
 ]
 
 const devItems = [
@@ -38,6 +36,7 @@ const showroomItems = [
 ]
 
 const adminItems = [
+  { to: '/admin/products', label: '상품 관리' },
   { to: '/admin/accounts', label: '계정 관리' },
   { to: '/admin/usage', label: '사용량 관리' },
 ]

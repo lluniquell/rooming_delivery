@@ -25,7 +25,11 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out
 }
 
-export default function BarcodeDB() {
+interface Props {
+  refreshKey?: number
+}
+
+export default function BarcodeDB({ refreshKey }: Props) {
   const [barcodes, setBarcodes] = useState<Barcode[]>([])
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
@@ -55,7 +59,7 @@ export default function BarcodeDB() {
     setLoading(false)
   }
 
-  useEffect(() => { fetchBarcodes(page, search) }, [page, search])
+  useEffect(() => { fetchBarcodes(page, search) }, [page, search, refreshKey])
 
   function doSearch() {
     setPage(0)
@@ -284,9 +288,9 @@ export default function BarcodeDB() {
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
   return (
-    <div className="max-w-3xl">
+    <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl font-bold text-gray-800">바코드 DB</h2>
+        <h2 className="text-xl font-bold text-gray-800">바코드 목록</h2>
         <div className="flex items-center gap-2">
           {uploadMsg && <span className="text-sm text-gray-500">{uploadMsg}</span>}
           <input ref={uploadRef} type="file" accept=".csv" className="hidden" onChange={handleUpload} />

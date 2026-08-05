@@ -8,9 +8,8 @@ import LoginPage from './pages/LoginPage'
 import AdminLayout, { PERMISSION_GROUPS, hasPermission, canManageAccounts, isDriverAccount } from './pages/admin/AdminLayout'
 import AdminAccounts from './pages/admin/AdminAccounts'
 import AdminUsage from './pages/admin/AdminUsage'
+import AdminProducts from './pages/admin/AdminProducts'
 import InspectionMain from './pages/inspection/InspectionMain'
-import BarcodeDB from './pages/inspection/BarcodeDB'
-import BarcodeAssign from './pages/inspection/BarcodeAssign'
 import Cafe24Callback from './pages/auth/Cafe24Callback'
 import AdminTest from './pages/admin/AdminTest'
 import SoumOrders from './pages/soum/SoumOrders'
@@ -112,9 +111,8 @@ function App() {
           <Route path="schedule" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleBoard /></RequirePermission>} />
           <Route path="schedule/day/:date" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleDay /></RequirePermission>} />
           <Route path="inspection" element={driver && <RequirePermission perm="soum" driver={driver}><InspectionMain /></RequirePermission>} />
-          <Route path="barcodes" element={driver && <RequirePermission perm="soum" driver={driver}><BarcodeDB /></RequirePermission>} />
-          <Route path="barcode-assign" element={driver && <RequirePermission perm="soum" driver={driver}><BarcodeAssign /></RequirePermission>} />
           <Route path="test" element={driver && <RequireSuperadmin driver={driver}><AdminTest /></RequireSuperadmin>} />
+          <Route path="products" element={driver && <RequireAccountManage driver={driver}><AdminProducts /></RequireAccountManage>} />
           <Route path="accounts" element={driver && <RequireAccountManage driver={driver}><AdminAccounts /></RequireAccountManage>} />
           <Route path="usage" element={driver && <RequireAccountManage driver={driver}><AdminUsage /></RequireAccountManage>} />
         </Route>
