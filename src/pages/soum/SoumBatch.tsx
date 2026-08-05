@@ -823,6 +823,7 @@ export default function SoumBatch() {
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">상품</th>
                   <th className="text-center px-4 py-2 font-medium text-gray-500 text-xs w-12">수량</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">배송방법</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">운송장</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
@@ -861,6 +862,7 @@ export default function SoumBatch() {
                           </td>
                           <td className={`px-4 py-3 text-center font-semibold text-gray-800 ${inspected ? 'bg-blue-50' : ''}`}>{item.quantity}</td>
                           <td className={`px-4 py-3 text-sm text-gray-600 ${inspected ? 'bg-blue-50' : ''}`}>{item.delivery_method ?? '-'}</td>
+                          <td className={`px-4 py-3 text-xs font-mono text-gray-500 ${inspected ? 'bg-blue-50' : ''}`}>{item.tracking_number ?? ''}</td>
                           {idx === 0 && (
                             <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top bg-white">
                               <button
