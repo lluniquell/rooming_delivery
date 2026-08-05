@@ -689,21 +689,23 @@ export default function SoumPicking() {
     )
   }
 
-  // "+ 추가"로 등록했지만 아직 실제로 가져오지 않은 요청 — 로케이션/브랜드순 카드 목록
-  // 안에 같이 섞여서 하나의 카드로 보이게 함 (별도 요약 박스로 안 뺌)
+  // "+ 추가"로 등록했지만 아직 실제로 가져오지 않은 요청 — 미성 화면은 어차피 전부
+  // "가져와야 할 것"들이라 별도 표시 없이 아래 피킹 카드와 완전히 동일한 형식으로 섞어서 보여줌
   function renderPendingMiseong(p: MiseongPickup) {
     return (
-      <div key={p.id} className="bg-sky-50 rounded-xl border border-sky-200 p-3.5">
-        <div className="flex items-center justify-between mb-1.5 gap-2">
-          <span className="text-[11px] font-medium text-sky-600">🚚 가져와야 함</span>
-          <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-xl font-bold text-gray-800 bg-white border border-sky-200 rounded-lg px-2.5 py-0.5">×{p.quantity}</span>
-            <button onClick={() => markMiseongFetched(p.id)} className="text-xs font-medium text-white bg-sky-600 hover:bg-sky-700 rounded-lg px-2 py-1">가져옴</button>
-            <button onClick={() => removeMiseongPickup(p.id)} className="text-sky-400 hover:text-red-500 text-xs px-1">✕</button>
-          </div>
+      <div key={p.id} className="bg-white rounded-xl border p-3.5">
+        <div className="flex items-center justify-end mb-1.5">
+          <button
+            onClick={() => markMiseongFetched(p.id)}
+            className="text-xl font-bold text-gray-800 bg-green-50 border border-green-200 rounded-lg px-2.5 py-0.5 shrink-0"
+          >
+            ×{p.quantity}
+          </button>
         </div>
         <div className="text-sm font-medium text-gray-800">{p.product_name}</div>
-        <div className="text-xs text-gray-400 font-mono mt-0.5">{p.product_code}</div>
+        <div className="mt-1.5">
+          <span className="text-xs text-gray-500 font-mono">{p.product_code}</span>
+        </div>
       </div>
     )
   }
