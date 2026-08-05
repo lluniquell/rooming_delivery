@@ -11,6 +11,8 @@ interface Item {
   quantity: number
   labels: string[] | null
   cafe24_item_code: string | null
+  // 이미 배치된 주문 검색 결과에서만 채워짐 — 있으면 검수 완료 여부로 라인 색칠에 씀
+  inspected_qty?: number
 }
 
 interface OrderGroup {
@@ -32,23 +34,19 @@ interface Batch {
   type: string
 }
 
-interface BatchedMatchItem {
-  id: string
-  product_name: string
-  option_info: string | null
-  quantity: number
-  inspected_qty: number
+// 이미 배치된 주문 검색 결과 — 미배정 목록과 완전히 같은 OrderRow로 그려서 재사용하고,
+// 어느 배치에 있는지(activeBatchIds)만 추가로 표시함
+interface BatchedMatch extends OrderGroup {
+  activeBatchIds: Set<string>
+  statusLabel: string
 }
 
-interface BatchedMatch {
-  order_id: string
-  cafe24_order_no: string
-  customer_name: string
-  receiver_name: string | null
-  // 같은 주문의 상품이 보류/CJ 등 여러 배치에 나뉘어 있을 수 있어서 배치별로 묶어서 보여줌
-  batches: { batch_id: string; status: string }[]
-  items: BatchedMatchItem[]
-}
+// readOnly OrderRow(이미 배치된 주문 검색 결과)에 넘길 안정적인 no-op들 — 매 렌더마다 새로
+// 만들면 OrderRow의 memo 비교가 매번 "달라짐"으로 판단해버림
+const emptySet = new Set<string>()
+const noop = () => {}
+const noopGroup = () => {}
+const noopAssign = () => {}
 
 const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버', '업체배송']
 const STATUS_LABEL: Record<string, string> = {
@@ -136,6 +134,7 @@ const PRESETS = [
 // 그려지면 화면이 버벅여서(스크롤도 멈춤), 실제로 바뀐 주문만 다시 그리도록 분리 + memo 처리
 const OrderRow = memo(function OrderRow({
   group, batches, shipStats, isAssigning, selected, assignedIds, onToggleItem, onToggleGroup, onQuickAssign,
+  readOnly, activeBatchIds, statusLabel,
 }: {
   group: OrderGroup
   batches: Batch[]
@@ -146,6 +145,10 @@ const OrderRow = memo(function OrderRow({
   onToggleItem: (id: string) => void
   onToggleGroup: (group: OrderGroup) => void
   onQuickAssign: (group: OrderGroup, batch: Batch) => void
+  // 이미 배치된 주문 검색 결과 표시용 — 체크박스/배정 없이 보기만, 현재 배치 버튼을 눌린 상태로 보여줌
+  readOnly?: boolean
+  activeBatchIds?: Set<string>
+  statusLabel?: string
 }) {
   const activeItems = group.items.filter(i => !assignedIds.has(i.id))
   // 배정된 상품은 배열에서 지우지 않고 화면에서만 안 보이게(invisible) 함 — 지우면 그 아래
@@ -157,17 +160,19 @@ const OrderRow = memo(function OrderRow({
     <div className={`border-b last:border-0 ${groupDone ? 'invisible pointer-events-none' : ''}`}>
       {/* 주문 헤더 — 폰에서는 정보 줄과 배치 버튼 줄을 분리(세로로 쌓음), 배치 버튼은 터치하기 쉽게 크게 */}
       <div
-        onClick={() => onToggleGroup(group)}
-        className="px-4 py-2.5 bg-gray-50/60 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 cursor-pointer hover:bg-gray-100"
+        onClick={() => !readOnly && onToggleGroup(group)}
+        className={`px-4 py-2.5 bg-gray-50/60 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 ${readOnly ? '' : 'cursor-pointer hover:bg-gray-100'}`}
       >
         <div className="flex items-center gap-2 flex-wrap min-w-0">
-          <input
-            type="checkbox"
-            checked={allChecked}
-            onChange={() => onToggleGroup(group)}
-            onClick={e => e.stopPropagation()}
-            className="rounded w-[18px] h-[18px] shrink-0"
-          />
+          {!readOnly && (
+            <input
+              type="checkbox"
+              checked={allChecked}
+              onChange={() => onToggleGroup(group)}
+              onClick={e => e.stopPropagation()}
+              className="rounded w-[18px] h-[18px] shrink-0"
+            />
+          )}
           <span className="font-mono text-xs text-gray-500">{group.cafe24_order_no}</span>
           <ChannelBadge placeName={group.order_place_name} />
           <span className="text-gray-600 text-sm">{group.customer_name}</span>
@@ -186,43 +191,60 @@ const OrderRow = memo(function OrderRow({
               📝 메모 {group.admin_memo.length}
             </span>
           )}
+          {statusLabel && (
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-700 shrink-0">
+              {statusLabel}
+            </span>
+          )}
         </div>
         <div className="flex items-center flex-wrap gap-1.5 sm:gap-1 sm:ml-auto sm:justify-end" onClick={e => e.stopPropagation()}>
           {isAssigning && (
             <span className="text-xs text-gray-400 self-center mr-1">배정 중...</span>
           )}
-          {batches.map(b => (
-            <button
-              key={b.id}
-              onClick={() => onQuickAssign(group, b)}
-              disabled={isAssigning}
-              title={`${b.batch_no}번 ${b.name}으로 배정`}
-              className="px-2.5 py-1.5 min-h-[34px] sm:px-2 sm:py-1 sm:min-h-0 rounded text-xs font-medium border border-gray-200 text-gray-500 bg-white hover:bg-indigo-600 hover:text-white hover:border-indigo-600 active:bg-indigo-700 active:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:text-gray-500"
-            >
-              {b.name}
-            </button>
-          ))}
+          {batches.map(b => {
+            const active = activeBatchIds?.has(b.id)
+            return (
+              <button
+                key={b.id}
+                onClick={() => !readOnly && onQuickAssign(group, b)}
+                disabled={isAssigning || readOnly}
+                title={active ? `현재 ${b.batch_no}번 ${b.name}에 있음` : `${b.batch_no}번 ${b.name}으로 배정`}
+                className={`px-2.5 py-1.5 min-h-[34px] sm:px-2 sm:py-1 sm:min-h-0 rounded text-xs font-medium border transition-colors disabled:cursor-default ${
+                  active
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : readOnly
+                      ? 'border-gray-200 text-gray-300 bg-white'
+                      : 'border-gray-200 text-gray-500 bg-white hover:bg-indigo-600 hover:text-white hover:border-indigo-600 active:bg-indigo-700 active:text-white disabled:opacity-40 disabled:hover:bg-white disabled:hover:text-gray-500'
+                }`}
+              >
+                {b.name}
+              </button>
+            )
+          })}
         </div>
       </div>
       {/* 상품 행 — 폰에서는 상품 정보와 배송방법/위치/수량을 두 줄로 나눔 */}
       {group.items.map(item => {
         const done = assignedIds.has(item.id)
+        const inspected = item.inspected_qty !== undefined && item.inspected_qty >= item.quantity
         return (
           <div
             key={item.id}
-            onClick={() => onToggleItem(item.id)}
-            className={`pl-4 sm:pl-10 pr-4 py-2.5 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3 cursor-pointer border-t border-gray-100 transition-colors ${
-              done ? 'invisible pointer-events-none' : selected.has(item.id) ? 'bg-blue-50' : 'hover:bg-gray-50'
+            onClick={() => !readOnly && onToggleItem(item.id)}
+            className={`pl-4 sm:pl-10 pr-4 py-2.5 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-3 border-t border-gray-100 transition-colors ${readOnly ? '' : 'cursor-pointer'} ${
+              done ? 'invisible pointer-events-none' : inspected ? 'bg-blue-50' : selected.has(item.id) ? 'bg-blue-50' : readOnly ? '' : 'hover:bg-gray-50'
             }`}
           >
             <div className="flex items-center gap-3 min-w-0">
-              <input
-                type="checkbox"
-                checked={selected.has(item.id)}
-                onChange={() => onToggleItem(item.id)}
-                onClick={e => e.stopPropagation()}
-                className="rounded w-[18px] h-[18px] shrink-0"
-              />
+              {!readOnly && (
+                <input
+                  type="checkbox"
+                  checked={selected.has(item.id)}
+                  onChange={() => onToggleItem(item.id)}
+                  onClick={e => e.stopPropagation()}
+                  className="rounded w-[18px] h-[18px] shrink-0"
+                />
+              )}
               <span className="text-xs text-gray-400 w-24 shrink-0 hidden sm:inline">{item.brand ?? '-'}</span>
               <div className="flex-1 min-w-0">
                 <div className="text-sm text-gray-800">
@@ -271,6 +293,9 @@ const OrderRow = memo(function OrderRow({
   if (prev.onToggleItem !== next.onToggleItem) return false
   if (prev.onToggleGroup !== next.onToggleGroup) return false
   if (prev.onQuickAssign !== next.onQuickAssign) return false
+  if (prev.readOnly !== next.readOnly) return false
+  if (prev.activeBatchIds !== next.activeBatchIds) return false
+  if (prev.statusLabel !== next.statusLabel) return false
   // selected/assignedIds Set 자체는 매번 새로 만들어지지만, 이 주문에 실제로 영향 있을 때만 다시 그림
   for (const item of next.group.items) {
     if (prev.selected.has(item.id) !== next.selected.has(item.id)) return false
@@ -312,6 +337,8 @@ export default function SoumOrders() {
   useEffect(() => { selectedRef.current = selected }, [selected])
   const assignedIdsRef = useRef<Set<string>>(assignedIds)
   useEffect(() => { assignedIdsRef.current = assignedIds }, [assignedIds])
+  const shipStatsRef = useRef<Record<string, Record<string, number>>>(shipStats)
+  useEffect(() => { shipStatsRef.current = shipStats }, [shipStats])
 
   function applyPreset(preset: typeof PRESETS[0]) {
     setStartDate(preset.start())
@@ -336,13 +363,13 @@ export default function SoumOrders() {
     setAllBatchesById(map)
   }
 
-  // 검색어와 일치하지만 이미 배치에 들어간(batch_id가 있는) 주문 — 어느 배치에 있는지 보여줘서
-  // "수집이 안 된 건지 / 이미 배치돼 있는 건지" 구분할 수 있게 함
+  // 검색어와 일치하지만 이미 배치에 들어간(batch_id가 있는) 주문 — 미배정 목록과 똑같은 OrderRow로
+  // 그려서, 어느 배치 버튼이 눌린 상태인지로 보여줌 ("수집이 안 된 건지 / 이미 배치돼 있는 건지" 구분)
   async function loadBatchedMatches(q: string) {
     if (!q) { setBatchedMatches([]); return }
     let query = supabase
       .from('order_items')
-      .select('id, order_id, batch_id, status, product_name, option_info, quantity, inspected_qty, orders!inner(cafe24_order_no, customer_name, receiver_name)')
+      .select('id, order_id, batch_id, status, product_code, product_name, option_info, brand, supplier_name, labels, cafe24_item_code, quantity, inspected_qty, orders!inner(cafe24_order_no, customer_name, receiver_name, address, order_date, order_place_name, admin_memo)')
       .not('batch_id', 'is', null)
     if (/^[\d-]+$/.test(q)) {
       query = query.ilike('orders.cafe24_order_no', `%${q}%`)
@@ -350,33 +377,72 @@ export default function SoumOrders() {
       query = query.or(`customer_name.ilike.%${q}%,receiver_name.ilike.%${q}%`, { foreignTable: 'orders' })
     }
     const { data } = await query
-    const byOrder = new Map<string, BatchedMatch>()
+    const byOrder = new Map<string, BatchedMatch & { statuses: Set<string> }>()
     for (const row of (data ?? []) as any[]) {
       let m = byOrder.get(row.order_id)
       if (!m) {
+        const o = row.orders
         m = {
           order_id: row.order_id,
-          cafe24_order_no: row.orders.cafe24_order_no,
-          customer_name: row.orders.customer_name,
-          receiver_name: row.orders.receiver_name,
-          batches: [],
+          cafe24_order_no: o.cafe24_order_no,
+          customer_name: o.customer_name,
+          receiver_name: o.receiver_name,
+          address: o.address,
+          order_date: o.order_date,
+          order_place_name: o.order_place_name,
+          admin_memo: o.admin_memo,
           items: [],
+          activeBatchIds: new Set(),
+          statuses: new Set(),
+          statusLabel: '',
         }
         byOrder.set(row.order_id, m)
       }
-      // 같은 주문의 상품이 보류/CJ 등 여러 배치에 나뉘어 있을 수 있어서 배지는 배치별로 하나씩만
-      if (!m.batches.some(b => b.batch_id === row.batch_id)) {
-        m.batches.push({ batch_id: row.batch_id, status: row.status })
-      }
+      m.activeBatchIds.add(row.batch_id)
+      m.statuses.add(row.status)
       m.items.push({
         id: row.id,
+        product_code: row.product_code,
         product_name: row.product_name,
         option_info: row.option_info,
+        brand: row.brand,
+        supplier_name: row.supplier_name,
         quantity: row.quantity,
+        labels: row.labels,
+        cafe24_item_code: row.cafe24_item_code,
         inspected_qty: row.inspected_qty,
       })
     }
-    setBatchedMatches([...byOrder.values()].sort((a, b) => b.cafe24_order_no.localeCompare(a.cafe24_order_no)))
+    // 보류처럼 배정 버튼 목록(batches)에 안 뜨는 배치에 있으면(미성은 batch_id에 절대
+    // 안 찍히니 해당 없음), 버튼 하이라이트로는 안 보이니 상태 배지에 이름을 덧붙여서 정보가 안 사라지게 함
+    const visibleBatchIds = new Set(batches.map(b => b.id))
+    const matches: BatchedMatch[] = [...byOrder.values()].map(m => {
+      const hiddenNames = [...m.activeBatchIds]
+        .filter(id => !visibleBatchIds.has(id))
+        .map(id => allBatchesById[id]?.name)
+        .filter((n): n is string => !!n)
+      const parts = [...m.statuses].map(s => STATUS_LABEL[s] ?? s)
+      if (hiddenNames.length) parts.push(...hiddenNames.map(n => `📦${n}`))
+      return { ...m, statusLabel: parts.join(', ') }
+    })
+    setBatchedMatches(matches.sort((a, b) => b.cafe24_order_no.localeCompare(a.cafe24_order_no)))
+
+    // 검색 결과 상품들의 배송방법 통계도 같이 보여주기 위해 shipStats에 없는 코드만 추가로 채움
+    const missingCodes = [...new Set(matches.flatMap(m => m.items.map(i => i.product_code)))]
+      .filter(c => c && !shipStatsRef.current[c])
+    if (missingCodes.length) {
+      const { data: statData } = await supabase
+        .from('product_ship_stats')
+        .select('product_code, method, ship_count')
+        .in('product_code', missingCodes)
+      if (statData?.length) {
+        setShipStats(prev => {
+          const next = { ...prev }
+          for (const s of statData) (next[s.product_code] ??= {})[s.method] = s.ship_count
+          return next
+        })
+      }
+    }
   }
 
   async function loadMeta() {
@@ -790,52 +856,30 @@ export default function SoumOrders() {
         )}
       </div>
 
-      {/* 검색 중이고 이미 배치된 주문이 있으면 — 미배정 목록엔 안 잡히니 여기서 어느 배치인지 보여줌 */}
+      {/* 검색 중이고 이미 배치된 주문이 있으면 — 미배정 목록과 완전히 같은 OrderRow로 그려서
+          어느 배치 버튼이 눌려있는지로 보여줌. 체크박스/배정 없이 보기 전용(readOnly) */}
       {searchQuery.trim() && batchedMatches.length > 0 && (
         <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-4">
           <p className="text-xs font-medium text-indigo-700 mb-2">
             이미 배치된 주문 {batchedMatches.length}건
           </p>
-          <div className="space-y-3">
+          <div className="bg-white rounded-xl border border-indigo-200 overflow-hidden">
             {batchedMatches.map(m => (
-              <div key={m.order_id} className="bg-white rounded-lg border border-indigo-200 overflow-hidden">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2 px-2.5 py-1.5 bg-indigo-100/50 text-xs text-indigo-900">
-                  <span className="truncate">
-                    <span className="font-mono text-indigo-500">{m.cafe24_order_no}</span>
-                    {' '}{m.customer_name} / {m.receiver_name || '-'}
-                  </span>
-                  <span className="shrink-0 flex flex-wrap items-center gap-1.5">
-                    {m.batches.map(({ batch_id, status }) => {
-                      const b = allBatchesById[batch_id]
-                      return (
-                        <span key={batch_id} className="flex items-center gap-1">
-                          <span className="px-1.5 py-0.5 rounded bg-white border border-indigo-200 font-medium">
-                            {b ? `${b.batch_no}번 ${b.name}` : '알 수 없는 배치'}
-                          </span>
-                          <span className="text-indigo-400">{STATUS_LABEL[status] ?? status}</span>
-                        </span>
-                      )
-                    })}
-                  </span>
-                </div>
-                <div className="divide-y divide-gray-100">
-                  {m.items.map(item => {
-                    const inspected = item.inspected_qty >= item.quantity
-                    return (
-                      <div
-                        key={item.id}
-                        className={`px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs ${inspected ? 'bg-blue-50' : 'bg-white'}`}
-                      >
-                        <span className="truncate text-gray-700">
-                          {item.product_name}
-                          {item.option_info && <span className="text-gray-400 ml-1.5">{item.option_info}</span>}
-                        </span>
-                        <span className="shrink-0 text-gray-400">×{item.quantity}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
+              <OrderRow
+                key={m.order_id}
+                group={m}
+                batches={batches}
+                shipStats={shipStats}
+                isAssigning={false}
+                selected={emptySet}
+                assignedIds={emptySet}
+                onToggleItem={noop}
+                onToggleGroup={noopGroup}
+                onQuickAssign={noopAssign}
+                readOnly
+                activeBatchIds={m.activeBatchIds}
+                statusLabel={m.statusLabel}
+              />
             ))}
           </div>
         </div>
