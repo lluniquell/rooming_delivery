@@ -38,7 +38,7 @@ interface BatchedMatch {
   customer_name: string
   receiver_name: string | null
   // 같은 주문의 상품이 보류/CJ 등 여러 배치에 나뉘어 있을 수 있어서 배치별로 묶어서 보여줌
-  batches: { batch_id: string; status: string }[]
+  batches: { batch_id: string; status: string; totalQty: number; inspectedQty: number }[]
 }
 
 const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버', '업체배송']
@@ -333,7 +333,7 @@ export default function SoumOrders() {
     if (!q) { setBatchedMatches([]); return }
     let query = supabase
       .from('order_items')
-      .select('order_id, batch_id, status, orders!inner(cafe24_order_no, customer_name, receiver_name)')
+      .select('order_id, batch_id, status, quantity, inspected_qty, orders!inner(cafe24_order_no, customer_name, receiver_name)')
       .not('batch_id', 'is', null)
     if (/^[\d-]+$/.test(q)) {
       query = query.ilike('orders.cafe24_order_no', `%${q}%`)
@@ -354,10 +354,14 @@ export default function SoumOrders() {
         }
         byOrder.set(row.order_id, m)
       }
-      // 같은 주문의 상품이 보류/CJ 등 여러 배치에 나뉘어 있을 수 있어서 배치별로 하나씩만 추가
-      if (!m.batches.some(b => b.batch_id === row.batch_id)) {
-        m.batches.push({ batch_id: row.batch_id, status: row.status })
+      // 같은 주문의 상품이 보류/CJ 등 여러 배치에 나뉘어 있을 수 있어서 배치별로 수량/검수수량을 합산
+      let b = m.batches.find(x => x.batch_id === row.batch_id)
+      if (!b) {
+        b = { batch_id: row.batch_id, status: row.status, totalQty: 0, inspectedQty: 0 }
+        m.batches.push(b)
       }
+      b.totalQty += row.quantity
+      b.inspectedQty += Math.min(row.inspected_qty, row.quantity)
     }
     setBatchedMatches([...byOrder.values()].sort((a, b) => b.cafe24_order_no.localeCompare(a.cafe24_order_no)))
   }
@@ -787,14 +791,27 @@ export default function SoumOrders() {
                   {' '}{m.customer_name} / {m.receiver_name || '-'}
                 </span>
                 <span className="shrink-0 flex flex-wrap items-center gap-1.5">
-                  {m.batches.map(({ batch_id, status }) => {
+                  {m.batches.map(({ batch_id, status, totalQty, inspectedQty }) => {
                     const b = allBatchesById[batch_id]
+                    const fullyInspected = totalQty > 0 && inspectedQty >= totalQty
                     return (
                       <span key={batch_id} className="flex items-center gap-1">
                         <span className="px-1.5 py-0.5 rounded bg-white border border-indigo-200 font-medium">
                           {b ? `${b.batch_no}번 ${b.name}` : '알 수 없는 배치'}
                         </span>
                         <span className="text-indigo-400">{STATUS_LABEL[status] ?? status}</span>
+                        <span
+                          title="바코드 검수 여부"
+                          className={`px-1.5 py-0.5 rounded font-medium ${
+                            fullyInspected
+                              ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                              : inspectedQty > 0
+                                ? 'bg-blue-50 text-blue-500 border border-blue-100'
+                                : 'bg-gray-50 text-gray-400 border border-gray-200'
+                          }`}
+                        >
+                          검수 {inspectedQty}/{totalQty}
+                        </span>
                       </span>
                     )
                   })}
