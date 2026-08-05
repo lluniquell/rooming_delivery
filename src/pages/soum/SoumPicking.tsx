@@ -537,6 +537,7 @@ export default function SoumPicking() {
   const doneItems = items.filter(i => i.picked_at)
   const pickingList = buildPickingList(activeItems, sort, barcodeMap)
   const doneList = buildPickingList(doneItems, sort, barcodeMap)
+  const pendingManual = isMiseongView ? miseongPickupsToday.filter(p => !p.fetched_at) : []
 
   if (!activeBatchId) {
     return (
@@ -688,6 +689,25 @@ export default function SoumPicking() {
     )
   }
 
+  // "+ 추가"로 등록했지만 아직 실제로 가져오지 않은 요청 — 로케이션/브랜드순 카드 목록
+  // 안에 같이 섞여서 하나의 카드로 보이게 함 (별도 요약 박스로 안 뺌)
+  function renderPendingMiseong(p: MiseongPickup) {
+    return (
+      <div key={p.id} className="bg-sky-50 rounded-xl border border-sky-200 p-3.5">
+        <div className="flex items-center justify-between mb-1.5 gap-2">
+          <span className="text-[11px] font-medium text-sky-600">🚚 가져와야 함</span>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-xl font-bold text-gray-800 bg-white border border-sky-200 rounded-lg px-2.5 py-0.5">×{p.quantity}</span>
+            <button onClick={() => markMiseongFetched(p.id)} className="text-xs font-medium text-white bg-sky-600 hover:bg-sky-700 rounded-lg px-2 py-1">가져옴</button>
+            <button onClick={() => removeMiseongPickup(p.id)} className="text-sky-400 hover:text-red-500 text-xs px-1">✕</button>
+          </div>
+        </div>
+        <div className="text-sm font-medium text-gray-800">{p.product_name}</div>
+        <div className="text-xs text-gray-400 font-mono mt-0.5">{p.product_code}</div>
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-md mx-auto">
       <div className="flex items-center gap-2 mb-3">
@@ -709,26 +729,6 @@ export default function SoumPicking() {
           <span className="w-14 shrink-0" />
         )}
       </div>
-
-      {isMiseongView && miseongPickupsToday.some(p => !p.fetched_at) && (
-        <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 mb-3">
-          <p className="text-xs font-medium text-sky-700 mb-2">
-            🚚 가져와야 함 {miseongPickupsToday.filter(p => !p.fetched_at).length}건
-          </p>
-          <div className="space-y-1">
-            {miseongPickupsToday.filter(p => !p.fetched_at).map(p => (
-              <div key={p.id} className="flex items-center justify-between text-xs text-sky-900">
-                <span className="truncate">{p.product_name} <span className="font-mono text-sky-500">{p.product_code}</span></span>
-                <span className="flex items-center gap-2 shrink-0 ml-2">
-                  ×{p.quantity}
-                  <button onClick={() => markMiseongFetched(p.id)} className="font-medium text-white bg-sky-600 hover:bg-sky-700 rounded px-2 py-0.5">가져옴</button>
-                  <button onClick={() => removeMiseongPickup(p.id)} className="text-sky-400 hover:text-red-500">✕</button>
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {isMiseongView && miseongPickupsToday.some(p => !!p.fetched_at) && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3">
@@ -770,7 +770,7 @@ export default function SoumPicking() {
 
       {loading ? (
         <p className="text-center text-gray-400 py-12">불러오는 중...</p>
-      ) : pickingList.length === 0 && doneItems.length === 0 ? (
+      ) : pickingList.length === 0 && doneItems.length === 0 && pendingManual.length === 0 ? (
         <p className="text-center text-gray-400 py-12">피킹할 상품이 없습니다.</p>
       ) : (
         <div className="space-y-2">
@@ -782,7 +782,8 @@ export default function SoumPicking() {
               </button>
             )}
           </div>
-          {pickingList.length === 0 ? (
+          {pendingManual.map(p => renderPendingMiseong(p))}
+          {pickingList.length === 0 && pendingManual.length === 0 ? (
             <p className="text-center text-gray-400 py-8 text-sm">남은 상품이 없습니다.</p>
           ) : (
             pickingList.map(row => renderRow(row, false))
