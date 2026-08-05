@@ -32,13 +32,22 @@ interface Batch {
   type: string
 }
 
+interface BatchedMatchItem {
+  id: string
+  product_name: string
+  option_info: string | null
+  quantity: number
+  inspected_qty: number
+}
+
 interface BatchedMatch {
   order_id: string
   cafe24_order_no: string
   customer_name: string
   receiver_name: string | null
   // 같은 주문의 상품이 보류/CJ 등 여러 배치에 나뉘어 있을 수 있어서 배치별로 묶어서 보여줌
-  batches: { batch_id: string; status: string; totalQty: number; inspectedQty: number }[]
+  batches: { batch_id: string; status: string }[]
+  items: BatchedMatchItem[]
 }
 
 const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버', '업체배송']
@@ -333,7 +342,7 @@ export default function SoumOrders() {
     if (!q) { setBatchedMatches([]); return }
     let query = supabase
       .from('order_items')
-      .select('order_id, batch_id, status, quantity, inspected_qty, orders!inner(cafe24_order_no, customer_name, receiver_name)')
+      .select('id, order_id, batch_id, status, product_name, option_info, quantity, inspected_qty, orders!inner(cafe24_order_no, customer_name, receiver_name)')
       .not('batch_id', 'is', null)
     if (/^[\d-]+$/.test(q)) {
       query = query.ilike('orders.cafe24_order_no', `%${q}%`)
@@ -351,17 +360,21 @@ export default function SoumOrders() {
           customer_name: row.orders.customer_name,
           receiver_name: row.orders.receiver_name,
           batches: [],
+          items: [],
         }
         byOrder.set(row.order_id, m)
       }
-      // 같은 주문의 상품이 보류/CJ 등 여러 배치에 나뉘어 있을 수 있어서 배치별로 수량/검수수량을 합산
-      let b = m.batches.find(x => x.batch_id === row.batch_id)
-      if (!b) {
-        b = { batch_id: row.batch_id, status: row.status, totalQty: 0, inspectedQty: 0 }
-        m.batches.push(b)
+      // 같은 주문의 상품이 보류/CJ 등 여러 배치에 나뉘어 있을 수 있어서 배지는 배치별로 하나씩만
+      if (!m.batches.some(b => b.batch_id === row.batch_id)) {
+        m.batches.push({ batch_id: row.batch_id, status: row.status })
       }
-      b.totalQty += row.quantity
-      b.inspectedQty += Math.min(row.inspected_qty, row.quantity)
+      m.items.push({
+        id: row.id,
+        product_name: row.product_name,
+        option_info: row.option_info,
+        quantity: row.quantity,
+        inspected_qty: row.inspected_qty,
+      })
     }
     setBatchedMatches([...byOrder.values()].sort((a, b) => b.cafe24_order_no.localeCompare(a.cafe24_order_no)))
   }
@@ -783,39 +796,45 @@ export default function SoumOrders() {
           <p className="text-xs font-medium text-indigo-700 mb-2">
             이미 배치된 주문 {batchedMatches.length}건
           </p>
-          <div className="space-y-1.5">
+          <div className="space-y-3">
             {batchedMatches.map(m => (
-              <div key={m.order_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2 text-xs text-indigo-900">
-                <span className="truncate">
-                  <span className="font-mono text-indigo-500">{m.cafe24_order_no}</span>
-                  {' '}{m.customer_name} / {m.receiver_name || '-'}
-                </span>
-                <span className="shrink-0 flex flex-wrap items-center gap-1.5">
-                  {m.batches.map(({ batch_id, status, totalQty, inspectedQty }) => {
-                    const b = allBatchesById[batch_id]
-                    const fullyInspected = totalQty > 0 && inspectedQty >= totalQty
+              <div key={m.order_id} className="bg-white rounded-lg border border-indigo-200 overflow-hidden">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2 px-2.5 py-1.5 bg-indigo-100/50 text-xs text-indigo-900">
+                  <span className="truncate">
+                    <span className="font-mono text-indigo-500">{m.cafe24_order_no}</span>
+                    {' '}{m.customer_name} / {m.receiver_name || '-'}
+                  </span>
+                  <span className="shrink-0 flex flex-wrap items-center gap-1.5">
+                    {m.batches.map(({ batch_id, status }) => {
+                      const b = allBatchesById[batch_id]
+                      return (
+                        <span key={batch_id} className="flex items-center gap-1">
+                          <span className="px-1.5 py-0.5 rounded bg-white border border-indigo-200 font-medium">
+                            {b ? `${b.batch_no}번 ${b.name}` : '알 수 없는 배치'}
+                          </span>
+                          <span className="text-indigo-400">{STATUS_LABEL[status] ?? status}</span>
+                        </span>
+                      )
+                    })}
+                  </span>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {m.items.map(item => {
+                    const inspected = item.inspected_qty >= item.quantity
                     return (
-                      <span key={batch_id} className="flex items-center gap-1">
-                        <span className="px-1.5 py-0.5 rounded bg-white border border-indigo-200 font-medium">
-                          {b ? `${b.batch_no}번 ${b.name}` : '알 수 없는 배치'}
+                      <div
+                        key={item.id}
+                        className={`px-2.5 py-1.5 flex items-center justify-between gap-2 text-xs ${inspected ? 'bg-blue-50' : 'bg-white'}`}
+                      >
+                        <span className="truncate text-gray-700">
+                          {item.product_name}
+                          {item.option_info && <span className="text-gray-400 ml-1.5">{item.option_info}</span>}
                         </span>
-                        <span className="text-indigo-400">{STATUS_LABEL[status] ?? status}</span>
-                        <span
-                          title="바코드 검수 여부"
-                          className={`px-1.5 py-0.5 rounded font-medium ${
-                            fullyInspected
-                              ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                              : inspectedQty > 0
-                                ? 'bg-blue-50 text-blue-500 border border-blue-100'
-                                : 'bg-gray-50 text-gray-400 border border-gray-200'
-                          }`}
-                        >
-                          검수 {inspectedQty}/{totalQty}
-                        </span>
-                      </span>
+                        <span className="shrink-0 text-gray-400">×{item.quantity}</span>
+                      </div>
                     )
                   })}
-                </span>
+                </div>
               </div>
             ))}
           </div>
