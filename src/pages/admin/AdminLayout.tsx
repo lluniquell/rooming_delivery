@@ -72,6 +72,12 @@ export function canManageAccounts(driver: Driver) {
   return driver.is_superadmin || driver.permissions?.includes('admin')
 }
 
+// 배송팀 권한과 다른 관리자 메뉴 권한을 같이 가질 수 있어서, 관리자 패널 쪽 메뉴가 하나라도
+// 있는지 별도로 판단 — 순수 배송팀 계정(모바일 전용)은 여기 해당 안 됨
+export function hasAnyAdminAccess(driver: Driver) {
+  return driver.is_superadmin || canManageAccounts(driver) || PERMISSION_GROUPS.some(g => hasPermission(driver, g.key))
+}
+
 // 모바일 배송원 앱으로 갈지(관리자 패널 대신) — role 컬럼 대신 permissions만으로 판단
 export function isDriverAccount(driver: Driver) {
   return driver.permissions?.includes('driver') ?? false
@@ -175,6 +181,11 @@ export default function AdminLayout({ driver }: Props) {
           </nav>
         </div>
         <div className="flex items-center gap-3 text-sm text-gray-500">
+          {isDriverAccount(driver) && (
+            <NavLink to="/" className="text-teal-600 hover:text-teal-700 font-medium">
+              배송 목록
+            </NavLink>
+          )}
           {outdated ? (
             <button
               onClick={() => window.location.reload()}

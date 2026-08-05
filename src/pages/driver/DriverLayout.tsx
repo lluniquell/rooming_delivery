@@ -1,6 +1,7 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, Link } from 'react-router-dom'
 import type { Driver } from '../../types'
 import { signOut } from '../../lib/auth'
+import { hasAnyAdminAccess } from '../admin/AdminLayout'
 
 interface Props {
   driver: Driver
@@ -12,6 +13,11 @@ export default function DriverLayout({ driver }: Props) {
       <header className="bg-white border-b px-4 py-3 flex items-center justify-between">
         <span className="font-bold text-gray-800">루밍 배송</span>
         <div className="flex items-center gap-3 text-sm text-gray-500">
+          {hasAnyAdminAccess(driver) && (
+            <Link to="/admin" className="text-indigo-600 hover:text-indigo-700 font-medium">
+              관리자 화면
+            </Link>
+          )}
           <span>{driver.name}</span>
           <button onClick={() => signOut()} className="text-gray-400 hover:text-gray-600">로그아웃</button>
         </div>

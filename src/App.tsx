@@ -93,10 +93,11 @@ function App() {
         <Route path="/login" element={!driver ? <LoginPage /> : <Navigate to="/" />} />
         <Route path="/auth/cafe24/callback" element={<Cafe24Callback />} />
 
-        {/* 관리자 — role이 아니라 'driver' 권한 유무로 판단 */}
+        {/* 관리자 — 배송팀 권한과 다른 메뉴 권한을 같이 가질 수 있어서 isDriverAccount로 막지 않음.
+            순수 배송팀 계정이 들어와도 defaultAdminPath가 /admin/no-access로 보내줌 */}
         <Route
           path="/admin"
-          element={driver && !isDriverAccount(driver) ? <AdminLayout driver={driver} /> : <Navigate to="/login" />}
+          element={driver ? <AdminLayout driver={driver} /> : <Navigate to="/login" />}
         >
           <Route index element={driver && <Navigate to={defaultAdminPath(driver)} replace />} />
           <Route path="no-access" element={driver && <NoAccess driver={driver} />} />

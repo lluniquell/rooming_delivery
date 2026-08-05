@@ -24,16 +24,10 @@ export default function AdminAccounts() {
 
   useEffect(() => { load() }, [])
 
-  // '배송팀'(모바일 앱)을 고르면 다른 메뉴 권한은 무의미하므로 비움, 반대로 메뉴 권한을 고르면 배송팀 해제
+  // 배송팀(모바일 앱) 권한과 다른 메뉴 권한을 같이 가질 수 있음 — 그냥 단순 토글
   function toggleSelection(key: Permission) {
-    setSelected(prev => {
-      if (prev.includes(key)) return prev.filter(k => k !== key)
-      if (key === 'driver') return ['driver']
-      return [...prev.filter(k => k !== 'driver'), key]
-    })
+    setSelected(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
   }
-
-  const isDriver = selected.includes('driver')
 
   async function addAccount(e: React.FormEvent) {
     e.preventDefault()
@@ -63,14 +57,7 @@ export default function AdminAccounts() {
 
   async function updatePermissions(account: Driver, key: Permission) {
     const current = account.permissions ?? []
-    let next: Permission[]
-    if (current.includes(key)) {
-      next = current.filter(p => p !== key)
-    } else if (key === 'driver') {
-      next = ['driver']
-    } else {
-      next = [...current.filter(p => p !== 'driver'), key]
-    }
+    const next = current.includes(key) ? current.filter(p => p !== key) : [...current, key]
     const { data, error } = await supabase.from('drivers').update({ permissions: next }).eq('id', account.id).select()
     // RLS 등으로 실제로는 반영이 안 됐는데 에러도 안 나는 경우(0건 반영)를 잡아냄
     if (error || !data?.length) {
@@ -165,8 +152,10 @@ export default function AdminAccounts() {
           </div>
 
           <p className="text-xs text-gray-400 mb-2">
-            {name || '이 계정'}을(를) <b className={isDriver ? 'text-teal-600' : 'text-indigo-600'}>{isDriver ? '배송팀(모바일)' : '관리자'}</b>로 추가합니다
-            {!isDriver && selected.length > 0 && ` (권한: ${selected.map(k => ASSIGNABLE_PERMISSIONS.find(o => o.key === k)?.label).join(', ')})`}
+            {name || '이 계정'}을(를) 다음 권한으로 추가합니다:{' '}
+            {selected.length > 0
+              ? selected.map(k => ASSIGNABLE_PERMISSIONS.find(o => o.key === k)?.label).join(', ')
+              : '(선택된 권한 없음)'}
           </p>
           <button
             type="submit"
