@@ -49,6 +49,7 @@ interface MiseongPickup {
   product_code: string
   product_name: string
   quantity: number
+  fetched_at: string | null
 }
 
 interface ProductCandidate {
@@ -233,7 +234,7 @@ export default function SoumPicking() {
   async function loadMiseongPickupsToday() {
     const { data } = await supabase
       .from('miseong_pickups')
-      .select('id, product_code, product_name, quantity')
+      .select('id, product_code, product_name, quantity, fetched_at')
       .eq('picked_date', todayStr())
       .order('created_at', { ascending: false })
     setMiseongPickupsToday((data ?? []) as MiseongPickup[])
@@ -402,6 +403,7 @@ export default function SoumPicking() {
       quantity: qty,
       requested_quantity: row.quantity,
       picked_by: staffName,
+      fetched_at: new Date().toISOString(),   // 실물을 이미 손에 들고 확정하는 시점 → 바로 완료
     })
     if (logError) { alert(`미성 이동 기록 실패: ${logError.message}`); return }
 
@@ -411,12 +413,15 @@ export default function SoumPicking() {
     setItems(prev => prev.map(i => idSet.has(i.id) ? { ...i, picked_at: value } : i))
     setMiseongFetchKey(null)
     setMiseongQtyValue('')
+    loadMiseongPickupsToday()
   }
 
-  // 미성 배치 화면에서 특정 주문과 무관하게 상품을 임의로 추가(예: 다음에 필요할 걸 미리
-  // 가져온 경우) — order_item과 연결이 없으니 이카운트 재고이동 기록(miseong_pickups)에만 남김.
-  // 상품코드는 현장에서 알기 어려워서 필수로 안 받음 — 검색해서 고르면 자동으로 채워지고,
-  // 못 고르면 빈 값으로 저장했다가 엑셀 받아서 나중에 채워 넣으면 됨
+  // 미성 배치 화면에서 특정 주문과 무관하게 상품을 임의로 요청(예: 다음에 필요할 것 같아
+  // 미리 가져와달라고 요청하는 경우) — order_item과 연결이 없으니 이카운트 재고이동
+  // 기록(miseong_pickups)에 fetched_at=null(대기중)로 남김. 실제로 가져온 뒤 "가져옴"을
+  // 눌러야 완료로 넘어감(markMiseongFetched). 상품코드는 현장에서 알기 어려워서 필수로
+  // 안 받음 — 검색해서 고르면 자동으로 채워지고, 못 고르면 빈 값으로 저장했다가 엑셀
+  // 받아서 나중에 채워 넣으면 됨
   async function addMiseongManual() {
     const product_code = addForm.product_code.trim()
     const product_name = addForm.product_name.trim()
@@ -432,6 +437,7 @@ export default function SoumPicking() {
       quantity,
       requested_quantity: quantity,
       picked_by: staffName,
+      fetched_at: null,   // 아직 안 가져온 요청 상태 — "가져옴" 누르면 완료로 전환
     })
     if (error) { alert(`추가 실패: ${error.message}`); return }
     setAddForm({ product_code: '', product_name: '', quantity: '' })
@@ -439,6 +445,14 @@ export default function SoumPicking() {
     setProductResults([])
     setShowAddMiseong(false)
     loadMiseongPickupsToday()
+  }
+
+  // 요청 카드에서 "가져옴"을 누르면 완료(fetched_at 기록)로 전환 — 오늘 미성 이동 기록에 합류
+  async function markMiseongFetched(id: string) {
+    const fetched_at = new Date().toISOString()
+    const { error } = await supabase.from('miseong_pickups').update({ fetched_at }).eq('id', id)
+    if (error) { alert(`완료 처리 실패: ${error.message}`); return }
+    setMiseongPickupsToday(prev => prev.map(p => p.id === id ? { ...p, fetched_at } : p))
   }
 
   async function removeMiseongPickup(id: string) {
@@ -475,6 +489,7 @@ export default function SoumPicking() {
       .from('miseong_pickups')
       .select('product_code, product_name, quantity, requested_quantity')
       .eq('picked_date', dateStr)
+      .not('fetched_at', 'is', null)   // 실제로 가져온(완료된) 것만 — 대기중 요청은 아직 이동 안 했으니 제외
       .order('product_code')
     if (!data?.length) { alert('오늘 미성에서 이동한 상품이 없습니다.'); return }
 
@@ -695,11 +710,33 @@ export default function SoumPicking() {
         )}
       </div>
 
-      {isMiseongView && miseongPickupsToday.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3">
-          <p className="text-xs font-medium text-amber-700 mb-2">오늘 미성 이동 기록 {miseongPickupsToday.length}건</p>
+      {isMiseongView && miseongPickupsToday.some(p => !p.fetched_at) && (
+        <div className="bg-sky-50 border border-sky-200 rounded-xl p-3 mb-3">
+          <p className="text-xs font-medium text-sky-700 mb-2">
+            🚚 가져와야 함 {miseongPickupsToday.filter(p => !p.fetched_at).length}건
+          </p>
           <div className="space-y-1">
-            {miseongPickupsToday.map(p => (
+            {miseongPickupsToday.filter(p => !p.fetched_at).map(p => (
+              <div key={p.id} className="flex items-center justify-between text-xs text-sky-900">
+                <span className="truncate">{p.product_name} <span className="font-mono text-sky-500">{p.product_code}</span></span>
+                <span className="flex items-center gap-2 shrink-0 ml-2">
+                  ×{p.quantity}
+                  <button onClick={() => markMiseongFetched(p.id)} className="font-medium text-white bg-sky-600 hover:bg-sky-700 rounded px-2 py-0.5">가져옴</button>
+                  <button onClick={() => removeMiseongPickup(p.id)} className="text-sky-400 hover:text-red-500">✕</button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isMiseongView && miseongPickupsToday.some(p => !!p.fetched_at) && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-3">
+          <p className="text-xs font-medium text-amber-700 mb-2">
+            오늘 미성 이동 기록 {miseongPickupsToday.filter(p => !!p.fetched_at).length}건
+          </p>
+          <div className="space-y-1">
+            {miseongPickupsToday.filter(p => !!p.fetched_at).map(p => (
               <div key={p.id} className="flex items-center justify-between text-xs text-amber-900">
                 <span className="truncate">{p.product_name} <span className="font-mono text-amber-500">{p.product_code}</span></span>
                 <span className="flex items-center gap-2 shrink-0 ml-2">
@@ -738,10 +775,10 @@ export default function SoumPicking() {
       ) : (
         <div className="space-y-2">
           <div className="flex items-center justify-between px-1">
-            <p className="text-xs text-gray-400">총 {pickingList.length}종</p>
+            <p className="text-xs text-gray-400">총 {pickingList.length}종 / {pickingList.reduce((sum, r) => sum + r.quantity, 0)}EA</p>
             {doneItems.length > 0 && (
               <button onClick={() => setShowDone(v => !v)} className="text-xs text-gray-500 underline">
-                확인완료 {doneList.length}종 {showDone ? '숨기기' : '보기'}
+                확인완료 {doneList.length}종 / {doneList.reduce((sum, r) => sum + r.quantity, 0)}EA {showDone ? '숨기기' : '보기'}
               </button>
             )}
           </div>

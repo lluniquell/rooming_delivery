@@ -50,7 +50,7 @@ export default function SoumDashboard() {
       holdBatch
         ? supabase.from('order_items').select('id', { count: 'exact', head: true }).eq('status', 'confirmed').eq('batch_id', holdBatch.id)
         : Promise.resolve({ count: 0 } as any),
-      supabase.from('miseong_pickups').select('quantity, picked_by').eq('picked_date', today()),
+      supabase.from('miseong_pickups').select('quantity, picked_by').eq('picked_date', today()).not('fetched_at', 'is', null),
       supabase
         .from('order_items')
         .select('quantity, shipped_by')
