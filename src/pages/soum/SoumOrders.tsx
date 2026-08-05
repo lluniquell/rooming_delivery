@@ -32,7 +32,22 @@ interface Batch {
   type: string
 }
 
+interface BatchedMatch {
+  order_id: string
+  cafe24_order_no: string
+  customer_name: string
+  receiver_name: string | null
+  // 같은 주문의 상품이 보류/CJ 등 여러 배치에 나뉘어 있을 수 있어서 배치별로 묶어서 보여줌
+  batches: { batch_id: string; status: string }[]
+}
+
 const DELIVERY_METHODS = ['CJ', '경동', '직배', '팀무버', '업체배송']
+const STATUS_LABEL: Record<string, string> = {
+  collected: '수집됨(미배정)',
+  confirmed: '배정됨',
+  in_transit: '배송중',
+  delivered: '배송완료',
+}
 // 상품(order_item) 개수가 아니라 "주문" 개수 기준 — 그래야 한 주문의 상품들이
 // 페이지 경계에서 쪼개지지 않음
 const PAGE_SIZE = 50
@@ -277,6 +292,9 @@ export default function SoumOrders() {
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set())
   // 폰에서는 날짜/검색 툴바가 화면을 너무 많이 차지해서 기본적으로 접어둠 (데스크톱은 항상 펼침)
   const [showFilters, setShowFilters] = useState(false)
+  // 검색어와 일치하지만 이미 배치에 들어간 주문 — 미배정 목록엔 안 잡히니 별도로 보여줌
+  const [batchedMatches, setBatchedMatches] = useState<BatchedMatch[]>([])
+  const [allBatchesById, setAllBatchesById] = useState<Record<string, { name: string; batch_no: string }>>({})
 
   // useCallback으로 고정한 핸들러들이 최신 값을 읽을 수 있도록 (stale closure 방지)
   const groupsRef = useRef<OrderGroup[]>(groups)
@@ -298,7 +316,51 @@ export default function SoumOrders() {
     loadOrders()
     loadBatches()
     loadMeta()
+    loadAllBatches()
   }, [])
+
+  // 배정 버튼용 목록(loadBatches)은 보류/미성을 빼지만, 검색 결과에 그 배치도 이름을 보여줘야 해서 전체를 따로 조회
+  async function loadAllBatches() {
+    const { data } = await supabase.from('batches').select('id, name, batch_no')
+    const map: Record<string, { name: string; batch_no: string }> = {}
+    for (const b of data ?? []) map[b.id] = { name: b.name, batch_no: b.batch_no }
+    setAllBatchesById(map)
+  }
+
+  // 검색어와 일치하지만 이미 배치에 들어간(batch_id가 있는) 주문 — 어느 배치에 있는지 보여줘서
+  // "수집이 안 된 건지 / 이미 배치돼 있는 건지" 구분할 수 있게 함
+  async function loadBatchedMatches(q: string) {
+    if (!q) { setBatchedMatches([]); return }
+    let query = supabase
+      .from('order_items')
+      .select('order_id, batch_id, status, orders!inner(cafe24_order_no, customer_name, receiver_name)')
+      .not('batch_id', 'is', null)
+    if (/^[\d-]+$/.test(q)) {
+      query = query.ilike('orders.cafe24_order_no', `%${q}%`)
+    } else {
+      query = query.or(`customer_name.ilike.%${q}%,receiver_name.ilike.%${q}%`, { foreignTable: 'orders' })
+    }
+    const { data } = await query
+    const byOrder = new Map<string, BatchedMatch>()
+    for (const row of (data ?? []) as any[]) {
+      let m = byOrder.get(row.order_id)
+      if (!m) {
+        m = {
+          order_id: row.order_id,
+          cafe24_order_no: row.orders.cafe24_order_no,
+          customer_name: row.orders.customer_name,
+          receiver_name: row.orders.receiver_name,
+          batches: [],
+        }
+        byOrder.set(row.order_id, m)
+      }
+      // 같은 주문의 상품이 보류/CJ 등 여러 배치에 나뉘어 있을 수 있어서 배치별로 하나씩만 추가
+      if (!m.batches.some(b => b.batch_id === row.batch_id)) {
+        m.batches.push({ batch_id: row.batch_id, status: row.status })
+      }
+    }
+    setBatchedMatches([...byOrder.values()].sort((a, b) => b.cafe24_order_no.localeCompare(a.cafe24_order_no)))
+  }
 
   async function loadMeta() {
     const { data } = await supabase.from('app_meta').select('value').eq('key', 'last_collected_at').maybeSingle()
@@ -324,6 +386,7 @@ export default function SoumOrders() {
         idQuery = idQuery.or(`customer_name.ilike.%${q}%,receiver_name.ilike.%${q}%`, { foreignTable: 'orders' })
       }
     }
+    loadBatchedMatches(q)
 
     const { data: idRows } = await idQuery
 
@@ -709,6 +772,44 @@ export default function SoumOrders() {
           </button>
         )}
       </div>
+
+      {/* 검색 중이고 이미 배치된 주문이 있으면 — 미배정 목록엔 안 잡히니 여기서 어느 배치인지 보여줌 */}
+      {searchQuery.trim() && batchedMatches.length > 0 && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-4">
+          <p className="text-xs font-medium text-indigo-700 mb-2">
+            이미 배치된 주문 {batchedMatches.length}건
+          </p>
+          <div className="space-y-1.5">
+            {batchedMatches.map(m => (
+              <div key={m.order_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-2 text-xs text-indigo-900">
+                <span className="truncate">
+                  <span className="font-mono text-indigo-500">{m.cafe24_order_no}</span>
+                  {' '}{m.customer_name} / {m.receiver_name || '-'}
+                </span>
+                <span className="shrink-0 flex flex-wrap items-center gap-1.5">
+                  {m.batches.map(({ batch_id, status }) => {
+                    const b = allBatchesById[batch_id]
+                    return (
+                      <span key={batch_id} className="flex items-center gap-1">
+                        <span className="px-1.5 py-0.5 rounded bg-white border border-indigo-200 font-medium">
+                          {b ? `${b.batch_no}번 ${b.name}` : '알 수 없는 배치'}
+                        </span>
+                        <span className="text-indigo-400">{STATUS_LABEL[status] ?? status}</span>
+                      </span>
+                    )
+                  })}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {searchQuery.trim() && groups.length === 0 && batchedMatches.length === 0 && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4 text-xs text-gray-500">
+          미배정/배치된 주문 어디에도 없어요 — 아직 카페24에서 수집되지 않았을 수 있어요.
+        </div>
+      )}
 
       {assignWarn && (
         <div className={`rounded-xl px-4 py-3 mb-4 text-sm flex items-center justify-between border ${
