@@ -133,7 +133,7 @@ const PRESETS = [
 // 주문 하나 + 그 상품 행들. 500건까지 나열되는 목록에서 배정할 때마다 전체가 다시
 // 그려지면 화면이 버벅여서(스크롤도 멈춤), 실제로 바뀐 주문만 다시 그리도록 분리 + memo 처리
 const OrderRow = memo(function OrderRow({
-  group, batches, shipStats, isAssigning, selected, assignedIds, onToggleItem, onToggleGroup, onQuickAssign,
+  group, batches, shipStats, isAssigning, selected, assignedIds, onToggleItem, onToggleGroup, onQuickAssign, onDelete,
   readOnly, activeBatchIds, statusLabel,
 }: {
   group: OrderGroup
@@ -145,6 +145,7 @@ const OrderRow = memo(function OrderRow({
   onToggleItem: (id: string) => void
   onToggleGroup: (group: OrderGroup) => void
   onQuickAssign: (group: OrderGroup, batch: Batch) => void
+  onDelete?: (group: OrderGroup) => void
   // 이미 배치된 주문 검색 결과 표시용 — 체크박스/배정 없이 보기만, 현재 배치 버튼을 눌린 상태로 보여줌
   readOnly?: boolean
   activeBatchIds?: Set<string>
@@ -221,6 +222,15 @@ const OrderRow = memo(function OrderRow({
               </button>
             )
           })}
+          {!readOnly && onDelete && (
+            <button
+              onClick={() => onDelete(group)}
+              title="이 주문을 삭제합니다 (삭제하면 다시 수집해야 함)"
+              className="px-2.5 py-1.5 min-h-[34px] sm:px-2 sm:py-1 sm:min-h-0 rounded text-xs font-medium border border-gray-200 text-gray-400 bg-white hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors"
+            >
+              삭제
+            </button>
+          )}
         </div>
       </div>
       {/* 상품 행 — 폰에서는 상품 정보와 배송방법/위치/수량을 두 줄로 나눔 */}
@@ -293,6 +303,7 @@ const OrderRow = memo(function OrderRow({
   if (prev.onToggleItem !== next.onToggleItem) return false
   if (prev.onToggleGroup !== next.onToggleGroup) return false
   if (prev.onQuickAssign !== next.onQuickAssign) return false
+  if (prev.onDelete !== next.onDelete) return false
   if (prev.readOnly !== next.readOnly) return false
   if (prev.activeBatchIds !== next.activeBatchIds) return false
   if (prev.statusLabel !== next.statusLabel) return false
@@ -739,6 +750,18 @@ export default function SoumOrders() {
     }
   }, [assignItems])
 
+  // 미배정 주문 삭제 — 카페24 원본은 그대로라 나중에 다시 수집하면 똑같이 잡힘
+  const deleteOrder = useCallback(async (group: OrderGroup) => {
+    if (!confirm(`이 주문(${group.cafe24_order_no})을 삭제할까요?\n삭제하면 이 주문은 다시 수집해야 합니다.`)) return
+    const itemIds = group.items.map(i => i.id)
+    const { error: itemsError } = await supabase.from('order_items').delete().in('id', itemIds)
+    if (itemsError) { alert(`삭제 실패: ${itemsError.message}`); return }
+    const { error: orderError } = await supabase.from('orders').delete().eq('id', group.order_id)
+    if (orderError) { alert(`삭제 실패: ${orderError.message}`); return }
+    setGroups(prev => prev.filter(g => g.order_id !== group.order_id))
+    setTotalCount(prev => Math.max(0, prev - 1))
+  }, [])
+
   return (
     <div className="max-w-5xl">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
@@ -943,6 +966,7 @@ export default function SoumOrders() {
               onToggleItem={toggle}
               onToggleGroup={toggleGroup}
               onQuickAssign={quickAssign}
+              onDelete={deleteOrder}
             />
           ))}
 
