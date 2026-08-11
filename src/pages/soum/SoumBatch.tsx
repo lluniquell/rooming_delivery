@@ -136,15 +136,26 @@ export default function SoumBatch() {
     const { data: batchData } = await supabase.from('batches').select('*').neq('type', 'miseong').order('batch_no')
     if (!batchData) return
 
-    const { data: itemData } = await supabase
-      .from('order_items')
-      .select('batch_id, quantity, orders(cafe24_order_no)')
-      .eq('status', 'confirmed')
+    // 전 배치를 배치 구분 없이 한 번에 집계하는 쿼리라 confirmed 건수가 많아지면
+    // PostgREST 기본 페이지 크기(1000행)에 걸려 조용히 잘림 — 카드 합계가 상세 화면
+    // 합계보다 작게 나오던 버그의 원인. range()로 끝까지 페이지네이션해서 전부 가져옴
+    const PAGE_SIZE = 1000
+    const itemData: any[] = []
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data: page } = await supabase
+        .from('order_items')
+        .select('batch_id, quantity, orders(cafe24_order_no)')
+        .eq('status', 'confirmed')
+        .range(from, from + PAGE_SIZE - 1)
+      if (!page || page.length === 0) break
+      itemData.push(...page)
+      if (page.length < PAGE_SIZE) break
+    }
 
     const countMap: Record<string, number> = {}
     const eaMap: Record<string, number> = {}
     const orderSetMap: Record<string, Set<string>> = {}
-    for (const it of (itemData ?? []) as any[]) {
+    for (const it of itemData) {
       if (!it.batch_id) continue
       countMap[it.batch_id] = (countMap[it.batch_id] ?? 0) + 1
       eaMap[it.batch_id] = (eaMap[it.batch_id] ?? 0) + it.quantity
