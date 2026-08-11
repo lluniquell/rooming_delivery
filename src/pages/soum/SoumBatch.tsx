@@ -886,43 +886,26 @@ export default function SoumBatch() {
                           <td className={`px-4 py-3 text-xs font-mono text-gray-500 truncate ${inspected ? 'bg-blue-50' : ''}`} title={item.tracking_number ?? ''}>{item.tracking_number ?? ''}</td>
                           {idx === 0 && (
                             <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top bg-white">
-                              {activeBatch?.type === 'hold' ? (
-                                <select
-                                  defaultValue=""
-                                  onChange={e => {
-                                    const v = e.target.value
-                                    if (!v) return
-                                    if (v === '__unassigned__') moveToUnassigned(item.id)
-                                    else moveToOtherBatch(item.id, v)
-                                    e.target.value = ''
-                                  }}
-                                  title="이 주문의 상품 전체를 다른 배치나 미배정으로 옮깁니다"
-                                  className="text-xs border rounded-lg px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                                >
-                                  <option value="" disabled>다른 배치로</option>
-                                  <option value="__unassigned__">미배정으로</option>
-                                  {batches.filter(b => b.type !== 'hold').map(b => (
-                                    <option key={b.id} value={b.id}>{b.batch_no}번 {b.name}</option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <>
-                                  <button
-                                    onClick={() => moveToUnassigned(item.id)}
-                                    title="이 주문의 상품 전체를 미배정으로 되돌립니다"
-                                    className="text-xs text-gray-300 hover:text-indigo-400 transition-colors mr-3"
-                                  >
-                                    미배정으로
-                                  </button>
-                                  <button
-                                    onClick={() => moveToHold(item.id)}
-                                    title="이 주문의 상품 전체를 보류로 옮깁니다"
-                                    className="text-xs text-gray-300 hover:text-orange-400 transition-colors"
-                                  >
-                                    보류로
-                                  </button>
-                                </>
-                              )}
+                              <select
+                                defaultValue=""
+                                onChange={e => {
+                                  const v = e.target.value
+                                  if (!v) return
+                                  if (v === '__unassigned__') moveToUnassigned(item.id)
+                                  else if (v === '__hold__') moveToHold(item.id)
+                                  else moveToOtherBatch(item.id, v)
+                                  e.target.value = ''
+                                }}
+                                title="이 주문의 상품 전체를 다른 배치나 미배정/보류로 옮깁니다"
+                                className="text-xs border rounded-lg px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                              >
+                                <option value="" disabled>다른 배치로</option>
+                                <option value="__unassigned__">미배정으로</option>
+                                {activeBatch?.type !== 'hold' && <option value="__hold__">보류로</option>}
+                                {batches.filter(b => b.type !== 'hold' && b.id !== activeBatchId).map(b => (
+                                  <option key={b.id} value={b.id}>{b.batch_no}번 {b.name}</option>
+                                ))}
+                              </select>
                             </td>
                           )}
                         </tr>
