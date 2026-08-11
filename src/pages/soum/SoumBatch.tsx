@@ -825,16 +825,26 @@ export default function SoumBatch() {
           ) : items.length === 0 ? (
             <div className="p-12 text-center text-gray-400 text-sm">이 배치에 상품이 없습니다</div>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full text-sm table-fixed">
+              <colgroup>
+                <col className="w-28" />
+                <col className="w-24" />
+                <col className="w-24" />
+                <col />
+                <col className="w-16" />
+                <col className="w-24" />
+                <col className="w-28" />
+                <col className="w-48" />
+              </colgroup>
               <thead className="border-b bg-gray-50">
                 <tr>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">주문번호</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">주문자명</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">수령인명</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">상품</th>
-                  <th className="text-center px-4 py-2 font-medium text-gray-500 text-xs w-12">수량</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">배송방법</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs">운송장</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">주문번호</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">주문자명</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">수령인명</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">상품</th>
+                  <th className="text-center px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">수량</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">배송방법</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">운송장</th>
                   <th className="px-4 py-2" />
                 </tr>
               </thead>
@@ -855,13 +865,13 @@ export default function SoumBatch() {
                         >
                           {idx === 0 && (
                             <>
-                              <td rowSpan={group.items.length} className="px-4 py-3 font-mono text-xs text-gray-500 whitespace-nowrap align-top bg-white">
+                              <td rowSpan={group.items.length} className="px-4 py-3 font-mono text-xs text-gray-500 truncate align-top bg-white" title={group.cafe24_order_no}>
                                 {group.cafe24_order_no}
                               </td>
-                              <td rowSpan={group.items.length} className="px-4 py-3 text-gray-700 whitespace-nowrap align-top bg-white">
+                              <td rowSpan={group.items.length} className="px-4 py-3 text-gray-700 truncate align-top bg-white" title={group.customer_name}>
                                 {group.customer_name}
                               </td>
-                              <td rowSpan={group.items.length} className="px-4 py-3 font-medium text-gray-800 whitespace-nowrap align-top bg-white">
+                              <td rowSpan={group.items.length} className="px-4 py-3 font-medium text-gray-800 truncate align-top bg-white" title={group.receiver_name || '-'}>
                                 {group.receiver_name || '-'}
                               </td>
                             </>
@@ -873,7 +883,7 @@ export default function SoumBatch() {
                           </td>
                           <td className={`px-4 py-3 text-center font-semibold text-gray-800 ${inspected ? 'bg-blue-50' : ''}`}>{item.quantity}</td>
                           <td className={`px-4 py-3 text-sm text-gray-600 ${inspected ? 'bg-blue-50' : ''}`}>{item.delivery_method ?? '-'}</td>
-                          <td className={`px-4 py-3 text-xs font-mono text-gray-500 ${inspected ? 'bg-blue-50' : ''}`}>{item.tracking_number ?? ''}</td>
+                          <td className={`px-4 py-3 text-xs font-mono text-gray-500 truncate ${inspected ? 'bg-blue-50' : ''}`} title={item.tracking_number ?? ''}>{item.tracking_number ?? ''}</td>
                           {idx === 0 && (
                             <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top bg-white">
                               <button
