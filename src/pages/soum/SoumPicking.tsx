@@ -231,6 +231,21 @@ export default function SoumPicking() {
     setLoading(false)
   }
 
+  // 확인 처리 직후 이 화면에서 다시 불러와 최신 상태로 맞춤 — realtime 구독이 끊겼다 붙는
+  // 사이의 이벤트를 놓쳐도, 각자 터치할 때마다 스스로 최신화되니 화면이 계속 어긋나 있지 않음.
+  // 로딩 스피너 없이 조용히 갱신(barcodeMap은 건드릴 필요 없어 items만 다시 조회)
+  async function refetchItems() {
+    if (!activeBatchId) return
+    const isMiseong = !!miseongBatch && activeBatchId === miseongBatch.id
+    let query = supabase
+      .from('order_items')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, location, product_no, quantity, inspected_qty, picked_at')
+      .eq('status', 'confirmed')
+    query = isMiseong ? query.not('miseong_sent_at', 'is', null) : query.eq('batch_id', activeBatchId).is('miseong_sent_at', null)
+    const { data } = await query
+    setItems((data ?? []) as Item[])
+  }
+
   async function loadMiseongPickupsToday() {
     const { data } = await supabase
       .from('miseong_pickups')
@@ -361,8 +376,7 @@ export default function SoumPicking() {
   async function confirmPicked(row: PickingRow, picked: boolean) {
     const value = picked ? new Date().toISOString() : null
     await supabase.from('order_items').update({ picked_at: value, picked_by: picked ? staffName : null }).in('id', row.item_ids)
-    const idSet = new Set(row.item_ids)
-    setItems(prev => prev.map(i => idSet.has(i.id) ? { ...i, picked_at: value } : i))
+    await refetchItems()
   }
 
   // 미성에서 찾기 — NK에 없는 상품을 미성 배치로 옮겨 파킹만 해둠 (수량은 여기선 안 물어봄,
@@ -409,8 +423,7 @@ export default function SoumPicking() {
 
     const value = new Date().toISOString()
     await supabase.from('order_items').update({ picked_at: value, picked_by: staffName }).in('id', row.item_ids)
-    const idSet = new Set(row.item_ids)
-    setItems(prev => prev.map(i => idSet.has(i.id) ? { ...i, picked_at: value } : i))
+    await refetchItems()
     setMiseongFetchKey(null)
     setMiseongQtyValue('')
     loadMiseongPickupsToday()
