@@ -169,6 +169,14 @@ export default function SoumPicking() {
     })
   }, [])
 
+  // 배치 선택 목록(CJ1~5 카드)은 화면 진입 시 한 번만 불러와서, 이미 열어둔 채로 다른 배치에
+  // 새로 주문이 배정돼도 목록이 갱신되지 않는 문제가 있었음 — 탭이 다시 포커스될 때 재조회
+  useEffect(() => {
+    function onFocus() { loadBatches() }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
   async function loadBatches() {
     // 미성 배치는 소품팀 피킹 화면 전용 임시 보관소라 일반 배치 목록엔 안 섞고 따로 고정 노출
     const { data: miseong } = await supabase.from('batches').select('id, batch_no, name, type').eq('type', 'miseong').maybeSingle()
@@ -233,7 +241,8 @@ export default function SoumPicking() {
 
   // 확인 처리 직후 이 화면에서 다시 불러와 최신 상태로 맞춤 — realtime 구독이 끊겼다 붙는
   // 사이의 이벤트를 놓쳐도, 각자 터치할 때마다 스스로 최신화되니 화면이 계속 어긋나 있지 않음.
-  // 로딩 스피너 없이 조용히 갱신(barcodeMap은 건드릴 필요 없어 items만 다시 조회)
+  // 로딩 스피너 없이 조용히 갱신(barcodeMap은 건드릴 필요 없어 items만 다시 조회).
+  // 배치 선택 목록도 같이 갱신 — 이 터치로 다른 배치가 새로 "피킹할 게 있는" 상태가 될 수 있음
   async function refetchItems() {
     if (!activeBatchId) return
     const isMiseong = !!miseongBatch && activeBatchId === miseongBatch.id
@@ -244,6 +253,7 @@ export default function SoumPicking() {
     query = isMiseong ? query.not('miseong_sent_at', 'is', null) : query.eq('batch_id', activeBatchId).is('miseong_sent_at', null)
     const { data } = await query
     setItems((data ?? []) as Item[])
+    loadBatches()
   }
 
   async function loadMiseongPickupsToday() {
