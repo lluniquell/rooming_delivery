@@ -188,10 +188,14 @@ export default function SoumPicking() {
 
     // 확인 안 된(picked_at null) 상품 중 아직 남은 수량(quantity > inspected_qty)이 있는
     // 배치만 선택 목록에 노출 — 피킹할 게 없는 배치는 목록에서 아예 뺌. 미성으로 보낸
-    // 상품은 원래 배치의 batch_id를 그대로 유지하니 여기서 따로 제외해야 함
+    // 상품은 원래 배치의 batch_id를 그대로 유지하니 여기서 따로 제외해야 함.
+    // batch_id로 CJ 배치만 좁혀서 조회 — 전체 배치 대상으로 조회하면 조건에 맞는 행이
+    // Supabase 기본 조회 제한(1000건)을 넘어서 뒷부분이 잘려나가 CJ2 등이 누락되는
+    // 문제가 있었음(2026-08-12 발견)
     const { data: itemData } = await supabase
       .from('order_items')
       .select('batch_id, quantity, inspected_qty')
+      .in('batch_id', batchData.map(b => b.id))
       .eq('status', 'confirmed')
       .is('picked_at', null)
       .is('miseong_sent_at', null)
