@@ -827,7 +827,7 @@ export default function SoumBatch() {
           ) : (
             <table className="w-full text-sm table-fixed">
               <colgroup>
-                <col className="w-28" />
+                <col className="w-40" />
                 <col className="w-24" />
                 <col className="w-24" />
                 <col />
