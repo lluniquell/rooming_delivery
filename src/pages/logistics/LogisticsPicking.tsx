@@ -12,17 +12,36 @@ interface Item {
   quantity: number
   inspected_qty: number
   picked_at: string | null
+  customer_name: string
+  route_id: string | null
+  route_order: number | null
+}
+
+interface BarcodeRow {
+  product_code: string
+  location: string | null
 }
 
 interface PickingRow {
   key: string
+  product_code: string
   product_name: string
   option_info: string
   brand: string
+  location: string
   supplier_note: string
   quantity: number
   item_ids: string[]
   order_ids: Set<string>
+}
+
+interface Label {
+  key: string
+  driverName: string
+  productName: string
+  customerName: string
+  dateLabel: string
+  routeOrder: number | null
 }
 
 // SoumBatch.tsx/SoumPicking.tsx와 동일한 규칙 — 공급자 상품명에 섞여있는
@@ -44,11 +63,12 @@ function tomorrowStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-function buildPickingList(items: Item[]): PickingRow[] {
+function buildPickingList(items: Item[], sort: 'location' | 'brand', barcodeMap: Record<string, BarcodeRow[]>): PickingRow[] {
   const merged: Record<string, PickingRow> = {}
   for (const item of items) {
     const remaining = item.quantity - item.inspected_qty
     if (remaining <= 0) continue
+    const location = barcodeMap[item.product_code]?.map(b => b.location).find(l => !!l) ?? ''
     const key = `${item.product_code}__${item.option_info ?? ''}`
     if (merged[key]) {
       merged[key].quantity += remaining
@@ -57,9 +77,11 @@ function buildPickingList(items: Item[]): PickingRow[] {
     } else {
       merged[key] = {
         key,
+        product_code: item.product_code,
         product_name: item.product_name,
         option_info: item.option_info ?? '',
         brand: item.brand ?? '',
+        location,
         supplier_note: supplierNoteOf(item.supplier_name),
         quantity: remaining,
         item_ids: [item.id],
@@ -67,14 +89,21 @@ function buildPickingList(items: Item[]): PickingRow[] {
       }
     }
   }
-  return Object.values(merged).sort((a, b) => a.product_name.localeCompare(b.product_name))
+  const rows = Object.values(merged)
+  return sort === 'brand'
+    ? rows.sort((a, b) => a.brand.localeCompare(b.brand) || a.product_name.localeCompare(b.product_name))
+    : rows.sort((a, b) => a.location.localeCompare(b.location) || a.product_name.localeCompare(b.product_name))
 }
 
 export default function LogisticsPicking() {
   const [date, setDate] = useState(tomorrowStr())
   const [items, setItems] = useState<Item[]>([])
+  const [barcodeMap, setBarcodeMap] = useState<Record<string, BarcodeRow[]>>({})
+  const [driverNameByRoute, setDriverNameByRoute] = useState<Record<string, string>>({})
+  const [sort, setSort] = useState<'location' | 'brand'>('location')
   const [loading, setLoading] = useState(true)
   const [showDone, setShowDone] = useState(false)
+  const [showLabels, setShowLabels] = useState(false)
   const [staffName, setStaffName] = useState('')
 
   useEffect(() => {
@@ -91,15 +120,57 @@ export default function LogisticsPicking() {
     setLoading(true)
     const { data: batches } = await supabase.from('batches').select('id, type, name')
     const jikbae = (batches ?? []).find(b => b.type === 'direct' || b.name?.includes('직배'))
-    if (!jikbae) { setItems([]); setLoading(false); return }
+    if (!jikbae) { setItems([]); setBarcodeMap({}); setDriverNameByRoute({}); setLoading(false); return }
 
     const { data } = await supabase
       .from('order_items')
-      .select('id, order_id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, picked_at, orders!inner(scheduled_date)')
+      .select('id, order_id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, picked_at, orders!inner(receiver_name, customer_name, route_id, route_order, scheduled_date)')
       .eq('batch_id', jikbae.id)
       .in('status', ['confirmed', 'in_transit'])
       .eq('orders.scheduled_date', date)
-    setItems((data ?? []) as unknown as Item[])
+    const rows: Item[] = ((data ?? []) as any[]).map(row => ({
+      id: row.id,
+      order_id: row.order_id,
+      product_code: row.product_code,
+      product_name: row.product_name,
+      option_info: row.option_info,
+      brand: row.brand,
+      supplier_name: row.supplier_name,
+      quantity: row.quantity,
+      inspected_qty: row.inspected_qty,
+      picked_at: row.picked_at,
+      customer_name: row.orders.receiver_name || row.orders.customer_name,
+      route_id: row.orders.route_id,
+      route_order: row.orders.route_order,
+    }))
+    setItems(rows)
+
+    const codes = [...new Set(rows.map(r => r.product_code))]
+    if (codes.length) {
+      const { data: bcData } = await supabase.from('barcodes').select('product_code, location').in('product_code', codes)
+      const map: Record<string, BarcodeRow[]> = {}
+      for (const b of (bcData ?? []) as BarcodeRow[]) {
+        (map[b.product_code] ??= []).push(b)
+      }
+      setBarcodeMap(map)
+    } else {
+      setBarcodeMap({})
+    }
+
+    // 라벨의 "배송담당자명"용 — 이 날짜 루트별 배정 배송원 이름
+    const { data: routeData } = await supabase.from('schedule_routes').select('id, driver_ids').eq('date', date)
+    const driverIds = [...new Set((routeData ?? []).flatMap(r => r.driver_ids as string[]))]
+    let driverNameById: Record<string, string> = {}
+    if (driverIds.length) {
+      const { data: driverData } = await supabase.from('drivers').select('id, name').in('id', driverIds)
+      driverNameById = Object.fromEntries((driverData ?? []).map(d => [d.id, d.name]))
+    }
+    const byRoute: Record<string, string> = {}
+    for (const r of routeData ?? []) {
+      byRoute[r.id] = (r.driver_ids as string[]).map((id: string) => driverNameById[id] ?? '?').join('/') || '미배정'
+    }
+    setDriverNameByRoute(byRoute)
+
     setLoading(false)
   }
 
@@ -115,14 +186,31 @@ export default function LogisticsPicking() {
 
   const activeItems = items.filter(i => !i.picked_at)
   const doneItems = items.filter(i => i.picked_at)
-  const pickingList = buildPickingList(activeItems)
-  const doneList = buildPickingList(doneItems)
+  const pickingList = buildPickingList(activeItems, sort, barcodeMap)
+  const doneList = buildPickingList(doneItems, sort, barcodeMap)
+
+  // 실제 운송장이 아니라 창고에서 상품에 붙이는 식별용 라벨 — 주문 1건당 1장씩,
+  // 배송담당자/상품명/고객명+날짜-배송순서만 텍스트로 인쇄
+  const dateLabel = date.slice(2).replace(/-/g, '')
+  const labels: Label[] = items
+    .map(i => ({
+      key: i.id,
+      driverName: (i.route_id && driverNameByRoute[i.route_id]) || '미배정',
+      productName: i.product_name,
+      customerName: i.customer_name,
+      dateLabel,
+      routeOrder: i.route_order,
+    }))
+    .sort((a, b) => a.driverName.localeCompare(b.driverName) || (a.routeOrder ?? 999) - (b.routeOrder ?? 999))
 
   function renderRow(row: PickingRow, done: boolean) {
     return (
       <div key={row.key} className={`bg-white rounded-xl border p-3.5 ${done ? 'opacity-60' : ''}`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
+            {row.location && (
+              <span className="font-mono text-sm font-bold text-indigo-600">{row.location}</span>
+            )}
             <div className="text-sm font-medium text-gray-800 break-words">{row.product_name}</div>
             {row.option_info && <div className="text-xs text-gray-400 mt-0.5">{row.option_info}</div>}
             <div className="mt-0.5">
@@ -153,6 +241,7 @@ export default function LogisticsPicking() {
 
   return (
     <div className="max-w-2xl">
+      <div className="print:hidden">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-gray-800">물류팀 피킹</h2>
         <input
@@ -161,6 +250,28 @@ export default function LogisticsPicking() {
           onChange={e => setDate(e.target.value)}
           className="border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
         />
+      </div>
+
+      <div className="flex items-center gap-2 mb-4">
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          <button
+            onClick={() => setSort('location')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              sort === 'location' ? 'bg-indigo-600 text-white' : 'text-gray-600'
+            }`}
+          >로케이션 정렬</button>
+          <button
+            onClick={() => setSort('brand')}
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              sort === 'brand' ? 'bg-indigo-600 text-white' : 'text-gray-600'
+            }`}
+          >브랜드별 정렬</button>
+        </div>
+        <button
+          onClick={() => setShowLabels(true)}
+          disabled={items.length === 0}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-40"
+        >라벨 출력</button>
       </div>
 
       {loading ? (
@@ -188,6 +299,36 @@ export default function LogisticsPicking() {
             {showDone && doneList.map(row => renderRow(row, true))}
           </div>
         </>
+      )}
+      </div>
+
+      {showLabels && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 print:static print:bg-white print:p-0 print:block">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col print:rounded-none print:shadow-none print:max-h-none print:max-w-none print:block">
+            <div className="px-5 py-3 border-b flex items-center justify-between shrink-0 print:hidden">
+              <h3 className="font-bold text-gray-800">
+                라벨 출력 <span className="text-gray-400 font-normal text-sm ml-1">{date} · {labels.length}장</span>
+              </h3>
+              <div className="flex items-center gap-2">
+                <button onClick={() => window.print()} className="px-2.5 py-1 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:border-indigo-400">인쇄</button>
+                <button onClick={() => setShowLabels(false)} className="ml-2 text-gray-400 hover:text-gray-600 text-xl leading-none px-1">×</button>
+              </div>
+            </div>
+            <div className="overflow-y-auto print:overflow-visible p-4 print:p-0">
+              <div className="grid grid-cols-3 gap-2 print:grid-cols-3">
+                {labels.map(l => (
+                  <div key={l.key} className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs break-inside-avoid">
+                    <div className="font-bold text-gray-800">{l.driverName}</div>
+                    <div className="text-gray-700 break-words">{l.productName}</div>
+                    <div className="text-gray-500">
+                      {l.customerName} {l.dateLabel}{l.routeOrder != null ? ` - ${l.routeOrder}` : ''}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
