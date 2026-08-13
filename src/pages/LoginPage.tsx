@@ -11,7 +11,10 @@ export default function LoginPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    const { error } = await signIn(email, password)
+    // 공용 계정(common@rooming.co.kr)만 "common"으로 짧게 로그인 가능하게 우회 —
+    // 실제 저장된 이메일/DB는 그대로, 로그인 입력값만 여기서 치환
+    const resolvedEmail = email.trim().toLowerCase() === 'common' ? 'common@rooming.co.kr' : email
+    const { error } = await signIn(resolvedEmail, password)
     if (error) setError('이메일 또는 비밀번호가 올바르지 않습니다.')
     setLoading(false)
   }
@@ -24,7 +27,8 @@ export default function LoginPage() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">이메일</label>
             <input
-              type="email"
+              type="text"
+              autoCapitalize="none"
               value={email}
               onChange={e => setEmail(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"

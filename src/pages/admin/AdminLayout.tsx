@@ -47,7 +47,7 @@ export const PERMISSION_GROUPS: { key: Permission; label: string; items: { to: s
   { key: 'schedule', label: '스케줄러', items: scheduleItems },
   { key: 'logistics', label: '물류팀', items: logisticsItems },
   { key: 'soum', label: '소품팀', items: propItems },
-  { key: 'showroom', label: '쇼룸', items: showroomItems },
+  { key: 'showroom', label: '공용', items: showroomItems },
 ]
 
 // 계정 관리 화면에서 고를 수 있는 권한 목록 — '관리자'는 실제 메뉴가 아니라
@@ -59,7 +59,7 @@ export const ASSIGNABLE_PERMISSIONS: { key: Permission; label: string }[] = [
   { key: 'schedule', label: '스케줄러' },
   { key: 'logistics', label: '물류팀' },
   { key: 'soum', label: '소품팀' },
-  { key: 'showroom', label: '쇼룸' },
+  { key: 'showroom', label: '공용' },
   { key: 'driver', label: '배송팀' },
 ]
 
