@@ -72,6 +72,8 @@ interface AdhocStop {
   phone: string | null
   address: string | null
   reason: string | null
+  lat: number | null
+  lng: number | null
 }
 
 interface RouteLane {
@@ -285,8 +287,8 @@ export default function ScheduleDay() {
       name: a.name,
       address: a.address,
       crew_size: null,
-      lat: null,
-      lng: null,
+      lat: a.lat,
+      lng: a.lng,
       visit_time: null,
       items: [],
       route_order: a.route_order,
@@ -348,7 +350,7 @@ export default function ScheduleDay() {
 
     const { data: adhocData } = await supabase
       .from('schedule_adhoc_stops')
-      .select('id, route_id, route_order, name, phone, address, reason')
+      .select('id, route_id, route_order, name, phone, address, reason, lat, lng')
       .eq('date', date)
     setAdhocStops(adhocData ?? [])
 
@@ -592,9 +594,27 @@ export default function ScheduleDay() {
     setAdhocModal(route)
   }
 
+  // 주소만으로는 좌표를 모르니, 저장 전에 카카오 지오코딩으로 한 번 찾아둠 —
+  // 안 그러면 이 배송지는 지도/동선에서 조용히 빠짐 (order 배송지의 geocodeMissing과 동일한 API)
+  async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+    try {
+      const res = await fetch('/api/kakao/geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address }),
+      })
+      const { lat, lng } = await res.json()
+      return lat && lng ? { lat, lng } : null
+    } catch {
+      return null
+    }
+  }
+
   async function confirmAddAdhoc() {
     if (!adhocModal || !adhocForm.name.trim() || !date) return
     const route_order = stopsForRoute(adhocModal.id).length + 1
+    const address = adhocForm.address.trim() || null
+    const coords = address ? await geocodeAddress(address) : null
     const { data } = await supabase.from('schedule_adhoc_stops')
       .insert({
         date,
@@ -602,10 +622,12 @@ export default function ScheduleDay() {
         route_order,
         name: adhocForm.name.trim(),
         phone: adhocForm.phone.trim() || null,
-        address: adhocForm.address.trim() || null,
+        address,
         reason: adhocForm.reason.trim() || null,
+        lat: coords?.lat ?? null,
+        lng: coords?.lng ?? null,
       })
-      .select('id, route_id, route_order, name, phone, address, reason')
+      .select('id, route_id, route_order, name, phone, address, reason, lat, lng')
       .single()
     if (data) setAdhocStops(prev => [...prev, data])
     setAdhocModal(null)
@@ -613,7 +635,8 @@ export default function ScheduleDay() {
 
   // 2인 배송 등에서, 이미 다른 루트에 배정된 당일 주문을 이 루트에도 동행 배송지로
   // 그대로 가져다 붙임(수기로 이름/연락처/주소 재입력 안 해도 되게) — 실제 order_id를
-  // 공유하는 게 아니라 값만 복사한 1회성 배송지(adhoc)로 추가
+  // 공유하는 게 아니라 값만 복사한 1회성 배송지(adhoc)로 추가. 좌표도 원본 주문 것을
+  // 그대로 복사해야 동선/지도에 나옴
   async function addOrderAsAdhoc(stop: Stop) {
     if (!adhocModal || !date) return
     const route_order = stopsForRoute(adhocModal.id).length + 1
@@ -626,8 +649,10 @@ export default function ScheduleDay() {
         phone: stop.receiver_phone,
         address: stop.address,
         reason: `동행 (${stop.cafe24_order_no})`,
+        lat: stop.lat,
+        lng: stop.lng,
       })
-      .select('id, route_id, route_order, name, phone, address, reason')
+      .select('id, route_id, route_order, name, phone, address, reason, lat, lng')
       .single()
     if (data) {
       setAdhocStops(prev => [...prev, data])
