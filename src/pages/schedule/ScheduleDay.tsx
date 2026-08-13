@@ -42,6 +42,7 @@ interface Stop {
   lat: number | null
   lng: number | null
   visit_time: string | null
+  schedule_note: string | null
   items: StopItem[]
   _dist?: number
   _routeLabel?: string | null
@@ -107,6 +108,7 @@ interface RouteStop {
   orderer_name?: string | null
   phone?: string | null
   reason?: string | null
+  schedule_note?: string | null
 }
 
 function regionOf(address: string | null) {
@@ -135,14 +137,18 @@ function loadKakaoSdk(): Promise<void> {
   })
 }
 
-function SortableStop({ stop, index, color, locked, onRemove, onTimeChange }: {
+function SortableStop({ stop, index, color, locked, onRemove, onTimeChange, onNoteChange }: {
   stop: RouteStop; index: number; color: string; locked: boolean; onRemove: (s: RouteStop) => void
   onTimeChange: (s: RouteStop, time: string) => void
+  onNoteChange: (s: RouteStop, note: string) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id, disabled: locked })
   const style = { transform: CSS.Transform.toString(transform), transition }
   const isPreset = stop.kind === 'preset'
   const isAdhoc = stop.kind === 'adhoc'
+  const isOrder = !isPreset && !isAdhoc
+  const [noteDraft, setNoteDraft] = useState(stop.schedule_note ?? '')
+  useEffect(() => { setNoteDraft(stop.schedule_note ?? '') }, [stop.id, stop.schedule_note])
 
   return (
     <div ref={setNodeRef} style={style} className={`flex items-center gap-2 border rounded-lg p-2 group ${isPreset ? 'bg-amber-50 border-amber-200' : isAdhoc ? 'bg-purple-50 border-purple-200' : 'bg-white'} ${locked ? 'opacity-70' : ''}`}>
@@ -184,11 +190,22 @@ function SortableStop({ stop, index, color, locked, onRemove, onTimeChange }: {
             {[stop.phone, stop.reason].filter(Boolean).join(' · ')}
           </div>
         )}
-        {!isPreset && !isAdhoc && stop.items.map(i => (
+        {isOrder && stop.items.map(i => (
           <div key={i.id} className="text-[11px] text-gray-500 truncate">
             {i.product_name} ×{i.quantity}
           </div>
         ))}
+        {isOrder && (
+          <input
+            value={noteDraft}
+            onChange={e => setNoteDraft(e.target.value)}
+            onBlur={() => { if (noteDraft !== (stop.schedule_note ?? '')) onNoteChange(stop, noteDraft) }}
+            onClick={e => e.stopPropagation()}
+            disabled={locked}
+            placeholder="메모 (예: 엘베없음, 미리 전화)"
+            className="mt-1 w-full text-[11px] border rounded px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50 disabled:bg-transparent"
+          />
+        )}
       </div>
       {!locked && (
         <button
@@ -255,6 +272,7 @@ export default function ScheduleDay() {
         lat: s.lat,
         lng: s.lng,
         visit_time: s.visit_time,
+        schedule_note: s.schedule_note,
         items: s.items,
         route_order: s.route_order ?? 999,
         route_id: s.route_id!,
@@ -376,6 +394,7 @@ export default function ScheduleDay() {
           lat: o.lat,
           lng: o.lng,
           visit_time: o.visit_time,
+          schedule_note: o.schedule_note,
           items: [],
         }
       }
@@ -385,7 +404,7 @@ export default function ScheduleDay() {
   }
 
   async function loadAll(bid: string, routesForDate: RouteLane[]) {
-    const SELECT = 'id, product_name, quantity, supplier_name, orders!inner(id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time)'
+    const SELECT = 'id, product_name, quantity, supplier_name, orders!inner(id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time, schedule_note)'
 
     const { data: scheduledData } = await supabase
       .from('order_items')
@@ -569,6 +588,14 @@ export default function ScheduleDay() {
     if (stop.kind !== 'order') return
     await supabase.from('orders').update({ visit_time: time || null }).eq('id', stop.id)
     setStops(prev => prev.map(s => s.order_id === stop.id ? { ...s, visit_time: time || null } : s))
+  }
+
+  // 스케줄러(관리자)가 배정된 주문에 직접 남기는 배송 코디네이션 메모(엘베없음, 미리 전화 등)
+  async function updateScheduleNote(stop: RouteStop, note: string) {
+    if (stop.kind !== 'order') return
+    const value = note.trim() || null
+    await supabase.from('orders').update({ schedule_note: value }).eq('id', stop.id)
+    setStops(prev => prev.map(s => s.order_id === stop.id ? { ...s, schedule_note: value } : s))
   }
 
   async function removeStop(stop: RouteStop) {
@@ -1063,7 +1090,7 @@ export default function ScheduleDay() {
                               <div className="p-4 text-center text-xs text-gray-300">이 루트에 배정된 배송건이 없습니다</div>
                             ) : (
                               laneStops.map((s, i) => (
-                                <SortableStop key={s.id} stop={s} index={i} color={color} locked={route.closed} onRemove={removeStop} onTimeChange={updateVisitTime} />
+                                <SortableStop key={s.id} stop={s} index={i} color={color} locked={route.closed} onRemove={removeStop} onTimeChange={updateVisitTime} onNoteChange={updateScheduleNote} />
                               ))
                             )}
                           </LaneDropZone>
