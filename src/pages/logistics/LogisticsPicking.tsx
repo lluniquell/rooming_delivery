@@ -23,6 +23,7 @@ interface BarcodeRow {
   product_code: string
   barcode: string | null
   location: string | null
+  box_count: number
 }
 
 interface PickingRow {
@@ -33,6 +34,7 @@ interface PickingRow {
   brand: string
   location: string
   barcodes: string[]
+  box_count: number
   supplier_note: string
   quantity: number
   item_ids: string[]
@@ -76,6 +78,7 @@ function buildPickingList(items: Item[], sort: 'location' | 'brand', barcodeMap:
     const bcRows = barcodeMap[item.product_code] ?? []
     const location = bcRows.map(b => b.location).find(l => !!l) ?? ''
     const barcodes = bcRows.map(b => b.barcode).filter((b): b is string => !!b)
+    const box_count = bcRows[0]?.box_count ?? 1
     const key = `${item.product_code}__${item.option_info ?? ''}`
     if (merged[key]) {
       merged[key].quantity += remaining
@@ -90,6 +93,7 @@ function buildPickingList(items: Item[], sort: 'location' | 'brand', barcodeMap:
         brand: item.brand ?? '',
         location,
         barcodes,
+        box_count,
         supplier_note: supplierNoteOf(item.supplier_name),
         quantity: remaining,
         item_ids: [item.id],
@@ -118,6 +122,8 @@ export default function LogisticsPicking() {
   const [editValue, setEditValue] = useState('')
   const [addingBarcodeKey, setAddingBarcodeKey] = useState<string | null>(null)
   const [barcodeInputValue, setBarcodeInputValue] = useState('')
+  const [editingBoxKey, setEditingBoxKey] = useState<string | null>(null)
+  const [boxCountValue, setBoxCountValue] = useState('')
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -161,7 +167,7 @@ export default function LogisticsPicking() {
 
     const codes = [...new Set(rows.map(r => r.product_code))]
     if (codes.length) {
-      const { data: bcData } = await supabase.from('barcodes').select('id, product_code, barcode, location').in('product_code', codes)
+      const { data: bcData } = await supabase.from('barcodes').select('id, product_code, barcode, location, box_count').in('product_code', codes)
       const map: Record<string, BarcodeRow[]> = {}
       for (const b of (bcData ?? []) as BarcodeRow[]) {
         (map[b.product_code] ??= []).push(b)
@@ -218,7 +224,7 @@ export default function LogisticsPicking() {
         ...prev,
         [row.product_code]: rows.length
           ? rows.map(r => ({ ...r, location: value }))
-          : [{ id: `temp-${row.product_code}`, product_code: row.product_code, barcode: null, location: value }],
+          : [{ id: `temp-${row.product_code}`, product_code: row.product_code, barcode: null, location: value, box_count: 1 }],
       }
     })
     setEditingKey(null)
@@ -242,11 +248,33 @@ export default function LogisticsPicking() {
       const rows = prev[row.product_code] ?? []
       const next = emptyRow
         ? rows.map(r => r.id === emptyRow.id ? { ...r, barcode: code } : r)
-        : [...rows, { id: `temp-${code}`, product_code: row.product_code, barcode: code, location: row.location || null }]
+        : [...rows, { id: `temp-${code}`, product_code: row.product_code, barcode: code, location: row.location || null, box_count: row.box_count }]
       return { ...prev, [row.product_code]: next }
     })
     setAddingBarcodeKey(null)
     setBarcodeInputValue('')
+  }
+
+  // 상품 하나가 실제로 몇 박스로 나뉘어 오는지(예: glo-ball floor 1개 = 2박스) — 상품코드
+  // 단위로 저장해서 라벨 발급 시 quantity에 곱해 실제 박스 수를 맞춤
+  async function updateBoxCount(row: PickingRow, value: string) {
+    const boxCount = Math.max(1, Number(value) || 1)
+    const existingRows = barcodeMap[row.product_code] ?? []
+    if (existingRows.length) {
+      await supabase.from('barcodes').update({ box_count: boxCount }).eq('product_code', row.product_code)
+    } else {
+      await supabase.from('barcodes').insert({ product_code: row.product_code, product_name: row.product_name, box_count: boxCount })
+    }
+    setBarcodeMap(prev => {
+      const rows = prev[row.product_code] ?? []
+      return {
+        ...prev,
+        [row.product_code]: rows.length
+          ? rows.map(r => ({ ...r, box_count: boxCount }))
+          : [{ id: `temp-${row.product_code}`, product_code: row.product_code, barcode: null, location: null, box_count: boxCount }],
+      }
+    })
+    setEditingBoxKey(null)
   }
 
   // 여러 명이 같이 준비할 때 서로 화면이 안 어긋나도록, 확인 즉시 로컬 patch 대신
@@ -270,8 +298,12 @@ export default function LogisticsPicking() {
   // 준비완료(picked_at 있음) 상품만 대상으로 함
   const dateLabel = date.slice(2).replace(/-/g, '')
 
-  // 상품명 앞의 "몇 번째 / 총 몇 건" 표시용 — 같은 주문의 전체 박스 수(라인 수가 아니라
-  // quantity 합) 기준. 피킹 여부와 무관하게 주문 전체 구성으로 계산해야 실제 박스 개수와 맞음
+  // 상품 1개가 실제로 몇 박스로 오는지(glo-ball floor처럼 1개=2박스인 경우 등)
+  const boxCountOf = (productCode: string) => barcodeMap[productCode]?.[0]?.box_count ?? 1
+
+  // 상품명 앞의 "몇 번째 / 총 몇 건" 표시용 — 같은 주문의 전체 박스 수(라인 수·quantity가
+  // 아니라 quantity × 상품별 박스 수 합) 기준. 피킹 여부와 무관하게 주문 전체 구성으로
+  // 계산해야 실제 박스 개수와 맞음
   const itemsByOrder: Record<string, Item[]> = {}
   for (const i of items) {
     (itemsByOrder[i.order_id] ??= []).push(i)
@@ -279,11 +311,11 @@ export default function LogisticsPicking() {
   const boxRangeByItemId: Record<string, { start: number; total: number }> = {}
   for (const list of Object.values(itemsByOrder)) {
     list.sort((a, b) => a.product_name.localeCompare(b.product_name) || a.id.localeCompare(b.id))
-    const total = list.reduce((sum, x) => sum + x.quantity, 0)
+    const total = list.reduce((sum, x) => sum + x.quantity * boxCountOf(x.product_code), 0)
     let cursor = 0
     for (const x of list) {
       boxRangeByItemId[x.id] = { start: cursor, total }
-      cursor += x.quantity
+      cursor += x.quantity * boxCountOf(x.product_code)
     }
   }
 
@@ -292,8 +324,9 @@ export default function LogisticsPicking() {
       const routeIds = [i.route_id, ...(companionRoutesByOrderNo[i.cafe24_order_no] ?? [])].filter((id): id is string => !!id)
       const driverNames = [...new Set(routeIds.map(id => driverNameByRoute[id]).filter((n): n is string => !!n))]
       const driverName = driverNames.join(',') || '미배정'
-      const { start, total } = boxRangeByItemId[i.id] ?? { start: 0, total: i.quantity }
-      return Array.from({ length: i.quantity }, (_, k) => ({
+      const { start, total } = boxRangeByItemId[i.id] ?? { start: 0, total: i.quantity * boxCountOf(i.product_code) }
+      const unitCount = i.quantity * boxCountOf(i.product_code)
+      return Array.from({ length: unitCount }, (_, k) => ({
         key: `${i.id}-${k}`,
         driverName,
         orderPosition: `${start + k + 1}-${total}`,
@@ -355,6 +388,29 @@ export default function LogisticsPicking() {
                 className="text-[11px] text-gray-400 border border-gray-300 rounded px-1.5 py-0.5"
               >
                 + 바코드
+              </button>
+            )}
+
+            {editingBoxKey === row.key ? (
+              <div className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  type="number"
+                  min={1}
+                  value={boxCountValue}
+                  onChange={e => setBoxCountValue(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') updateBoxCount(row, boxCountValue) }}
+                  className="w-14 border rounded px-1.5 py-0.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+                <button onClick={() => updateBoxCount(row, boxCountValue)} className="text-[11px] font-medium text-white bg-indigo-600 rounded px-1.5 py-0.5">저장</button>
+                <button onClick={() => setEditingBoxKey(null)} className="text-[11px] text-gray-400 px-1">취소</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setEditingBoxKey(row.key); setBoxCountValue(String(row.box_count)) }}
+                className="text-[11px] text-gray-500 border border-gray-300 rounded px-1.5 py-0.5"
+              >
+                박스 {row.box_count}
               </button>
             )}
           </div>
