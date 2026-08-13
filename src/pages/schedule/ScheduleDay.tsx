@@ -206,13 +206,18 @@ function SortableStop({ stop, index, color, locked, onRemove, onTimeChange, onNo
         {isOrder && stop.items.map(i => {
           const note = supplierNoteOf(i.supplier_name)
           return (
-            <div key={i.id} className="min-w-0 mt-1">
-              <div className="text-sm font-medium text-gray-800 break-words">
-                {i.product_name} <span className="text-gray-400 font-normal">×{i.quantity}</span>
-              </div>
-              <div className="mt-0.5">
-                <span className="text-xs text-gray-500">{i.brand || '-'}</span>
-                {note && <div className="text-xs text-gray-400 mt-0.5 break-words">{note}</div>}
+            <div key={i.id} className="min-w-0 mt-1.5 bg-white rounded-xl border p-3.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-gray-800 break-words">{i.product_name}</div>
+                  <div className="mt-0.5">
+                    <span className="text-xs text-gray-500">{i.brand || '-'}</span>
+                    {note && <div className="text-xs text-gray-400 mt-0.5 break-words">{note}</div>}
+                  </div>
+                </div>
+                <span className="text-xl font-bold text-gray-800 bg-green-50 border border-green-200 rounded-lg px-2.5 py-0.5 shrink-0">
+                  ×{i.quantity}
+                </span>
               </div>
             </div>
           )
