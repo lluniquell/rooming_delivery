@@ -134,7 +134,7 @@ const PRESETS = [
 // 그려지면 화면이 버벅여서(스크롤도 멈춤), 실제로 바뀐 주문만 다시 그리도록 분리 + memo 처리
 const OrderRow = memo(function OrderRow({
   group, batches, shipStats, isAssigning, selected, assignedIds, onToggleItem, onToggleGroup, onQuickAssign, onDelete,
-  readOnly, activeBatchIds, statusLabel,
+  readOnly, activeBatchIds, statusLabel, onRefreshOrder, isRefreshing,
 }: {
   group: OrderGroup
   batches: Batch[]
@@ -150,6 +150,8 @@ const OrderRow = memo(function OrderRow({
   readOnly?: boolean
   activeBatchIds?: Set<string>
   statusLabel?: string
+  onRefreshOrder?: (group: OrderGroup) => void
+  isRefreshing?: boolean
 }) {
   const activeItems = group.items.filter(i => !assignedIds.has(i.id))
   // 배정된 상품은 배열에서 지우지 않고 화면에서만 안 보이게(invisible) 함 — 지우면 그 아래
@@ -179,9 +181,20 @@ const OrderRow = memo(function OrderRow({
           <span className="text-gray-600 text-sm">{group.customer_name}</span>
           <span className="font-medium text-gray-800 text-sm">{group.receiver_name || '-'}</span>
           {group.address && (
-            <span className={`text-xs shrink-0 ${group.address.includes('서초구 명달로 95') ? 'text-red-600 font-medium' : 'text-gray-400'}`}>
-              {regionOf(group.address)}
-            </span>
+            onRefreshOrder ? (
+              <button
+                onClick={e => { e.stopPropagation(); onRefreshOrder(group) }}
+                disabled={isRefreshing}
+                title="클릭하면 카페24에서 이 주문 주소를 다시 조회합니다"
+                className={`text-xs shrink-0 underline decoration-dotted underline-offset-2 disabled:opacity-50 ${group.address.includes('서초구 명달로 95') ? 'text-red-600 font-medium' : 'text-gray-400'}`}
+              >
+                {isRefreshing ? '재조회 중...' : regionOf(group.address)}
+              </button>
+            ) : (
+              <span className={`text-xs shrink-0 ${group.address.includes('서초구 명달로 95') ? 'text-red-600 font-medium' : 'text-gray-400'}`}>
+                {regionOf(group.address)}
+              </span>
+            )
           )}
           <span className="text-xs text-gray-400">
             {group.order_date ? new Date(group.order_date).toLocaleDateString('ko-KR') : '-'}
@@ -309,6 +322,8 @@ const OrderRow = memo(function OrderRow({
   if (prev.readOnly !== next.readOnly) return false
   if (prev.activeBatchIds !== next.activeBatchIds) return false
   if (prev.statusLabel !== next.statusLabel) return false
+  if (prev.onRefreshOrder !== next.onRefreshOrder) return false
+  if (prev.isRefreshing !== next.isRefreshing) return false
   // selected/assignedIds Set 자체는 매번 새로 만들어지지만, 이 주문에 실제로 영향 있을 때만 다시 그림
   for (const item of next.group.items) {
     if (prev.selected.has(item.id) !== next.selected.has(item.id)) return false
@@ -335,6 +350,7 @@ export default function SoumOrders() {
   const [searchQuery, setSearchQuery] = useState('')
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null)
+  const [refreshingOrderId, setRefreshingOrderId] = useState<string | null>(null)
   // 배정된 상품 id — groups 배열에서는 안 지우고 여기만 기록해서 화면에서 invisible 처리함
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set())
   // 폰에서는 날짜/검색 툴바가 화면을 너무 많이 차지해서 기본적으로 접어둠 (데스크톱은 항상 펼침)
@@ -764,6 +780,36 @@ export default function SoumOrders() {
     setTotalCount(prev => Math.max(0, prev - 1))
   }, [])
 
+  // 주소를 클릭하면 이 주문 하나만 카페24에서 다시 조회해서 수령인/주소를 최신화 —
+  // 전체 재수집 없이 이 주문 하나 값이 잘못됐거나 방금 고객이 수정했을 때 씀
+  const refreshOrder = useCallback(async (group: OrderGroup) => {
+    setRefreshingOrderId(group.order_id)
+    try {
+      const res = await fetch(`/api/cafe24/collect?order_no=${group.cafe24_order_no}`)
+      const order = await res.json()
+      if (!res.ok) { alert(`재조회 실패: ${order.error ?? res.status}`); return }
+      const receiver = order.receivers?.[0]
+      const patch = {
+        receiver_name: receiver?.name ?? null,
+        receiver_phone: receiver?.cellphone || receiver?.phone || null,
+        zipcode: receiver?.zipcode ?? null,
+        address: [receiver?.address1, receiver?.address2].filter(Boolean).join(' ') || null,
+        shipping_message: receiver?.shipping_message ?? null,
+      }
+      const { error } = await supabase.from('orders').update(patch).eq('id', group.order_id)
+      if (error) { alert(`저장 실패: ${error.message}`); return }
+      const apply = <T extends OrderGroup>(g: T): T => g.order_id === group.order_id
+        ? { ...g, receiver_name: patch.receiver_name, address: patch.address }
+        : g
+      setGroups(prev => prev.map(apply))
+      setBatchedMatches(prev => prev.map(apply))
+    } catch {
+      alert('재조회 중 네트워크 오류가 발생했습니다.')
+    } finally {
+      setRefreshingOrderId(null)
+    }
+  }, [])
+
   return (
     <div className="max-w-5xl">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
@@ -904,6 +950,8 @@ export default function SoumOrders() {
                 readOnly
                 activeBatchIds={m.activeBatchIds}
                 statusLabel={m.statusLabel}
+                onRefreshOrder={refreshOrder}
+                isRefreshing={refreshingOrderId === m.order_id}
               />
             ))}
           </div>
@@ -969,6 +1017,8 @@ export default function SoumOrders() {
               onToggleGroup={toggleGroup}
               onQuickAssign={quickAssign}
               onDelete={deleteOrder}
+              onRefreshOrder={refreshOrder}
+              isRefreshing={refreshingOrderId === group.order_id}
             />
           ))}
 
