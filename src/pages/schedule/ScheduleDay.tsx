@@ -196,7 +196,7 @@ function SortableStop({ stop, index, color, locked, onRemove, onTimeChange, onNo
               {i.product_name} ×{i.quantity}
             </div>
             {i.supplier_name && (
-              <div className="text-[10px] text-gray-600 break-words">{i.supplier_name}</div>
+              <div className="text-xs text-gray-500 mt-0.5 break-words">{i.supplier_name}</div>
             )}
           </div>
         ))}
