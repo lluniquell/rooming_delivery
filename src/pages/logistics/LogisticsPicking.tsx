@@ -42,6 +42,7 @@ interface PickingRow {
 interface Label {
   key: string
   driverName: string
+  orderPosition: string
   productName: string
   customerName: string
   dateLabel: string
@@ -268,13 +269,26 @@ export default function LogisticsPicking() {
   // 아직 준비(피킹) 안 된 상품까지 라벨이 나가면 실물 없이 라벨만 붙이게 될 수 있어서
   // 준비완료(picked_at 있음) 상품만 대상으로 함
   const dateLabel = date.slice(2).replace(/-/g, '')
+
+  // 상품명 앞의 "몇 번째 / 총 몇 건" 표시용 — 같은 주문의 전체 상품 구성 기준(피킹 여부 무관)
+  const itemsByOrder: Record<string, Item[]> = {}
+  for (const i of items) {
+    (itemsByOrder[i.order_id] ??= []).push(i)
+  }
+  for (const list of Object.values(itemsByOrder)) {
+    list.sort((a, b) => a.product_name.localeCompare(b.product_name) || a.id.localeCompare(b.id))
+  }
+
   const labels: Label[] = doneItems
     .map(i => {
       const routeIds = [i.route_id, ...(companionRoutesByOrderNo[i.cafe24_order_no] ?? [])].filter((id): id is string => !!id)
       const driverNames = [...new Set(routeIds.map(id => driverNameByRoute[id]).filter((n): n is string => !!n))]
+      const orderList = itemsByOrder[i.order_id] ?? [i]
+      const position = orderList.findIndex(x => x.id === i.id) + 1
       return {
         key: i.id,
-        driverName: driverNames.join(' + ') || '미배정',
+        driverName: driverNames.join(',') || '미배정',
+        orderPosition: `${position}-${orderList.length}`,
         productName: i.product_name,
         customerName: i.customer_name,
         dateLabel,
@@ -442,13 +456,13 @@ export default function LogisticsPicking() {
               {labels.map(l => (
                 <div
                   key={l.key}
-                  className="w-[80mm] h-[60mm] mx-auto border border-gray-300 print:border-0 rounded-lg print:rounded-none px-4 py-3 flex flex-col justify-center gap-1.5 break-inside-avoid print:break-after-page"
+                  className="w-[80mm] h-[60mm] mx-auto border border-gray-300 print:border-0 rounded-lg print:rounded-none px-4 pt-4 pb-3 flex flex-col justify-start gap-1.5 break-inside-avoid print:break-after-page"
                 >
-                  <div className="text-2xl font-bold text-gray-800">{l.driverName}</div>
-                  <div className="text-lg text-gray-700 break-words">{l.productName}</div>
-                  <div className="text-base text-gray-500">
-                    {l.customerName} {l.dateLabel}{l.routeOrder != null ? ` - ${l.routeOrder}` : ''}
+                  <div className="text-2xl font-bold text-gray-800">
+                    {l.driverName} {l.dateLabel}{l.routeOrder != null ? ` - ${l.routeOrder}` : ''}
                   </div>
+                  <div className="text-lg text-gray-700 break-words">{l.orderPosition} {l.productName}</div>
+                  <div className="text-base text-gray-500">{l.customerName}</div>
                 </div>
               ))}
             </div>
