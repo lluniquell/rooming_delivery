@@ -47,8 +47,6 @@ export default function ShowroomInventory() {
     const { data } = await supabase.from('barcodes').select('product_code, product_name, location').eq('barcode', trimmed).maybeSingle()
     setScan(data ? { mode: 'found', barcode: trimmed, row: data } : { mode: 'not_found', barcode: trimmed })
     setBarcodeInput('')
-    setNameQuery('')
-    setNameResults([])
     barcodeRef.current?.focus()
   }
 
@@ -130,42 +128,45 @@ export default function ShowroomInventory() {
       )}
 
       {scan?.mode === 'not_found' && (
-        <div className="bg-white rounded-xl border p-4 space-y-3">
+        <div className="bg-white rounded-xl border p-4 mb-4">
           <p className="text-sm text-gray-500">
-            등록되지 않은 바코드입니다 (<span className="font-mono">{scan.barcode}</span>). 상품명으로 찾아보세요.
+            등록되지 않은 바코드입니다 (<span className="font-mono">{scan.barcode}</span>). 아래에서 상품명으로 찾아보세요.
           </p>
-          <input
-            autoFocus
-            value={nameQuery}
-            onChange={e => {
-              const v = e.target.value
-              setNameQuery(v)
-              if (searchTimeout.current) clearTimeout(searchTimeout.current)
-              searchTimeout.current = setTimeout(() => searchByName(v), 300)
-            }}
-            placeholder="상품명 또는 상품코드로 검색"
-            className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-          />
-          {nameResults.length > 0 && (
-            <div className="divide-y border rounded-lg overflow-hidden">
-              {nameResults.map(r => (
-                <div key={r.product_code} className="px-3 py-2 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <button
-                      onClick={() => showThumbnail(r.product_code, r.product_name)}
-                      className="text-sm text-gray-800 text-left truncate underline decoration-dotted underline-offset-2"
-                    >
-                      {r.product_name}
-                    </button>
-                    <div className="text-[11px] text-gray-400 font-mono">{r.product_code}{r.barcode ? ` · ${r.barcode}` : ''}</div>
-                  </div>
-                  <div className="text-sm font-bold text-indigo-600 font-mono shrink-0">{r.location || '미등록'}</div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
+
+      <div className="border-t pt-4 mt-2">
+        <p className="text-xs font-medium text-gray-500 mb-2">상품명으로 검색</p>
+        <input
+          value={nameQuery}
+          onChange={e => {
+            const v = e.target.value
+            setNameQuery(v)
+            if (searchTimeout.current) clearTimeout(searchTimeout.current)
+            searchTimeout.current = setTimeout(() => searchByName(v), 300)
+          }}
+          placeholder="상품명 또는 상품코드로 검색"
+          className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        />
+        {nameResults.length > 0 && (
+          <div className="divide-y border rounded-lg overflow-hidden mt-3">
+            {nameResults.map(r => (
+              <div key={r.product_code} className="px-3 py-2 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <button
+                    onClick={() => showThumbnail(r.product_code, r.product_name)}
+                    className="text-sm text-gray-800 text-left truncate underline decoration-dotted underline-offset-2"
+                  >
+                    {r.product_name}
+                  </button>
+                  <div className="text-[11px] text-gray-400 font-mono">{r.product_code}{r.barcode ? ` · ${r.barcode}` : ''}</div>
+                </div>
+                <div className="text-sm font-bold text-indigo-600 font-mono shrink-0">{r.location || '미등록'}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {thumbnail && (
         <div
