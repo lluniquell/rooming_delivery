@@ -191,8 +191,13 @@ function SortableStop({ stop, index, color, locked, onRemove, onTimeChange, onNo
           </div>
         )}
         {isOrder && stop.items.map(i => (
-          <div key={i.id} className="text-[11px] text-gray-500 truncate">
-            {i.product_name} ×{i.quantity}
+          <div key={i.id} className="min-w-0">
+            <div className="text-[11px] text-gray-500 truncate">
+              {i.product_name} ×{i.quantity}
+            </div>
+            {i.supplier_name && (
+              <div className="text-[10px] text-gray-600 break-words">{i.supplier_name}</div>
+            )}
           </div>
         ))}
         {isOrder && (
