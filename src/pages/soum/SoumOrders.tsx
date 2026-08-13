@@ -179,7 +179,9 @@ const OrderRow = memo(function OrderRow({
           <span className="text-gray-600 text-sm">{group.customer_name}</span>
           <span className="font-medium text-gray-800 text-sm">{group.receiver_name || '-'}</span>
           {group.address && (
-            <span className="text-xs text-gray-400 shrink-0">{regionOf(group.address)}</span>
+            <span className={`text-xs shrink-0 ${group.address.includes('서초구 명달로 95') ? 'text-red-600 font-medium' : 'text-gray-400'}`}>
+              {regionOf(group.address)}
+            </span>
           )}
           <span className="text-xs text-gray-400">
             {group.order_date ? new Date(group.order_date).toLocaleDateString('ko-KR') : '-'}
