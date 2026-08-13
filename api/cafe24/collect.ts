@@ -41,7 +41,7 @@ async function getToken(): Promise<string> {
 
 // 주문 1건 상세 조회 (orders/[orderNo].ts 병합) — GET ?order_no=xxx
 async function getOrder(orderNo: string, token: string) {
-  const url = `https://${MALL_ID}.cafe24api.com/api/v2/admin/orders/${orderNo}?shop_no=1`
+  const url = `https://${MALL_ID}.cafe24api.com/api/v2/admin/orders/${orderNo}?shop_no=1&embed=receivers`
   const apiRes = await fetch(url, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
   })
