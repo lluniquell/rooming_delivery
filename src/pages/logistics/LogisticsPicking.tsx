@@ -264,36 +264,44 @@ export default function LogisticsPicking() {
   const pickingList = buildPickingList(activeItems, sort, barcodeMap)
   const doneList = buildPickingList(doneItems, sort, barcodeMap)
 
-  // 실제 운송장이 아니라 창고에서 상품에 붙이는 식별용 라벨 — 주문 1건당 1장씩,
-  // 배송담당자/상품명/고객명+날짜-배송순서만 텍스트로 인쇄.
+  // 실제 운송장이 아니라 창고에서 박스 하나하나에 붙이는 식별용 라벨 — 박스(수량) 1개당
+  // 1장씩. 배송담당자/상품명/고객명+날짜-배송순서만 텍스트로 인쇄.
   // 아직 준비(피킹) 안 된 상품까지 라벨이 나가면 실물 없이 라벨만 붙이게 될 수 있어서
   // 준비완료(picked_at 있음) 상품만 대상으로 함
   const dateLabel = date.slice(2).replace(/-/g, '')
 
-  // 상품명 앞의 "몇 번째 / 총 몇 건" 표시용 — 같은 주문의 전체 상품 구성 기준(피킹 여부 무관)
+  // 상품명 앞의 "몇 번째 / 총 몇 건" 표시용 — 같은 주문의 전체 박스 수(라인 수가 아니라
+  // quantity 합) 기준. 피킹 여부와 무관하게 주문 전체 구성으로 계산해야 실제 박스 개수와 맞음
   const itemsByOrder: Record<string, Item[]> = {}
   for (const i of items) {
     (itemsByOrder[i.order_id] ??= []).push(i)
   }
+  const boxRangeByItemId: Record<string, { start: number; total: number }> = {}
   for (const list of Object.values(itemsByOrder)) {
     list.sort((a, b) => a.product_name.localeCompare(b.product_name) || a.id.localeCompare(b.id))
+    const total = list.reduce((sum, x) => sum + x.quantity, 0)
+    let cursor = 0
+    for (const x of list) {
+      boxRangeByItemId[x.id] = { start: cursor, total }
+      cursor += x.quantity
+    }
   }
 
   const labels: Label[] = doneItems
-    .map(i => {
+    .flatMap(i => {
       const routeIds = [i.route_id, ...(companionRoutesByOrderNo[i.cafe24_order_no] ?? [])].filter((id): id is string => !!id)
       const driverNames = [...new Set(routeIds.map(id => driverNameByRoute[id]).filter((n): n is string => !!n))]
-      const orderList = itemsByOrder[i.order_id] ?? [i]
-      const position = orderList.findIndex(x => x.id === i.id) + 1
-      return {
-        key: i.id,
-        driverName: driverNames.join(',') || '미배정',
-        orderPosition: `${position}-${orderList.length}`,
+      const driverName = driverNames.join(',') || '미배정'
+      const { start, total } = boxRangeByItemId[i.id] ?? { start: 0, total: i.quantity }
+      return Array.from({ length: i.quantity }, (_, k) => ({
+        key: `${i.id}-${k}`,
+        driverName,
+        orderPosition: `${start + k + 1}-${total}`,
         productName: i.product_name,
         customerName: i.customer_name,
         dateLabel,
         routeOrder: i.route_order,
-      }
+      }))
     })
     .sort((a, b) => a.driverName.localeCompare(b.driverName) || (a.routeOrder ?? 999) - (b.routeOrder ?? 999))
 
@@ -408,7 +416,7 @@ export default function LogisticsPicking() {
         onClick={() => setShowLabels(true)}
         disabled={doneItems.length === 0}
         className="w-full py-2 rounded-lg text-sm font-medium bg-orange-500 text-white disabled:opacity-40 mb-3"
-      >라벨 출력 {doneItems.length > 0 && `(${doneItems.length})`}</button>
+      >라벨 출력 {labels.length > 0 && `(${labels.length})`}</button>
 
       {loading ? (
         <p className="text-center text-gray-400 py-12">불러오는 중...</p>
