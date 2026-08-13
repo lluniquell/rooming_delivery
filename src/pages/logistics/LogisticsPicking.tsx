@@ -458,8 +458,9 @@ export default function LogisticsPicking() {
                   key={l.key}
                   className="w-[80mm] h-[60mm] mx-auto border border-gray-300 print:border-0 rounded-lg print:rounded-none px-4 pt-4 pb-3 flex flex-col justify-start gap-1.5 break-inside-avoid print:break-after-page"
                 >
-                  <div className="text-2xl font-bold text-gray-800">
-                    {l.driverName} {l.dateLabel}{l.routeOrder != null ? ` - ${l.routeOrder}` : ''}
+                  <div className="text-2xl font-bold text-gray-800">{l.driverName}</div>
+                  <div className="text-base text-gray-500">
+                    {l.dateLabel}{l.routeOrder != null ? ` - ${l.routeOrder}` : ''}
                   </div>
                   <div className="text-lg text-gray-700 break-words">{l.orderPosition} {l.productName}</div>
                   <div className="text-base text-gray-500">{l.customerName}</div>
