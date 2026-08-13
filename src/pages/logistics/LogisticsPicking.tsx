@@ -426,7 +426,9 @@ export default function LogisticsPicking() {
 
       {showLabels && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 print:static print:bg-white print:p-0 print:block">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col print:rounded-none print:shadow-none print:max-h-none print:max-w-none print:block">
+          {/* 라벨 프린터 용지 크기(가로 80mm x 세로 60mm)에 맞춰 1장씩 한 줄로 인쇄 */}
+          <style>{'@page { size: 80mm 60mm; margin: 0; }'}</style>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col print:rounded-none print:shadow-none print:max-h-none print:max-w-none print:block">
             <div className="px-5 py-3 border-b flex items-center justify-between shrink-0 print:hidden">
               <h3 className="font-bold text-gray-800">
                 라벨 출력 <span className="text-gray-400 font-normal text-sm ml-1">{date} · {labels.length}장</span>
@@ -436,18 +438,19 @@ export default function LogisticsPicking() {
                 <button onClick={() => setShowLabels(false)} className="ml-2 text-gray-400 hover:text-gray-600 text-xl leading-none px-1">×</button>
               </div>
             </div>
-            <div className="overflow-y-auto print:overflow-visible p-4 print:p-0">
-              <div className="grid grid-cols-2 gap-2 print:grid-cols-3">
-                {labels.map(l => (
-                  <div key={l.key} className="border border-gray-300 rounded-lg px-2.5 py-2 text-xs break-inside-avoid">
-                    <div className="font-bold text-gray-800">{l.driverName}</div>
-                    <div className="text-gray-700 break-words">{l.productName}</div>
-                    <div className="text-gray-500">
-                      {l.customerName} {l.dateLabel}{l.routeOrder != null ? ` - ${l.routeOrder}` : ''}
-                    </div>
+            <div className="overflow-y-auto print:overflow-visible p-4 print:p-0 space-y-3 print:space-y-0">
+              {labels.map(l => (
+                <div
+                  key={l.key}
+                  className="w-[80mm] h-[60mm] mx-auto border border-gray-300 print:border-0 rounded-lg print:rounded-none px-4 py-3 flex flex-col justify-center gap-1.5 break-inside-avoid print:break-after-page"
+                >
+                  <div className="text-2xl font-bold text-gray-800">{l.driverName}</div>
+                  <div className="text-lg text-gray-700 break-words">{l.productName}</div>
+                  <div className="text-base text-gray-500">
+                    {l.customerName} {l.dateLabel}{l.routeOrder != null ? ` - ${l.routeOrder}` : ''}
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
