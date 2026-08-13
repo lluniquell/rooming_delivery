@@ -220,6 +220,9 @@ export default function ScheduleDay() {
   const [modalRouteId, setModalRouteId] = useState('')
   const [adhocModal, setAdhocModal] = useState<RouteLane | null>(null)
   const [adhocForm, setAdhocForm] = useState({ name: '', phone: '', address: '', reason: '' })
+  const [adhocTab, setAdhocTab] = useState<'manual' | 'import'>('manual')
+  const [importQuery, setImportQuery] = useState('')
+  const [importedOrderIds, setImportedOrderIds] = useState<Set<string>>(new Set())
 
   const mapRef = useRef<HTMLDivElement>(null)
   const mapObjRef = useRef<any>(null)
@@ -583,6 +586,9 @@ export default function ScheduleDay() {
 
   function openAdhocModal(route: RouteLane) {
     setAdhocForm({ name: '', phone: '', address: '', reason: '' })
+    setAdhocTab('manual')
+    setImportQuery('')
+    setImportedOrderIds(new Set())
     setAdhocModal(route)
   }
 
@@ -603,6 +609,30 @@ export default function ScheduleDay() {
       .single()
     if (data) setAdhocStops(prev => [...prev, data])
     setAdhocModal(null)
+  }
+
+  // 2인 배송 등에서, 이미 다른 루트에 배정된 당일 주문을 이 루트에도 동행 배송지로
+  // 그대로 가져다 붙임(수기로 이름/연락처/주소 재입력 안 해도 되게) — 실제 order_id를
+  // 공유하는 게 아니라 값만 복사한 1회성 배송지(adhoc)로 추가
+  async function addOrderAsAdhoc(stop: Stop) {
+    if (!adhocModal || !date) return
+    const route_order = stopsForRoute(adhocModal.id).length + 1
+    const { data } = await supabase.from('schedule_adhoc_stops')
+      .insert({
+        date,
+        route_id: adhocModal.id,
+        route_order,
+        name: stop.customer_name,
+        phone: stop.receiver_phone,
+        address: stop.address,
+        reason: `동행 (${stop.cafe24_order_no})`,
+      })
+      .select('id, route_id, route_order, name, phone, address, reason')
+      .single()
+    if (data) {
+      setAdhocStops(prev => [...prev, data])
+      setImportedOrderIds(prev => new Set(prev).add(stop.order_id))
+    }
   }
 
   // 이 루트의 현재 배송 순서를 직배 수기 엑셀과 동일한 양식으로 다운로드
@@ -1088,40 +1118,104 @@ export default function ScheduleDay() {
             <h3 className="font-bold text-gray-800 mb-1">기타 배송지 추가</h3>
             <p className="text-sm text-gray-500 mb-4">{adhocModal.label}에 1회성 배송지를 추가합니다.</p>
 
-            <div className="space-y-3 mb-6">
-              <input
-                value={adhocForm.name}
-                onChange={e => setAdhocForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="이름"
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-              <input
-                value={adhocForm.phone}
-                onChange={e => setAdhocForm(f => ({ ...f, phone: e.target.value }))}
-                placeholder="연락처"
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-              <input
-                value={adhocForm.address}
-                onChange={e => setAdhocForm(f => ({ ...f, address: e.target.value }))}
-                placeholder="배송지"
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-              <input
-                value={adhocForm.reason}
-                onChange={e => setAdhocForm(f => ({ ...f, reason: e.target.value }))}
-                placeholder="사유"
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
+            <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => setAdhocTab('manual')}
+                className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  adhocTab === 'manual' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'
+                }`}
+              >직접 입력</button>
+              <button
+                onClick={() => setAdhocTab('import')}
+                className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  adhocTab === 'import' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500'
+                }`}
+              >당일 배송건 불러오기</button>
             </div>
 
+            {adhocTab === 'manual' ? (
+              <div className="space-y-3 mb-6">
+                <input
+                  value={adhocForm.name}
+                  onChange={e => setAdhocForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="이름"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <input
+                  value={adhocForm.phone}
+                  onChange={e => setAdhocForm(f => ({ ...f, phone: e.target.value }))}
+                  placeholder="연락처"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <input
+                  value={adhocForm.address}
+                  onChange={e => setAdhocForm(f => ({ ...f, address: e.target.value }))}
+                  placeholder="배송지"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <input
+                  value={adhocForm.reason}
+                  onChange={e => setAdhocForm(f => ({ ...f, reason: e.target.value }))}
+                  placeholder="사유"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+            ) : (
+              <div className="mb-6">
+                <input
+                  value={importQuery}
+                  onChange={e => setImportQuery(e.target.value)}
+                  placeholder="이름·주소·주문번호로 검색"
+                  className="w-full border rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <div className="border rounded-lg divide-y max-h-72 overflow-y-auto">
+                  {stops
+                    .filter(s => {
+                      const q = importQuery.trim()
+                      if (!q) return true
+                      return [s.customer_name, s.address, s.cafe24_order_no].some(v => v?.includes(q))
+                    })
+                    .map(s => {
+                      const added = importedOrderIds.has(s.order_id)
+                      const routeLabel = routes.find(r => r.id === s.route_id)?.label
+                      return (
+                        <div key={s.order_id} className="flex items-center justify-between gap-2 px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-medium text-gray-800 truncate">{s.customer_name}</span>
+                              <span className="text-[10px] text-gray-400 shrink-0">
+                                {routeLabel ? `${routeLabel} 배정` : '미배정'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-gray-400 truncate">{s.address}</div>
+                            <div className="text-[10px] text-gray-300 font-mono">{s.cafe24_order_no}</div>
+                          </div>
+                          <button
+                            onClick={() => addOrderAsAdhoc(s)}
+                            disabled={added}
+                            className="shrink-0 px-2.5 py-1 rounded-lg text-xs font-medium text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >{added ? '추가됨' : '+ 추가'}</button>
+                        </div>
+                      )
+                    })}
+                  {stops.length === 0 && (
+                    <div className="px-3 py-6 text-center text-xs text-gray-400">오늘 등록된 배송건이 없습니다</div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-2">
-              <button onClick={() => setAdhocModal(null)} className="flex-1 py-2 text-sm text-gray-500 border rounded-lg hover:bg-gray-50">취소</button>
-              <button
-                onClick={confirmAddAdhoc}
-                disabled={!adhocForm.name.trim()}
-                className="flex-1 py-2 text-sm text-white bg-purple-600 rounded-lg hover:bg-purple-700 font-medium disabled:opacity-50"
-              >추가</button>
+              <button onClick={() => setAdhocModal(null)} className="flex-1 py-2 text-sm text-gray-500 border rounded-lg hover:bg-gray-50">
+                {adhocTab === 'import' ? '닫기' : '취소'}
+              </button>
+              {adhocTab === 'manual' && (
+                <button
+                  onClick={confirmAddAdhoc}
+                  disabled={!adhocForm.name.trim()}
+                  className="flex-1 py-2 text-sm text-white bg-purple-600 rounded-lg hover:bg-purple-700 font-medium disabled:opacity-50"
+                >추가</button>
+              )}
             </div>
           </div>
         </div>
