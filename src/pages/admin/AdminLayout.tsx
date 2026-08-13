@@ -17,8 +17,9 @@ const scheduleItems = [
   { to: '/admin/schedule', label: '배송 스케줄' },
 ]
 
-// 물류팀 메뉴는 아직 페이지 없이 탭만 준비 — 추후 전날 픽킹리스트 + 준비완료 체크 기능 예정
-const logisticsItems: { to: string; label: string }[] = []
+const logisticsItems = [
+  { to: '/admin/logistics/picking', label: '피킹' },
+]
 
 const propItems = [
   { to: '/admin/soum/outgoing', label: '출고 검수 (CJ 운송장)' },

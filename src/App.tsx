@@ -20,6 +20,7 @@ import SoumPicking from './pages/soum/SoumPicking'
 import SoumStow from './pages/soum/SoumStow'
 import SoumDashboard from './pages/soum/SoumDashboard'
 import ShowroomInventory from './pages/showroom/ShowroomInventory'
+import LogisticsPicking from './pages/logistics/LogisticsPicking'
 import ScheduleBoard from './pages/schedule/ScheduleBoard'
 import ScheduleDay from './pages/schedule/ScheduleDay'
 import DriverLayout from './pages/driver/DriverLayout'
@@ -108,6 +109,7 @@ function App() {
           <Route path="soum/stow" element={driver && <RequirePermission perm="soum" driver={driver}><SoumStow /></RequirePermission>} />
           <Route path="soum/dashboard" element={driver && <RequireSuperadmin driver={driver}><SoumDashboard /></RequireSuperadmin>} />
           <Route path="showroom/inventory" element={driver && <RequirePermission perm="showroom" driver={driver}><ShowroomInventory /></RequirePermission>} />
+          <Route path="logistics/picking" element={driver && <RequirePermission perm="logistics" driver={driver}><LogisticsPicking /></RequirePermission>} />
           <Route path="schedule" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleBoard /></RequirePermission>} />
           <Route path="schedule/day/:date" element={driver && <RequirePermission perm="schedule" driver={driver}><ScheduleDay /></RequirePermission>} />
           <Route path="inspection" element={driver && <RequirePermission perm="soum" driver={driver}><InspectionMain /></RequirePermission>} />
