@@ -27,6 +27,19 @@ interface StopItem {
   product_name: string
   quantity: number
   supplier_name: string | null
+  brand: string | null
+}
+
+// 소품팀 피킹 화면(SoumPicking.tsx)과 동일한 규칙 — 공급자 상품명에 섞여있는
+// 로케이션 코드/미성 표시를 걷어내고 순수한 메모만 남김
+const LOC_REGEX = /[A-Z]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}/
+function supplierNoteOf(supplierName: string | null) {
+  const supplier = supplierName ?? ''
+  const codeMatch = supplier.match(LOC_REGEX)?.[0]
+  const stripPattern: RegExp | string = codeMatch ? LOC_REGEX : supplier.includes('미성') ? '미성' : ''
+  return (stripPattern ? supplier.replace(stripPattern, '') : supplier)
+    .replace(/^\s*[|｜]\s*|\s*[|｜]\s*$/g, '')
+    .trim()
 }
 
 interface Stop {
@@ -190,16 +203,20 @@ function SortableStop({ stop, index, color, locked, onRemove, onTimeChange, onNo
             {[stop.phone, stop.reason].filter(Boolean).join(' · ')}
           </div>
         )}
-        {isOrder && stop.items.map(i => (
-          <div key={i.id} className="min-w-0">
-            <div className="text-[11px] text-gray-500 truncate">
-              {i.product_name} ×{i.quantity}
+        {isOrder && stop.items.map(i => {
+          const note = supplierNoteOf(i.supplier_name)
+          return (
+            <div key={i.id} className="min-w-0 mt-1">
+              <div className="text-sm font-medium text-gray-800 break-words">
+                {i.product_name} <span className="text-gray-400 font-normal">×{i.quantity}</span>
+              </div>
+              <div className="mt-0.5">
+                <span className="text-xs text-gray-500">{i.brand || '-'}</span>
+                {note && <div className="text-xs text-gray-400 mt-0.5 break-words">{note}</div>}
+              </div>
             </div>
-            {i.supplier_name && (
-              <div className="text-xs text-gray-500 mt-0.5 break-words">{i.supplier_name}</div>
-            )}
-          </div>
-        ))}
+          )
+        })}
         {isOrder && (
           <input
             value={noteDraft}
@@ -403,13 +420,13 @@ export default function ScheduleDay() {
           items: [],
         }
       }
-      map[o.id].items.push({ id: row.id, product_name: row.product_name, quantity: row.quantity, supplier_name: row.supplier_name })
+      map[o.id].items.push({ id: row.id, product_name: row.product_name, quantity: row.quantity, supplier_name: row.supplier_name, brand: row.brand })
     }
     return Object.values(map)
   }
 
   async function loadAll(bid: string, routesForDate: RouteLane[]) {
-    const SELECT = 'id, product_name, quantity, supplier_name, orders!inner(id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time, schedule_note)'
+    const SELECT = 'id, product_name, quantity, supplier_name, brand, orders!inner(id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time, schedule_note)'
 
     const { data: scheduledData } = await supabase
       .from('order_items')
