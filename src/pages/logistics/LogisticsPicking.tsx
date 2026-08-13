@@ -13,6 +13,7 @@ interface Item {
   inspected_qty: number
   picked_at: string | null
   customer_name: string
+  cafe24_order_no: string
   route_id: string | null
   route_order: number | null
 }
@@ -106,6 +107,7 @@ export default function LogisticsPicking() {
   const [items, setItems] = useState<Item[]>([])
   const [barcodeMap, setBarcodeMap] = useState<Record<string, BarcodeRow[]>>({})
   const [driverNameByRoute, setDriverNameByRoute] = useState<Record<string, string>>({})
+  const [companionRoutesByOrderNo, setCompanionRoutesByOrderNo] = useState<Record<string, string[]>>({})
   const [sort, setSort] = useState<'location' | 'brand'>('location')
   const [loading, setLoading] = useState(true)
   const [showDone, setShowDone] = useState(false)
@@ -134,7 +136,7 @@ export default function LogisticsPicking() {
 
     const { data } = await supabase
       .from('order_items')
-      .select('id, order_id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, picked_at, orders!inner(receiver_name, customer_name, route_id, route_order, scheduled_date)')
+      .select('id, order_id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, picked_at, orders!inner(cafe24_order_no, receiver_name, customer_name, route_id, route_order, scheduled_date)')
       .eq('batch_id', jikbae.id)
       .in('status', ['confirmed', 'in_transit'])
       .eq('orders.scheduled_date', date)
@@ -150,6 +152,7 @@ export default function LogisticsPicking() {
       inspected_qty: row.inspected_qty,
       picked_at: row.picked_at,
       customer_name: row.orders.receiver_name || row.orders.customer_name,
+      cafe24_order_no: row.orders.cafe24_order_no,
       route_id: row.orders.route_id,
       route_order: row.orders.route_order,
     }))
@@ -167,8 +170,9 @@ export default function LogisticsPicking() {
       setBarcodeMap({})
     }
 
-    // 라벨의 "배송담당자명"용 — 이 날짜 루트별 배정 배송원 이름
-    const { data: routeData } = await supabase.from('schedule_routes').select('id, driver_ids').eq('date', date)
+    // 라벨의 "배송담당자명"용 — 이 날짜 루트별 배정 배송원 이름. 배정된 배송원이 없으면
+    // 담당자 대신 차량번호(루트 라벨, 예: "1호차")를 대신 넣음
+    const { data: routeData } = await supabase.from('schedule_routes').select('id, label, driver_ids').eq('date', date)
     const driverIds = [...new Set((routeData ?? []).flatMap(r => r.driver_ids as string[]))]
     let driverNameById: Record<string, string> = {}
     if (driverIds.length) {
@@ -177,9 +181,22 @@ export default function LogisticsPicking() {
     }
     const byRoute: Record<string, string> = {}
     for (const r of routeData ?? []) {
-      byRoute[r.id] = (r.driver_ids as string[]).map((id: string) => driverNameById[id] ?? '?').join('/') || '미배정'
+      const names = (r.driver_ids as string[]).map((id: string) => driverNameById[id] ?? '?').join('/')
+      byRoute[r.id] = names || r.label
     }
     setDriverNameByRoute(byRoute)
+
+    // 2인 배송 등으로 다른 루트에 "동행"으로 같이 붙어있는 주문 — 라벨엔 원래 루트
+    // 담당자와 동행 루트 담당자를 같이 표시해야 함 (ScheduleDay.tsx의 addOrderAsAdhoc이
+    // reason에 "동행 (주문번호)" 형식으로 남겨둔 걸 파싱)
+    const { data: adhocData } = await supabase.from('schedule_adhoc_stops').select('route_id, reason').eq('date', date)
+    const companions: Record<string, string[]> = {}
+    for (const a of adhocData ?? []) {
+      const orderNo = a.reason?.match(/\d{8}-\d{7}/)?.[0]
+      if (!orderNo) continue
+      (companions[orderNo] ??= []).push(a.route_id)
+    }
+    setCompanionRoutesByOrderNo(companions)
 
     setLoading(false)
   }
@@ -247,17 +264,23 @@ export default function LogisticsPicking() {
   const doneList = buildPickingList(doneItems, sort, barcodeMap)
 
   // 실제 운송장이 아니라 창고에서 상품에 붙이는 식별용 라벨 — 주문 1건당 1장씩,
-  // 배송담당자/상품명/고객명+날짜-배송순서만 텍스트로 인쇄
+  // 배송담당자/상품명/고객명+날짜-배송순서만 텍스트로 인쇄.
+  // 아직 준비(피킹) 안 된 상품까지 라벨이 나가면 실물 없이 라벨만 붙이게 될 수 있어서
+  // 준비완료(picked_at 있음) 상품만 대상으로 함
   const dateLabel = date.slice(2).replace(/-/g, '')
-  const labels: Label[] = items
-    .map(i => ({
-      key: i.id,
-      driverName: (i.route_id && driverNameByRoute[i.route_id]) || '미배정',
-      productName: i.product_name,
-      customerName: i.customer_name,
-      dateLabel,
-      routeOrder: i.route_order,
-    }))
+  const labels: Label[] = doneItems
+    .map(i => {
+      const routeIds = [i.route_id, ...(companionRoutesByOrderNo[i.cafe24_order_no] ?? [])].filter((id): id is string => !!id)
+      const driverNames = [...new Set(routeIds.map(id => driverNameByRoute[id]).filter((n): n is string => !!n))]
+      return {
+        key: i.id,
+        driverName: driverNames.join(' + ') || '미배정',
+        productName: i.product_name,
+        customerName: i.customer_name,
+        dateLabel,
+        routeOrder: i.route_order,
+      }
+    })
     .sort((a, b) => a.driverName.localeCompare(b.driverName) || (a.routeOrder ?? 999) - (b.routeOrder ?? 999))
 
   function renderRow(row: PickingRow, done: boolean) {
@@ -369,9 +392,9 @@ export default function LogisticsPicking() {
       </div>
       <button
         onClick={() => setShowLabels(true)}
-        disabled={items.length === 0}
+        disabled={doneItems.length === 0}
         className="w-full py-2 rounded-lg text-sm font-medium bg-orange-500 text-white disabled:opacity-40 mb-3"
-      >라벨 출력</button>
+      >라벨 출력 {doneItems.length > 0 && `(${doneItems.length})`}</button>
 
       {loading ? (
         <p className="text-center text-gray-400 py-12">불러오는 중...</p>
