@@ -178,12 +178,21 @@ export default function SoumBatch() {
     setActiveBatchId(batchId)
     setShowPicking(false)
     setLoading(true)
-    const { data } = await supabase
-      .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, tm_barcode, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no)')
-      .eq('batch_id', batchId)
-      .eq('status', 'confirmed')
-    const rows = ((data ?? []) as any[])
+    // 업체배송처럼 누적 상품이 1000건을 넘는 배치가 있어서(2026-08-14 발견 - 20260604-0000403
+    // 주문 상품이 뒷부분에 있어 조용히 잘려나감), 기본 조회 한도(1000건)를 넘겨서 전부 가져올 때까지 페이징
+    const PAGE = 1000
+    let data: any[] = []
+    for (let offset = 0; ; offset += PAGE) {
+      const { data: page } = await supabase
+        .from('order_items')
+        .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, tm_barcode, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no)')
+        .eq('batch_id', batchId)
+        .eq('status', 'confirmed')
+        .range(offset, offset + PAGE - 1)
+      data = data.concat(page ?? [])
+      if (!page || page.length < PAGE) break
+    }
+    const rows = (data as any[])
       .map(row => ({
         id: row.id,
         product_code: row.product_code,
