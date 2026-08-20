@@ -129,12 +129,22 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
     const token = await getToken()
     const { offset = 0, limit = 50 } = req.body ?? {}
 
-    const { data: pendingRows } = await supabase
-      .from('order_items')
-      .select('id, cafe24_item_code, labels, orders!inner(id, cafe24_order_no)')
-      .in('status', ['collected', 'confirmed'])
-      .is('tracking_number', null)
-      .eq('order_status', 'N20')
+    // 대상이 1000건 넘으면 Supabase 기본 조회 한도에 조용히 잘려서 뒤쪽 주문은 영원히
+    // 재확인 대상에서 빠짐(취소된 주문이 계속 안 걸러지던 원인, 2026-08-20 발견) —
+    // range()로 끝까지 페이지네이션
+    const PAGE = 1000
+    let pendingRows: any[] = []
+    for (let pOffset = 0; ; pOffset += PAGE) {
+      const { data: page } = await supabase
+        .from('order_items')
+        .select('id, cafe24_item_code, labels, orders!inner(id, cafe24_order_no)')
+        .in('status', ['collected', 'confirmed'])
+        .is('tracking_number', null)
+        .eq('order_status', 'N20')
+        .range(pOffset, pOffset + PAGE - 1)
+      pendingRows = pendingRows.concat(page ?? [])
+      if (!page || page.length < PAGE) break
+    }
 
     const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null }[]>()
     const orderIdByNo = new Map<string, string>()
