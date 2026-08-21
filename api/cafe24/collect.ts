@@ -137,23 +137,26 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
     for (let pOffset = 0; ; pOffset += PAGE) {
       const { data: page } = await supabase
         .from('order_items')
-        .select('id, cafe24_item_code, labels, orders!inner(id, cafe24_order_no)')
+        .select('id, cafe24_item_code, labels, order_status, orders!inner(id, cafe24_order_no)')
         .in('status', ['collected', 'confirmed'])
         .is('tracking_number', null)
-        .eq('order_status', 'N20')
+        // order_status='N20' 조건은 뺌 — 이게 있으면 한 번 N20에서 다른 상태(N21 등)로
+        // 바뀐 순간부터 그 상품은 재확인 대상에서 영원히 빠져서, 이후 실제로 배송중/취소로
+        // 더 진행돼도 다시는 안 잡혔음(20260330-0000907 - N21에 멈춰서 실제 N30(배송중)
+        // 전환을 못 따라감, 2026-08-20 발견). 운송장 없는 상품은 상태 불문 계속 재확인해야 함
         .range(pOffset, pOffset + PAGE - 1)
       pendingRows = pendingRows.concat(page ?? [])
       if (!page || page.length < PAGE) break
     }
 
-    const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null }[]>()
+    const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null; order_status: string | null }[]>()
     const orderIdByNo = new Map<string, string>()
     for (const row of (pendingRows ?? []) as any[]) {
       const no = row.orders.cafe24_order_no
       orderIdByNo.set(no, row.orders.id)
       if (!row.cafe24_item_code) continue
       if (!byOrderNo.has(no)) byOrderNo.set(no, [])
-      byOrderNo.get(no)!.push({ id: row.id, cafe24_item_code: row.cafe24_item_code, labels: row.labels })
+      byOrderNo.get(no)!.push({ id: row.id, cafe24_item_code: row.cafe24_item_code, labels: row.labels, order_status: row.order_status })
     }
     // 매 호출마다 순서가 흔들리지 않도록 정렬 후 슬라이스
     const allOrderNos = [...orderIdByNo.keys()].sort()
@@ -161,6 +164,7 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
     const chunk = allOrderNos.slice(offset, offset + limit)
 
     let notReady = 0
+    let unassigned = 0
     if (chunk.length) {
       // order_id 지정 시 날짜 파라미터 없이도 조회 가능 (날짜 필터엔 3개월 제한이 있어서 회피)
       const data = await cafe24Get(
@@ -174,7 +178,19 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
           const match = liveItems.find((i: any) => i.order_item_code === pendingItem.cafe24_item_code)
           if (!match) continue
           const patch: Record<string, any> = {}
-          if (match.order_status && match.order_status !== 'N20') { patch.order_status = match.order_status; notReady++ }
+          // 'N20' 고정 비교가 아니라 로컬에 저장된 실제 값과 비교 — N21처럼 중간 상태에서도
+          // 계속 최신값을 따라가야 함(위 주석 참고)
+          if (match.order_status && match.order_status !== pendingItem.order_status) {
+            patch.order_status = match.order_status
+            if (match.order_status !== 'N20') notReady++
+            // 배송중(N3x)/배송완료(N4x)로 이미 넘어간 상품은 우리 쪽에서 더 할 일이 없는데도
+            // batch_id가 남아있으면 배치현황에 계속 처리 안 된 것처럼 보임(2026-08-20 발견) —
+            // 자동으로 배치 해제
+            if (/^N[34]/.test(match.order_status)) {
+              patch.batch_id = null
+              unassigned++
+            }
+          }
           if (JSON.stringify(match.labels ?? []) !== JSON.stringify(pendingItem.labels ?? [])) {
             patch.labels = match.labels ?? []
           }
@@ -201,6 +217,7 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
       processed: chunk.length,
       total,
       not_ready: notReady,
+      unassigned,
       next_offset: offset + limit,
       done: offset + limit >= total,
     })

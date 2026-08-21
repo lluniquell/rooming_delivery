@@ -338,6 +338,8 @@ export default function SoumOrders() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [collecting, setCollecting] = useState(false)
   const [collectMsg, setCollectMsg] = useState('')
+  const [rechecking, setRechecking] = useState(false)
+  const [recheckMsg, setRecheckMsg] = useState('')
   const [progress, setProgress] = useState<{ phase: 'main' | 'recheck'; current: number; total: number } | null>(null)
   const [startDate, setStartDate] = useState(today())
   const [endDate, setEndDate] = useState(today())
@@ -376,6 +378,7 @@ export default function SoumOrders() {
   }
 
   const [lastCollected, setLastCollected] = useState<string | null>(null)
+  const [lastRechecked, setLastRechecked] = useState<string | null>(null)
 
   useEffect(() => {
     loadOrders()
@@ -475,8 +478,9 @@ export default function SoumOrders() {
   }
 
   async function loadMeta() {
-    const { data } = await supabase.from('app_meta').select('value').eq('key', 'last_collected_at').maybeSingle()
-    setLastCollected(data?.value || null)
+    const { data } = await supabase.from('app_meta').select('key, value').in('key', ['last_collected_at', 'last_rechecked_at'])
+    setLastCollected(data?.find(r => r.key === 'last_collected_at')?.value || null)
+    setLastRechecked(data?.find(r => r.key === 'last_rechecked_at')?.value || null)
   }
 
   async function loadOrders(pageNum = page, sort = orderSort, search = searchQuery) {
@@ -599,18 +603,25 @@ export default function SoumOrders() {
     setBatches(data ?? [])
   }
 
-  async function collect() {
-    // 다른 작업자가 수집 중인지 확인 (2분 이내 시작한 락이 있으면 경고)
+  // 다른 작업자가 수집/재확인 중인지 확인 — 카페24 API를 동시에 두 곳에서 두드리지 않도록
+  // 수집과 재확인이 락을 공유함
+  async function checkCollectLock() {
     const { data: lockRow } = await supabase.from('app_meta').select('value').eq('key', 'collect_lock').maybeSingle()
     if (lockRow?.value && Date.now() - new Date(lockRow.value).getTime() < 2 * 60 * 1000) {
-      if (!confirm('⚠️ 다른 작업자가 이미 수집 중입니다 (2분 이내 시작).\n그래도 계속할까요?')) return
+      return confirm('⚠️ 다른 작업자가 이미 수집/재확인 중입니다 (2분 이내 시작).\n그래도 계속할까요?')
     }
+    return true
+  }
+
+  // 신규 주문 수집만 — 지정한 기간의 order_status='N20' 신규 주문을 찾아서 저장
+  async function collectNew() {
+    if (!(await checkCollectLock())) return
 
     setCollecting(true)
     setCollectMsg('')
     await supabase.from('app_meta').upsert({ key: 'collect_lock', value: new Date().toISOString(), updated_at: new Date().toISOString() })
 
-    // 1단계: 메인 수집 — 범위가 넓으면 한 번에 처리하다 타임아웃 나서, 하루씩 나눠 순차 호출
+    // 범위가 넓으면 한 번에 처리하다 타임아웃 나서, 하루씩 나눠 순차 호출
     const days = dateRange(startDate, endDate)
     let totalCollected = 0, totalBackfilled = 0, totalChecked = 0
     const mainErrors: string[] = []
@@ -638,11 +649,37 @@ export default function SoumOrders() {
       setProgress({ phase: 'main', current: i + 1, total: days.length })
     }
 
-    // 2단계: 주문 상태 재확인 — 대상이 많을 때 타임아웃 나서, 50건씩 나눠 반복 호출
+    const errMsg = mainErrors.length ? ` | 실패: ${mainErrors[0]}${mainErrors.length > 1 ? ` 외 ${mainErrors.length - 1}건` : ''}` : ''
+    const backfillMsg = totalBackfilled ? ` / 상품보충 ${totalBackfilled}건` : ''
+    setCollectMsg(`카페24 ${totalChecked}건 조회 / 신규 ${totalCollected}건${backfillMsg}${errMsg}`)
+    if (totalCollected > 0 || totalBackfilled > 0) loadOrders(0)
+
+    const now = new Date().toISOString()
+    await supabase.from('app_meta').upsert([
+      { key: 'collect_lock', value: '', updated_at: now },
+      { key: 'last_collected_at', value: now, updated_at: now },
+    ])
+    setLastCollected(now)
+    setCollecting(false)
+    setProgress(null)
+  }
+
+  // 주문 상태 재확인만 — 운송장 아직 없는 상품들의 order_status/labels를 카페24와 다시 맞춤.
+  // 배송중/배송완료로 확인되면 서버에서 자동으로 배치 해제(batch_id=null)까지 처리함
+  async function recheckOrders() {
+    if (!(await checkCollectLock())) return
+
+    setRechecking(true)
+    setRecheckMsg('')
+    await supabase.from('app_meta').upsert({ key: 'collect_lock', value: new Date().toISOString(), updated_at: new Date().toISOString() })
+
+    // 대상이 많을 때 타임아웃 나서, 50건씩 나눠 반복 호출
     let notReady = 0
+    let unassigned = 0
+    let total = 0
+    let errored = false
     {
       let offset = 0
-      let total = 0
       try {
         do {
           const res = await fetch('/api/cafe24/collect?phase=recheck', {
@@ -651,32 +688,31 @@ export default function SoumOrders() {
             body: JSON.stringify({ offset, limit: 50 }),
           })
           const data = await res.json()
-          if (data.error) break
+          if (data.error) { errored = true; break }
           total = data.total
           notReady += data.not_ready ?? 0
+          unassigned += data.unassigned ?? 0
           offset = data.next_offset
           setProgress({ phase: 'recheck', current: Math.min(offset, total), total })
           if (data.done) break
         } while (offset < total)
       } catch {
-        // 재확인 실패해도 메인 수집 결과는 유지
+        errored = true
       }
     }
 
-    const errMsg = mainErrors.length ? ` | 실패: ${mainErrors[0]}${mainErrors.length > 1 ? ` 외 ${mainErrors.length - 1}건` : ''}` : ''
-    const backfillMsg = totalBackfilled ? ` / 상품보충 ${totalBackfilled}건` : ''
-    const notReadyMsg = notReady ? ` / 상태변경으로 숨김 ${notReady}건` : ''
-    setCollectMsg(`카페24 ${totalChecked}건 조회 / 신규 ${totalCollected}건${backfillMsg}${notReadyMsg}${errMsg}`)
-    if (totalCollected > 0 || totalBackfilled > 0 || notReady > 0) loadOrders(0)
+    const unassignedMsg = unassigned ? ` / 배송중·완료로 배치해제 ${unassigned}건` : ''
+    const errMsg = errored ? ' | 일부 실패(다시 시도해주세요)' : ''
+    setRecheckMsg(`재확인 대상 ${total}건 / 상태변경 ${notReady}건${unassignedMsg}${errMsg}`)
+    if (notReady > 0 || unassigned > 0) loadOrders(0)
 
-    // 락 해제 + 최종 수집 시간 기록
     const now = new Date().toISOString()
     await supabase.from('app_meta').upsert([
       { key: 'collect_lock', value: '', updated_at: now },
-      { key: 'last_collected_at', value: now, updated_at: now },
+      { key: 'last_rechecked_at', value: now, updated_at: now },
     ])
-    setLastCollected(now)
-    setCollecting(false)
+    setLastRechecked(now)
+    setRechecking(false)
     setProgress(null)
   }
 
@@ -816,17 +852,31 @@ export default function SoumOrders() {
         <h2 className="text-xl font-bold text-gray-800">주문 수집</h2>
         <div className="flex flex-wrap items-center gap-3">
           {collectMsg && <span className="text-sm text-gray-500">{collectMsg}</span>}
+          {recheckMsg && <span className="text-sm text-gray-500">{recheckMsg}</span>}
           {lastCollected && (
             <span className="text-xs text-gray-400">
               마지막 수집 {new Date(lastCollected).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
+          {lastRechecked && (
+            <span className="text-xs text-gray-400">
+              마지막 재확인 {new Date(lastRechecked).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
           <button
-            onClick={collect}
-            disabled={collecting}
+            onClick={collectNew}
+            disabled={collecting || rechecking}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
           >
             {collecting ? '수집 중...' : '카페24 주문 수집'}
+          </button>
+          <button
+            onClick={recheckOrders}
+            disabled={collecting || rechecking}
+            title="운송장 없는 상품들의 상태를 카페24와 다시 맞춥니다. 배송중/배송완료로 확인되면 배치에서 자동으로 빠집니다."
+            className="bg-white text-blue-600 border border-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 disabled:opacity-50"
+          >
+            {rechecking ? '재확인 중...' : '주문 재확인'}
           </button>
           <button
             onClick={() => setShowFilters(v => !v)}

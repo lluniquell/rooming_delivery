@@ -399,7 +399,7 @@ export default function ScheduleDay() {
       .eq('date', date)
     setAdhocStops(adhocData ?? [])
 
-    if (jikbae) await loadAll(jikbae.id, routeData ?? [])
+    if (jikbae) await loadAll(jikbae.id, routeData ?? [], waypointData ?? [], presetData ?? [])
     setLoading(false)
   }
 
@@ -430,7 +430,7 @@ export default function ScheduleDay() {
     return Object.values(map)
   }
 
-  async function loadAll(bid: string, routesForDate: RouteLane[]) {
+  async function loadAll(bid: string, routesForDate: RouteLane[], waypointsForDate: DayWaypoint[] = dayWaypoints, presetsForDate: PresetLocation[] = presets) {
     const SELECT = 'id, product_name, quantity, supplier_name, brand, orders!inner(id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time, schedule_note)'
 
     const { data: scheduledData } = await supabase
@@ -450,7 +450,21 @@ export default function ScheduleDay() {
         lastByRoute[rid] = s
       }
     }
-    const anchors = Object.values(lastByRoute).filter(s => s.lat && s.lng)
+    const anchors: { lat: number; lng: number; route_id: string }[] = Object.values(lastByRoute)
+      .filter((s): s is Stop & { lat: number; lng: number } => !!s.lat && !!s.lng)
+      .map(s => ({ lat: s.lat, lng: s.lng, route_id: s.route_id! }))
+
+    // 아직 실제 주문이 없는 루트도, "선진 출발"이 꽂혀있으면 그 좌표를 임시 기준점으로 써서
+    // 처음부터 근처 추천이 되게 함 (실제 주문이 배정되면 그 주문 위치가 우선 기준점이 됨)
+    const depot = presetsForDate.find(p => p.key === PINNED_KEY)
+    if (depot?.lat && depot?.lng) {
+      const routesWithAnchor = new Set(anchors.map(a => a.route_id))
+      for (const w of waypointsForDate) {
+        if (w.preset_key !== PINNED_KEY || routesWithAnchor.has(w.route_id)) continue
+        anchors.push({ lat: depot.lat, lng: depot.lng, route_id: w.route_id })
+        routesWithAnchor.add(w.route_id)
+      }
+    }
 
     function withNearest(list: Stop[]): Stop[] {
       if (!anchors.length) return list
