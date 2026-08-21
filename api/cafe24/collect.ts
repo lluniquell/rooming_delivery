@@ -137,7 +137,7 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
     for (let pOffset = 0; ; pOffset += PAGE) {
       const { data: page } = await supabase
         .from('order_items')
-        .select('id, cafe24_item_code, labels, order_status, orders!inner(id, cafe24_order_no)')
+        .select('id, cafe24_item_code, labels, order_status, batch_id, orders!inner(id, cafe24_order_no)')
         .in('status', ['collected', 'confirmed'])
         .is('tracking_number', null)
         // order_status='N20' 조건은 뺌 — 이게 있으면 한 번 N20에서 다른 상태(N21 등)로
@@ -149,14 +149,14 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
       if (!page || page.length < PAGE) break
     }
 
-    const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null; order_status: string | null }[]>()
+    const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null; order_status: string | null; batch_id: string | null }[]>()
     const orderIdByNo = new Map<string, string>()
     for (const row of (pendingRows ?? []) as any[]) {
       const no = row.orders.cafe24_order_no
       orderIdByNo.set(no, row.orders.id)
       if (!row.cafe24_item_code) continue
       if (!byOrderNo.has(no)) byOrderNo.set(no, [])
-      byOrderNo.get(no)!.push({ id: row.id, cafe24_item_code: row.cafe24_item_code, labels: row.labels, order_status: row.order_status })
+      byOrderNo.get(no)!.push({ id: row.id, cafe24_item_code: row.cafe24_item_code, labels: row.labels, order_status: row.order_status, batch_id: row.batch_id })
     }
     // 매 호출마다 순서가 흔들리지 않도록 정렬 후 슬라이스
     const allOrderNos = [...orderIdByNo.keys()].sort()
@@ -183,13 +183,13 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
           if (match.order_status && match.order_status !== pendingItem.order_status) {
             patch.order_status = match.order_status
             if (match.order_status !== 'N20') notReady++
-            // 배송중(N3x)/배송완료(N4x)로 이미 넘어간 상품은 우리 쪽에서 더 할 일이 없는데도
-            // batch_id가 남아있으면 배치현황에 계속 처리 안 된 것처럼 보임(2026-08-20 발견) —
-            // 자동으로 배치 해제
-            if (/^N[34]/.test(match.order_status)) {
-              patch.batch_id = null
-              unassigned++
-            }
+          }
+          // 배치 해제는 "이번에 상태가 바뀐 경우"에만 걸면 안 됨 — order_status는 예전에
+          // 이미 N30/N40으로 갱신됐지만 배치해제 로직이 생기기 전이라 그대로 남아있던 건이
+          // 185건 있었음(2026-08-20 발견). match.order_status 값 자체로 매번 독립적으로 판단
+          if (match.order_status && /^N[34]/.test(match.order_status) && pendingItem.batch_id) {
+            patch.batch_id = null
+            unassigned++
           }
           if (JSON.stringify(match.labels ?? []) !== JSON.stringify(pendingItem.labels ?? [])) {
             patch.labels = match.labels ?? []
