@@ -37,8 +37,27 @@ export default function SoumDashboard() {
 
     const { data: holdBatch } = await supabase.from('batches').select('id').eq('type', 'hold').maybeSingle()
 
+    // 미배정 건수 대상이 1000건 넘으면 Supabase 기본 조회 한도에 조용히 잘려서 실제보다
+    // 훨씬 적게 표시됨(2026-08-20 발견, 확인 시점 기준 이미 2,979건으로 한도 초과 상태였음) —
+    // range()로 끝까지 페이지네이션
+    async function loadUnassignedOrderIds() {
+      const PAGE = 1000
+      let rows: { order_id: string }[] = []
+      for (let offset = 0; ; offset += PAGE) {
+        const { data: page } = await supabase
+          .from('order_items')
+          .select('order_id')
+          .eq('status', 'collected')
+          .is('batch_id', null)
+          .range(offset, offset + PAGE - 1)
+        rows = rows.concat(page ?? [])
+        if (!page || page.length < PAGE) break
+      }
+      return rows
+    }
+
     const [
-      { data: unassignedRows },
+      unassignedRows,
       { count: holdItemCount },
       { data: miseongRows },
       { data: shippedRows },
@@ -46,7 +65,7 @@ export default function SoumDashboard() {
       { data: pickedRows },
       { data: stowRows },
     ] = await Promise.all([
-      supabase.from('order_items').select('order_id').eq('status', 'collected').is('batch_id', null),
+      loadUnassignedOrderIds(),
       holdBatch
         ? supabase.from('order_items').select('id', { count: 'exact', head: true }).eq('status', 'confirmed').eq('batch_id', holdBatch.id)
         : Promise.resolve({ count: 0 } as any),

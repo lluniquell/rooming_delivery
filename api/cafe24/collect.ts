@@ -275,10 +275,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const ids = cafe24Orders.map(o => o.order_id)
-    const { data: existing } = await supabase
-      .from('orders')
-      .select('id, cafe24_order_no, order_place_name, order_items(count)')
-      .in('cafe24_order_no', ids)
+    // 조회 대상(ids)이 1000건 넘으면 Supabase 기본 조회 한도에 조용히 잘려서, 이미 있는
+    // 주문 일부가 existingMap에서 빠져 신규로 착각해 중복 insert될 수 있음(전체 orders가
+    // 이미 2,885건인 상황에서 넓은 기간 재수집 시 현실적으로 발생 가능, 2026-08-20 점검) —
+    // range()로 끝까지 페이지네이션
+    const EXISTING_PAGE = 1000
+    let existing: any[] = []
+    for (let eOffset = 0; ; eOffset += EXISTING_PAGE) {
+      const { data: page } = await supabase
+        .from('orders')
+        .select('id, cafe24_order_no, order_place_name, order_items(count)')
+        .in('cafe24_order_no', ids)
+        .range(eOffset, eOffset + EXISTING_PAGE - 1)
+      existing = existing.concat(page ?? [])
+      if (!page || page.length < EXISTING_PAGE) break
+    }
     const existingMap = new Map(
       (existing ?? []).map((e: any) => [
         e.cafe24_order_no,
