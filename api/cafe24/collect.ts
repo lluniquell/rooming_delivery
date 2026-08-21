@@ -189,6 +189,7 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
         token
       )
       const itemsByOrder = new Map<string, any[]>((data.orders ?? []).map((o: any) => [o.order_id, o.items ?? []]))
+      const piiClearedOrderIds = new Set<string>()
       for (const no of chunk) {
         const liveItems = itemsByOrder.get(no) ?? []
         for (const pendingItem of byOrderNo.get(no) ?? []) {
@@ -218,15 +219,41 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
             await supabase.from('order_items').update(patch).eq('id', pendingItem.id)
           }
         }
+
+        // 이 주문의 카페24 상품이 전부 배송중/배송완료/취소로 끝났으면, 출고검수 완료 때와
+        // 동일하게 더 이상 필요 없는 고객 개인정보를 비움(SoumOutgoing.tsx의
+        // clearPiiIfOrderComplete와 같은 기준 — 자동 배치해제 경로엔 이 처리가 없어서
+        // 지금까지 빠져있었음, 2026-08-20). liveItems는 카페24에서 방금 받아온 이 주문의
+        // 전체 상품이라 배송방법 불문 다 포함됨 — 로컬 status 대신 이걸로 판단하는 게 더 정확함
+        if (liveItems.length && liveItems.every((i: any) => i.order_status && /^(N[34]|C)/.test(i.order_status))) {
+          const orderId = orderIdByNo.get(no)
+          if (orderId) {
+            await supabase.from('orders').update({
+              customer_name: '(비공개)',
+              receiver_name: null,
+              receiver_phone: null,
+              address: null,
+              zipcode: null,
+              lat: null,
+              lng: null,
+              shipping_message: null,
+              delivery_memo: null,
+              admin_memo: null,
+            }).eq('id', orderId)
+            piiClearedOrderIds.add(orderId)
+          }
+        }
       }
 
-      // 관리자 메모는 카페24가 벌크 조회를 지원 안 해서 주문마다 따로 호출해야 함 — 동시에 처리
+      // 관리자 메모는 카페24가 벌크 조회를 지원 안 해서 주문마다 따로 호출해야 함 — 동시에 처리.
+      // 방금 PII를 비운 주문은 건너뜀 — 안 그러면 이 단계가 admin_memo를 다시 채워서
+      // 비워둔 걸 덮어씀
       const MEMO_CONCURRENCY = 10
       for (let j = 0; j < chunk.length; j += MEMO_CONCURRENCY) {
         const sub = chunk.slice(j, j + MEMO_CONCURRENCY)
         await Promise.all(sub.map(async no => {
           const orderId = orderIdByNo.get(no)
-          if (!orderId) return
+          if (!orderId || piiClearedOrderIds.has(orderId)) return
           const memos = await fetchMemos(no, token)
           await supabase.from('orders').update({ admin_memo: memos }).eq('id', orderId)
         }))
