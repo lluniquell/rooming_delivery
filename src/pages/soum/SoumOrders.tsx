@@ -665,7 +665,7 @@ export default function SoumOrders() {
   }
 
   // 주문 상태 재확인만 — 운송장 아직 없는 상품들의 order_status/labels를 카페24와 다시 맞춤.
-  // 배송중/배송완료로 확인되면 서버에서 자동으로 배치 해제(batch_id=null)까지 처리함
+  // 배송중/배송완료/취소로 확인되면 서버에서 자동으로 배치 해제(batch_id=null)까지 처리함
   async function recheckOrders() {
     if (!(await checkCollectLock())) return
 
@@ -701,7 +701,7 @@ export default function SoumOrders() {
       }
     }
 
-    const unassignedMsg = unassigned ? ` / 배송중·완료로 배치해제 ${unassigned}건` : ''
+    const unassignedMsg = unassigned ? ` / 배송중·완료·취소로 배치해제 ${unassigned}건` : ''
     const errMsg = errored ? ' | 일부 실패(다시 시도해주세요)' : ''
     setRecheckMsg(`재확인 대상 ${total}건 / 상태변경 ${notReady}건${unassignedMsg}${errMsg}`)
     if (notReady > 0 || unassigned > 0) loadOrders(0)
@@ -873,7 +873,7 @@ export default function SoumOrders() {
           <button
             onClick={recheckOrders}
             disabled={collecting || rechecking}
-            title="운송장 없는 상품들의 상태를 카페24와 다시 맞춥니다. 배송중/배송완료로 확인되면 배치에서 자동으로 빠집니다."
+            title="운송장 없는 상품들의 상태를 카페24와 다시 맞춥니다. 배송중/배송완료/취소로 확인되면 배치에서 자동으로 빠집니다."
             className="bg-white text-blue-600 border border-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 disabled:opacity-50"
           >
             {rechecking ? '재확인 중...' : '주문 재확인'}

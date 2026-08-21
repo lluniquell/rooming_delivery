@@ -116,11 +116,12 @@ function itemRowsOf(order: any, dbOrderId: string) {
   }))
 }
 
-// 주문 상태 재확인 — 아직 운송장이 없는 상품(미배정이든, 배치에 들어갔지만 운송장 등록 전이든)의
-// 상태/라벨/메모를 최신화. 운송장이 이미 등록된 상품은 대상에서 제외 — 그건 나중에 배송대기
-// 전환 시도할 때 카페24가 취소 주문이면 알아서 에러로 걸러줌. 웹훅 없이 이 재확인만으로
-// 취소 감지를 대신함(2026-07-28 결정) — 배치에 들어간 채로 취소된 상품도 order_status가
-// 갱신되면 화면엔 안 보여도(주문 수집 화면은 batch_id null인 것만 보여줌) 내부 데이터는 정확해짐.
+// 주문 상태 재확인 — 아직 검수/출고 전인 상품(미배정이든, 배치에 들어갔지만 운송장 등록 전이든)의
+// 상태/라벨/메모를 최신화. 운송장이 이미 등록된 상품은 검수 완료 시 status가 'in_transit'으로
+// 바뀌어 자동으로 대상에서 빠지므로 별도 제외 불필요 — 단, 보류 배치는 운송장이 있어도 검수를
+// 안 거치니 예외로 포함(2026-08-20). 웹훅 없이 이 재확인만으로 취소 감지를 대신함(2026-07-28
+// 결정, 검수 전 취소는 CS가 별도로 연락 준다고 확인해서 자동화 범위에 포함 — 2026-08-20).
+// 배송중(N3x)/배송완료(N4x)/취소(C계열)로 확인되면 batch_id를 비워 배치에서 자동으로 뺌.
 // 대상이 몇 백 건이면 한 번에 다 처리하다 Vercel 60초 제한을 넘길 수 있어서(2026-07-28
 // 실제 발생) offset/limit으로 나눠 호출 — 프론트가 진행률 표시하며 반복 호출함
 // (POST ?phase=recheck, body: { offset, limit })
@@ -129,24 +130,40 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
     const token = await getToken()
     const { offset = 0, limit = 50 } = req.body ?? {}
 
+    const { data: holdBatch } = await supabase.from('batches').select('id').eq('type', 'hold').maybeSingle()
+
     // 대상이 1000건 넘으면 Supabase 기본 조회 한도에 조용히 잘려서 뒤쪽 주문은 영원히
     // 재확인 대상에서 빠짐(취소된 주문이 계속 안 걸러지던 원인, 2026-08-20 발견) —
     // range()로 끝까지 페이지네이션
     const PAGE = 1000
-    let pendingRows: any[] = []
-    for (let pOffset = 0; ; pOffset += PAGE) {
-      const { data: page } = await supabase
-        .from('order_items')
-        .select('id, cafe24_item_code, labels, order_status, batch_id, orders!inner(id, cafe24_order_no)')
-        .in('status', ['collected', 'confirmed'])
-        .is('tracking_number', null)
-        // order_status='N20' 조건은 뺌 — 이게 있으면 한 번 N20에서 다른 상태(N21 등)로
-        // 바뀐 순간부터 그 상품은 재확인 대상에서 영원히 빠져서, 이후 실제로 배송중/취소로
-        // 더 진행돼도 다시는 안 잡혔음(20260330-0000907 - N21에 멈춰서 실제 N30(배송중)
-        // 전환을 못 따라감, 2026-08-20 발견). 운송장 없는 상품은 상태 불문 계속 재확인해야 함
-        .range(pOffset, pOffset + PAGE - 1)
-      pendingRows = pendingRows.concat(page ?? [])
-      if (!page || page.length < PAGE) break
+    async function fetchAllPages(build: (q: any) => any) {
+      let rows: any[] = []
+      for (let pOffset = 0; ; pOffset += PAGE) {
+        const { data: page } = await build(
+          supabase
+            .from('order_items')
+            .select('id, cafe24_item_code, labels, order_status, batch_id, orders!inner(id, cafe24_order_no)')
+            .in('status', ['collected', 'confirmed'])
+        ).range(pOffset, pOffset + PAGE - 1)
+        rows = rows.concat(page ?? [])
+        if (!page || page.length < PAGE) break
+      }
+      return rows
+    }
+
+    // 운송장 없는 상품 — order_status='N20' 조건은 뺌. 이게 있으면 한 번 N20에서 다른
+    // 상태(N21 등)로 바뀐 순간부터 그 상품은 재확인 대상에서 영원히 빠져서, 이후 실제로
+    // 배송중/취소로 더 진행돼도 다시는 안 잡혔음(20260330-0000907, 2026-08-20 발견)
+    let pendingRows = await fetchAllPages(q => q.is('tracking_number', null))
+
+    // 보류 배치는 예외 — 운송장이 이미 붙어있어도 재확인 대상에 포함해야 함. 원래
+    // "운송장 있으면 나중에 배송대기 전환 시도할 때 카페24가 취소면 에러로 걸러줌"이
+    // 전제였는데, 보류 항목은 그 배송대기 전환 자체를 안 거쳐서 이 안전장치가 전혀
+    // 작동 안 함 — 운송장 붙은 채 취소된 보류 주문이 영원히 안 걸러지던 원인
+    // (20260811-0000993, 2026-08-20 발견)
+    if (holdBatch) {
+      const holdRows = await fetchAllPages(q => q.eq('batch_id', holdBatch.id).not('tracking_number', 'is', null))
+      pendingRows = pendingRows.concat(holdRows)
     }
 
     const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null; order_status: string | null; batch_id: string | null }[]>()
@@ -186,8 +203,11 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
           }
           // 배치 해제는 "이번에 상태가 바뀐 경우"에만 걸면 안 됨 — order_status는 예전에
           // 이미 N30/N40으로 갱신됐지만 배치해제 로직이 생기기 전이라 그대로 남아있던 건이
-          // 185건 있었음(2026-08-20 발견). match.order_status 값 자체로 매번 독립적으로 판단
-          if (match.order_status && /^N[34]/.test(match.order_status) && pendingItem.batch_id) {
+          // 185건 있었음(2026-08-20 발견). match.order_status 값 자체로 매번 독립적으로 판단.
+          // 배송중/배송완료(N3x/N4x)뿐 아니라 취소(C계열, 취소접수/취소완료 전부)도 우리 쪽에서
+          // 더 할 일이 없으니 같이 배치해제 — 검수 전 취소는 CS가 별도로 연락 준다고 확인함
+          // (2026-08-20 결정)
+          if (match.order_status && /^(N[34]|C)/.test(match.order_status) && pendingItem.batch_id) {
             patch.batch_id = null
             unassigned++
           }
