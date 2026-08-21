@@ -295,7 +295,10 @@ export default function SoumBatch() {
 
     const ids = orderItems.map(i => i.id)
     await supabase.from('order_items')
-      .update({ status: 'collected', batch_id: null, delivery_method: null, tracking_number: null })
+      // order_status도 N20으로 같이 되돌려야 함 — 재확인이 그 사이 N21/N22 등으로 갱신해놨으면
+      // 안 건드릴 시 "주문 수집" 미배정 목록(order_status='N20' 필터)에서 계속 안 보임
+      // (20260810-0000823 cushion, 2026-08-21 발견)
+      .update({ status: 'collected', batch_id: null, delivery_method: null, tracking_number: null, order_status: 'N20' })
       .in('id', ids)
     // 서버 재조회 없이 로컬에서 바로 반영
     setItems(prev => prev.filter(i => !ids.includes(i.id)))
