@@ -1,33 +1,43 @@
 import { useState } from 'react'
 import BarcodeDB from './BarcodeDB'
 import BarcodeAssign from './BarcodeAssign'
+import BarcodeHelpModal from './BarcodeHelpModal'
 
 export default function AdminProducts() {
   const [tab, setTab] = useState<'list' | 'assign'>('list')
   // 채번 탭에서 채번이 끝나면 이 값을 올려서 목록 탭이(숨겨져 있어도) 새로 불러오게 함
   const [refreshKey, setRefreshKey] = useState(0)
+  const [showHelp, setShowHelp] = useState(false)
 
   return (
     <div className="max-w-3xl">
       <h2 className="text-xl font-bold text-gray-800 mb-1">상품 관리</h2>
       <p className="text-sm text-gray-400 mb-4">바코드 DB 조회/수정과 신규 채번을 한 곳에서 처리해요.</p>
 
-      <div className="flex gap-2 mb-6">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setTab('list')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+              tab === 'list' ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-600 border-gray-300 hover:border-indigo-400'
+            }`}
+          >
+            바코드 목록
+          </button>
+          <button
+            onClick={() => setTab('assign')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+              tab === 'assign' ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-600 border-gray-300 hover:border-indigo-400'
+            }`}
+          >
+            바코드 채번
+          </button>
+        </div>
         <button
-          onClick={() => setTab('list')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-            tab === 'list' ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-600 border-gray-300 hover:border-indigo-400'
-          }`}
+          onClick={() => setShowHelp(true)}
+          className="text-sm text-gray-500 border border-gray-300 rounded-lg px-3 py-2 hover:border-indigo-400 hover:text-indigo-600 transition-colors"
         >
-          바코드 목록
-        </button>
-        <button
-          onClick={() => setTab('assign')}
-          className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-            tab === 'assign' ? 'bg-indigo-600 text-white border-indigo-600' : 'text-gray-600 border-gray-300 hover:border-indigo-400'
-          }`}
-        >
-          바코드 채번
+          도움말
         </button>
       </div>
 
@@ -39,6 +49,8 @@ export default function AdminProducts() {
       <div className={tab === 'assign' ? '' : 'hidden'}>
         <BarcodeAssign onAssigned={() => setRefreshKey(k => k + 1)} />
       </div>
+
+      {showHelp && <BarcodeHelpModal onClose={() => setShowHelp(false)} />}
     </div>
   )
 }
