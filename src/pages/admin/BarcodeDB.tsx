@@ -91,8 +91,34 @@ export default function BarcodeDB({ refreshKey }: Props) {
 
     const clean = (v?: string) => (v ?? '').replace(/[\t"]/g, '').trim()
 
+    // 따옴표로 감싼 CSV("a","b","c")와 일반 콤마 구분 CSV(a,b,c)를 모두 지원.
+    // 예전엔 '","' 고정 구분자만 찾아서, 따옴표 없는 파일이 올라오면 한 줄 전체가
+    // product_code 한 칸에 다 들어가버리는 사고가 났음(2026-08-24) — 상태 기계로 파싱해 방지.
+    function parseCsvLine(line: string): string[] {
+      const cols: string[] = []
+      let cur = ''
+      let inQuotes = false
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i]
+        if (inQuotes) {
+          if (c === '"') {
+            if (line[i + 1] === '"') { cur += '"'; i++ }
+            else inQuotes = false
+          } else {
+            cur += c
+          }
+        } else {
+          if (c === '"') inQuotes = true
+          else if (c === ',') { cols.push(cur); cur = '' }
+          else cur += c
+        }
+      }
+      cols.push(cur)
+      return cols
+    }
+
     const rows = lines.slice(1).map(line => {
-      const cols = line.split('","')
+      const cols = parseCsvLine(line)
       return {
         product_code: clean(cols[0]),
         product_name: clean(cols[1]),
