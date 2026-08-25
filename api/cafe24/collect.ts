@@ -166,6 +166,15 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
       pendingRows = pendingRows.concat(holdRows)
     }
 
+    // 로컬에 이미 최종 상태로 확인된 상품은 다시 확인할 필요 없음 — 주문 수집이
+    // order_status=N20으로 카페24를 다시 조회하는 방식이라, 혹시 이 중 하나가 다시
+    // N20으로 되돌아가도(드문 케이스) 그 날짜로 주문 수집을 돌리면 알아서 다시 잡힘.
+    // PostgREST의 not.in 필터는 order_status가 NULL인 행을 걸러버려서(NULL NOT IN (...)
+    // 은 NULL) DB 쿼리 대신 여기서 걸러냄 — 아직 한 번도 확인 안 된(NULL) 상품은 계속 대상에
+    // 남아야 함 (2026-08-21 결정)
+    const RESOLVED_STATUSES = new Set(['N30', 'N40', 'N50', 'C40', 'E40', 'E41', 'R30', 'R40'])
+    pendingRows = pendingRows.filter((row: any) => !row.order_status || !RESOLVED_STATUSES.has(row.order_status))
+
     const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null; order_status: string | null; batch_id: string | null }[]>()
     const orderIdByNo = new Map<string, string>()
     for (const row of (pendingRows ?? []) as any[]) {
