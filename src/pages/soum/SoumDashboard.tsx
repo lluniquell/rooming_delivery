@@ -162,6 +162,22 @@ export default function SoumDashboard() {
     ? shippedRows.filter(r => fmtDate(new Date(r.shipped_at)) === selectedDate).length
     : 0
 
+  // 월 합계 — 달력에 표시 중인 달 전체를 대상으로 (날짜 선택과 무관하게 항상 표시)
+  const monthStaffStats = useMemo(() => {
+    const map: Record<string, StaffStats> = {}
+    for (const r of pickedRows) addTo(map, r.picked_by, 'picked', r.quantity)
+    for (const r of miseongRows) addTo(map, r.picked_by, 'miseong', r.quantity)
+    for (const r of shippedRows) addTo(map, r.shipped_by, 'shipped', r.quantity)
+    for (const r of stowRows) addTo(map, r.staff_name, 'stow', r.quantity)
+    return Object.values(map).sort((a, b) =>
+      (b.picked + b.miseong + b.shipped + b.stow) - (a.picked + a.miseong + a.shipped + a.stow)
+    )
+  }, [pickedRows, miseongRows, shippedRows, stowRows])
+
+  const monthCollected = orderRows.length
+  const monthMiseong = miseongRows.reduce((sum, r) => sum + r.quantity, 0)
+  const monthShipped = shippedRows.length
+
   const year = monthCursor.getFullYear()
   const month = monthCursor.getMonth()
   const firstWeekday = new Date(year, month, 1).getDay()
@@ -241,8 +257,57 @@ export default function SoumDashboard() {
         )}
       </div>
 
+      <h3 className="text-sm font-bold text-gray-700 mb-3">{year}년 {month + 1}월 합계</h3>
+
+      <div className="grid grid-cols-3 gap-3 mb-6">
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">수집</div>
+          <div className="text-2xl font-bold text-gray-800">{monthCollected}건</div>
+        </div>
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">미성 이동</div>
+          <div className="text-2xl font-bold text-amber-600">{monthMiseong}개</div>
+        </div>
+        <div className="bg-white rounded-xl border p-4">
+          <div className="text-sm text-gray-500 mb-1">배송중 전환</div>
+          <div className="text-2xl font-bold text-blue-600">{monthShipped}건</div>
+        </div>
+      </div>
+
+      <h3 className="text-sm font-bold text-gray-700 mb-2">담당자별 월 처리 수량</h3>
+      {monthStaffStats.length === 0 ? (
+        <p className="text-sm text-gray-400 mb-6">이번 달 처리 기록이 없습니다.</p>
+      ) : (
+        <div className="bg-white rounded-xl border overflow-x-auto mb-6">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-gray-500 text-xs">
+                <th className="text-left px-4 py-2 font-medium">담당자</th>
+                <th className="text-right px-4 py-2 font-medium">피킹확인</th>
+                <th className="text-right px-4 py-2 font-medium">미성이동</th>
+                <th className="text-right px-4 py-2 font-medium">출고검수</th>
+                <th className="text-right px-4 py-2 font-medium">입고진열</th>
+                <th className="text-right px-4 py-2 font-medium">합계</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthStaffStats.map(s => (
+                <tr key={s.name} className="border-b last:border-0">
+                  <td className="px-4 py-2 font-medium text-gray-800">{s.name}</td>
+                  <td className="px-4 py-2 text-right text-gray-600">{s.picked || '-'}</td>
+                  <td className="px-4 py-2 text-right text-gray-600">{s.miseong || '-'}</td>
+                  <td className="px-4 py-2 text-right text-gray-600">{s.shipped || '-'}</td>
+                  <td className="px-4 py-2 text-right text-gray-600">{s.stow || '-'}</td>
+                  <td className="px-4 py-2 text-right font-bold text-gray-800">{s.picked + s.miseong + s.shipped + s.stow}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {!selectedDate ? (
-        <p className="text-sm text-gray-400 text-center py-6">달력에서 날짜를 클릭하면 상세 내역을 볼 수 있어요.</p>
+        <p className="text-sm text-gray-400 text-center py-6">달력에서 날짜를 클릭하면 그 날짜 상세가 여기 표시돼요.</p>
       ) : (
         <>
           <h3 className="text-sm font-bold text-gray-700 mb-3">{selectedLabel} 상세</h3>
