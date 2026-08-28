@@ -27,6 +27,7 @@ interface Item {
   status: string
   cafe24_item_code: string | null
   tracking_number: string | null
+  order_status: string | null
   cafe24_order_no: string
   customer_name: string
   receiver_name: string | null
@@ -185,7 +186,7 @@ export default function SoumBatch() {
     for (let offset = 0; ; offset += PAGE) {
       const { data: page } = await supabase
         .from('order_items')
-        .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, tm_barcode, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no)')
+        .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, order_status, tm_barcode, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no)')
         .eq('batch_id', batchId)
         .eq('status', 'confirmed')
         .range(offset, offset + PAGE - 1)
@@ -207,6 +208,7 @@ export default function SoumBatch() {
         status: row.status,
         cafe24_item_code: row.cafe24_item_code,
         tracking_number: row.tracking_number,
+        order_status: row.order_status,
         cafe24_order_no: row.orders.cafe24_order_no,
         customer_name: row.orders.customer_name,
         receiver_name: row.orders.receiver_name,
@@ -275,8 +277,14 @@ export default function SoumBatch() {
     const orderItems = items.filter(i => i.cafe24_order_no === target.cafe24_order_no)
     if (!confirm(`이 주문(${target.cafe24_order_no})의 상품 ${orderItems.length}건을 배정 취소하고 주문 수집(미배정) 목록으로 되돌릴까요?`)) return
 
-    // 카페24에 이미 운송장이 등록돼 있는 상품이 있으면(운송장 업로드를 거쳤으면) 각각 정리
-    for (const item of orderItems) {
+    // 카페24 쪽 운송장 정리는 아직 N20(배송준비중)인 상품만 — 이미 배송이 진행된 상품(N21
+    // 이상)은 카페24 상태를 그대로 두고 딜리버리 웹에서만 배치 해제한다. 그런 상품은
+    // order_status도 덮어쓰지 않고 실제 값 그대로 둬서, 다음 "주문 재확인" 때 카페24
+    // 실제 상태로 자연스럽게 정리되게(더 이상 문제로 안 걸리게) 한다.
+    const n20Items = orderItems.filter(i => i.order_status === 'N20')
+    const otherItems = orderItems.filter(i => i.order_status !== 'N20')
+
+    for (const item of n20Items) {
       if (!item.tracking_number || !item.cafe24_item_code) continue
       try {
         const res = await fetch('/api/cafe24/shipments?action=unregister', {
@@ -293,14 +301,19 @@ export default function SoumBatch() {
       }
     }
 
-    const ids = orderItems.map(i => i.id)
-    await supabase.from('order_items')
-      // order_status도 N20으로 같이 되돌려야 함 — 재확인이 그 사이 N21/N22 등으로 갱신해놨으면
-      // 안 건드릴 시 "주문 수집" 미배정 목록(order_status='N20' 필터)에서 계속 안 보임
-      // (20260810-0000823 cushion, 2026-08-21 발견)
-      .update({ status: 'collected', batch_id: null, delivery_method: null, tracking_number: null, order_status: 'N20' })
-      .in('id', ids)
+    if (n20Items.length) {
+      await supabase.from('order_items')
+        .update({ status: 'collected', batch_id: null, delivery_method: null, tracking_number: null, order_status: 'N20' })
+        .in('id', n20Items.map(i => i.id))
+    }
+    if (otherItems.length) {
+      await supabase.from('order_items')
+        .update({ status: 'collected', batch_id: null, delivery_method: null, tracking_number: null })
+        .in('id', otherItems.map(i => i.id))
+    }
+
     // 서버 재조회 없이 로컬에서 바로 반영
+    const ids = orderItems.map(i => i.id)
     setItems(prev => prev.filter(i => !ids.includes(i.id)))
     setBatches(prev => prev.map(b =>
       b.id === activeBatchId ? { ...b, item_count: Math.max(0, b.item_count - ids.length) } : b
