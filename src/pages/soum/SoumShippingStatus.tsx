@@ -113,6 +113,21 @@ export default function SoumShippingStatus() {
 
   const selectedStats = selectedDate ? (dayMethodStats[selectedDate] ?? {}) : {}
 
+  // 월 합계 — 달력에 표시 중인 달 전체 (날짜 선택과 무관하게 항상 표시)
+  const monthStats = useMemo(() => {
+    const totals: Record<string, MethodStat> = {}
+    for (const day of Object.values(dayMethodStats)) {
+      for (const m of METHODS) {
+        if (!day[m]) continue
+        const t = (totals[m] ??= { orderCount: 0, skuCount: 0, eaCount: 0 })
+        t.orderCount += day[m].orderCount
+        t.skuCount += day[m].skuCount
+        t.eaCount += day[m].eaCount
+      }
+    }
+    return totals
+  }, [dayMethodStats])
+
   const year = monthCursor.getFullYear()
   const month = monthCursor.getMonth()
   const firstWeekday = new Date(year, month, 1).getDay()
@@ -179,8 +194,19 @@ export default function SoumShippingStatus() {
         )}
       </div>
 
+      <h3 className="text-sm font-bold text-gray-700 mb-3">{year}년 {month + 1}월 합계</h3>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        {METHODS.map(m => (
+          <div key={m} className="bg-white rounded-xl border p-4">
+            <div className="text-sm text-gray-500 mb-2">{m}</div>
+            <div className="text-2xl font-bold text-indigo-600">{monthStats[m]?.orderCount ?? 0}건</div>
+            <div className="text-xs text-gray-400 mt-1">SKU {monthStats[m]?.skuCount ?? 0}개 / EA {monthStats[m]?.eaCount ?? 0}개</div>
+          </div>
+        ))}
+      </div>
+
       {!selectedDate ? (
-        <p className="text-sm text-gray-400 text-center py-6">달력에서 날짜를 클릭하면 상세 내역을 볼 수 있어요.</p>
+        <p className="text-sm text-gray-400 text-center py-6">달력에서 날짜를 클릭하면 그 날짜 상세가 여기 표시돼요.</p>
       ) : (
         <>
           <h3 className="text-sm font-bold text-gray-700 mb-3">{selectedLabel} 상세</h3>
