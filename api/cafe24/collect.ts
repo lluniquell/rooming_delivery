@@ -201,9 +201,17 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
       const piiClearedOrderIds = new Set<string>()
       for (const no of chunk) {
         const liveItems = itemsByOrder.get(no) ?? []
+        // 취소가 감지되면 orders.cancelled_at도 같이 세워야 함 — 이 필드는 출고검수1
+        // 화면(SoumOutgoing.tsx)이 "취소 주문입니다, 출고하지 마세요" 경고를 띄우는 유일한
+        // 근거인데, 원래 카페24 웹훅(취소 이벤트)만 이걸 채워서 웹훅이 안 온 취소는(예:
+        // 이미 운송장이 붙어 보류 배치에 있다가 취소된 건) 재확인이 order_status는 C40으로
+        // 갱신해도 cancelled_at은 그대로 null이라 출고검수 경고가 안 떠서 취소 주문이 그대로
+        // 검수/출고될 수 있었음(20260825-0000670, 2026-09-01 발견)
+        let orderCancelled = false
         for (const pendingItem of byOrderNo.get(no) ?? []) {
           const match = liveItems.find((i: any) => i.order_item_code === pendingItem.cafe24_item_code)
           if (!match) continue
+          if (match.order_status && /^C/.test(match.order_status)) orderCancelled = true
           const patch: Record<string, any> = {}
           // 'N20' 고정 비교가 아니라 로컬에 저장된 실제 값과 비교 — N21처럼 중간 상태에서도
           // 계속 최신값을 따라가야 함(위 주석 참고)
@@ -227,6 +235,11 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
           if (Object.keys(patch).length) {
             await supabase.from('order_items').update(patch).eq('id', pendingItem.id)
           }
+        }
+
+        if (orderCancelled) {
+          const orderId = orderIdByNo.get(no)
+          if (orderId) await supabase.from('orders').update({ cancelled_at: new Date().toISOString() }).eq('id', orderId)
         }
 
         // 이 주문의 카페24 상품이 전부 배송중/배송완료/취소로 끝났으면, 출고검수 완료 때와

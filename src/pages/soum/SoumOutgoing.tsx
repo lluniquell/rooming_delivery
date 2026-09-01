@@ -79,13 +79,16 @@ export default function SoumOutgoing() {
   async function loadPending() {
     // 운송장 등록됐고 아직 출고 안 된 상품이 있는 주문 — 운송장번호는 상품(order_item) 자신의
     // 값이라, 같은 주문에 다른 배송방법 상품이 섞여 있어도 그건 여기 잡히지 않음.
-    // 이 화면은 CJ 전용이라 직배(스케줄러/배송원 앱에서 완료 처리)는 제외
+    // 이 화면은 CJ 전용이라 직배(스케줄러/배송원 앱에서 완료 처리)는 제외.
+    // 취소된 주문(orders.cancelled_at)은 loadByTracking에서 스캔 시 어차피 막히니
+    // 잔여 목록에서도 미리 빼서 처리 불가능한 건이 남아있는 것처럼 보이지 않게 함
     const { data } = await supabase
       .from('order_items')
-      .select('tracking_number, quantity, orders!inner(customer_name)')
+      .select('tracking_number, quantity, orders!inner(customer_name, cancelled_at)')
       .eq('status', 'confirmed')
       .eq('delivery_method', 'CJ')
       .not('tracking_number', 'is', null)
+      .is('orders.cancelled_at', null)
     const map: Record<string, PendingOrder> = {}
     for (const row of (data ?? []) as any[]) {
       const t = row.tracking_number
