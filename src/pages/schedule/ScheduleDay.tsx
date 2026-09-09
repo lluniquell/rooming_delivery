@@ -819,17 +819,27 @@ export default function ScheduleDay() {
 
   async function toggleWaypoint(route: RouteLane, preset: PresetLocation) {
     const active = dayWaypoints.find(w => w.route_id === route.id && w.preset_key === preset.key)
+    let nextWaypoints = dayWaypoints
     if (active) {
       await supabase.from('schedule_day_waypoints').delete().eq('id', active.id)
-      setDayWaypoints(prev => prev.filter(w => w.id !== active.id))
+      nextWaypoints = dayWaypoints.filter(w => w.id !== active.id)
+      setDayWaypoints(nextWaypoints)
     } else {
       const route_order = stopsForRoute(route.id).length + 1
       const { data } = await supabase.from('schedule_day_waypoints')
         .insert({ date, route_id: route.id, preset_key: preset.key, route_order })
         .select('id, preset_key, route_id, route_order')
         .single()
-      if (data) setDayWaypoints(prev => [...prev, data])
+      if (data) {
+        nextWaypoints = [...dayWaypoints, data]
+        setDayWaypoints(nextWaypoints)
+      }
     }
+    // 선진 출발 같은 프리셋 경유지를 토글하면 미배정 목록의 "가까운 순" 기준점(anchor)도
+    // 바뀌는데, dayWaypoints state는 비동기라 여기서 바로 loadAll(batchId, routes)를
+    // 부르면 갱신 전 값을 참조하는 stale closure가 됨 — 방금 계산한 nextWaypoints를
+    // 직접 넘겨서 새로고침 없이도 미배정 거리가 바로 재계산되게 함
+    if (batchId) loadAll(batchId, routes, nextWaypoints)
   }
 
   async function addRoute() {
