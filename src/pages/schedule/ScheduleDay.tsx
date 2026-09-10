@@ -914,14 +914,16 @@ export default function ScheduleDay() {
   }
 
   // 루트 마감(잠금) — 이 루트에 배정된 직배 주문들만 카페24에 배송대기로 등록하고, 이후 이 루트의
-  // 내용(주문/경유지/기타 배송지 추가·삭제·순서변경)은 잠김. 마감 취소로 다시 잠금 해제 가능
+  // 내용(주문/경유지/기타 배송지 추가·삭제·순서변경)은 잠김. 마감 취소하면 등록해둔 운송장을
+  // 카페24에서 정리해서 배송준비중(N20)으로 되돌림 — 안 그러면 마감 취소 후 루트 내용을
+  // 바꿔도 카페24는 여전히 예전 운송장으로 배송대기 중인 채 어긋난 상태로 남음(2026-09-10)
   async function toggleRouteClosed(route: RouteLane) {
     if (!date) return
     const next = !route.closed
-    if (next) {
-      const routeOrders = stops.filter(s => s.route_id === route.id)
-      if (routeOrders.length) {
-        setRegisteringRouteId(route.id)
+    const routeOrders = stops.filter(s => s.route_id === route.id)
+    if (routeOrders.length) {
+      setRegisteringRouteId(route.id)
+      if (next) {
         const trackingNo = `직배${date.replace(/-/g, '')}`
         try {
           const res = await fetch('/api/cafe24/shipments?action=standby', {
@@ -940,8 +942,37 @@ export default function ScheduleDay() {
         } catch {
           alert('카페24 등록 중 네트워크 오류가 발생했습니다.')
         }
-        setRegisteringRouteId(null)
+      } else {
+        const orderNoByOrderId = new Map(routeOrders.map(s => [s.order_id, s.cafe24_order_no]))
+        const { data: registeredItems } = await supabase
+          .from('order_items')
+          .select('id, order_id, cafe24_item_code')
+          .in('order_id', [...orderNoByOrderId.keys()])
+          .not('tracking_number', 'is', null)
+        const errors: string[] = []
+        for (const item of registeredItems ?? []) {
+          const orderNo = orderNoByOrderId.get(item.order_id)
+          if (!orderNo || !item.cafe24_item_code) continue
+          try {
+            const res = await fetch('/api/cafe24/shipments?action=unregister', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ order_no: orderNo, item_code: item.cafe24_item_code }),
+            })
+            const data = await res.json()
+            if (data.error) errors.push(`${orderNo}: ${data.error}`)
+          } catch {
+            errors.push(`${orderNo}: 네트워크 오류`)
+          }
+        }
+        if (errors.length) {
+          alert(`카페24 배송준비중 되돌리기 일부 실패:\n${errors.slice(0, 5).join('\n')}`)
+        }
+        if (registeredItems?.length) {
+          await supabase.from('order_items').update({ tracking_number: null }).in('id', registeredItems.map(i => i.id))
+        }
       }
+      setRegisteringRouteId(null)
     }
     const closed_at = next ? new Date().toISOString() : null
     await supabase.from('schedule_routes').update({ closed: next, closed_at }).eq('id', route.id)
