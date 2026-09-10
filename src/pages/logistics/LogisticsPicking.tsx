@@ -294,8 +294,8 @@ export default function LogisticsPicking() {
 
   // 실제 운송장이 아니라 창고에서 박스 하나하나에 붙이는 식별용 라벨 — 박스(수량) 1개당
   // 1장씩. 배송담당자/상품명/고객명+날짜-배송순서만 텍스트로 인쇄.
-  // 아직 준비(피킹) 안 된 상품까지 라벨이 나가면 실물 없이 라벨만 붙이게 될 수 있어서
-  // 준비완료(picked_at 있음) 상품만 대상으로 함
+  // 피킹 전 상태를 포함해 전체 상품을 대상으로 함 — 라벨을 먼저 뽑아 들고 다니면서
+  // 피킹하는 동시에 붙이는 방식으로 운영하기로 함(2026-09-10)
   const dateLabel = date.slice(2).replace(/-/g, '')
 
   // 상품 1개가 실제로 몇 박스로 오는지(glo-ball floor처럼 1개=2박스인 경우 등)
@@ -319,7 +319,7 @@ export default function LogisticsPicking() {
     }
   }
 
-  const labels: Label[] = doneItems
+  const labels: Label[] = items
     .flatMap(i => {
       const routeIds = [i.route_id, ...(companionRoutesByOrderNo[i.cafe24_order_no] ?? [])].filter((id): id is string => !!id)
       const driverNames = [...new Set(routeIds.map(id => driverNameByRoute[id]).filter((n): n is string => !!n))]
@@ -468,7 +468,7 @@ export default function LogisticsPicking() {
       </div>
       <button
         onClick={() => setShowLabels(true)}
-        disabled={doneItems.length === 0}
+        disabled={items.length === 0}
         className="w-full py-2 rounded-lg text-sm font-medium bg-orange-500 text-white disabled:opacity-40 mb-3"
       >라벨 출력 {labels.length > 0 && `(${labels.length})`}</button>
 
