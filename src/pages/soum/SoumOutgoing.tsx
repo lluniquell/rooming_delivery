@@ -80,17 +80,18 @@ export default function SoumOutgoing() {
     // 운송장 등록됐고 아직 출고 안 된 상품이 있는 주문 — 운송장번호는 상품(order_item) 자신의
     // 값이라, 같은 주문에 다른 배송방법 상품이 섞여 있어도 그건 여기 잡히지 않음.
     // 이 화면은 CJ 전용이라 직배(스케줄러/배송원 앱에서 완료 처리)는 제외.
-    // 취소된 주문(orders.cancelled_at)은 loadByTracking에서 스캔 시 어차피 막히니
-    // 잔여 목록에서도 미리 빼서 처리 불가능한 건이 남아있는 것처럼 보이지 않게 함
+    // 취소된 상품은 loadByTracking에서 스캔 시 어차피 제외되니 잔여 목록 건수에도 미리 안
+    // 넣음 — orders.cancelled_at(주문 단위) 대신 상품 자신의 order_status로 판단해야,
+    // 부분취소 주문의 취소 안 된 다른 정상 상품까지 목록에서 같이 사라지지 않음(2026-09-11)
     const { data } = await supabase
       .from('order_items')
-      .select('tracking_number, quantity, orders!inner(customer_name, cancelled_at)')
+      .select('tracking_number, quantity, order_status, orders!inner(customer_name)')
       .eq('status', 'confirmed')
       .eq('delivery_method', 'CJ')
       .not('tracking_number', 'is', null)
-      .is('orders.cancelled_at', null)
     const map: Record<string, PendingOrder> = {}
     for (const row of (data ?? []) as any[]) {
+      if (row.order_status && /^C/.test(row.order_status)) continue
       const t = row.tracking_number
       if (!map[t]) map[t] = { tracking_number: t, customer_name: row.orders.customer_name, item_count: 0, ea_count: 0 }
       map[t].item_count++
@@ -105,7 +106,7 @@ export default function SoumOutgoing() {
     // 이 화면은 CJ 전용이라 직배는 제외
     const { data: itemData } = await supabase
       .from('order_items')
-      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, cafe24_item_code, product_no, order_id, orders!inner(id, cafe24_order_no, customer_name, cancelled_at)')
+      .select('id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, delivery_method, cafe24_item_code, product_no, order_id, order_status, orders!inner(id, cafe24_order_no, customer_name)')
       .eq('tracking_number', tracking)
       .eq('status', 'confirmed')
       .eq('delivery_method', 'CJ')
@@ -117,18 +118,23 @@ export default function SoumOutgoing() {
       return
     }
 
-    // 출고 전 취소된 주문 — 검수/출고 진행 자체를 막고 경고만 표시
-    if ((itemData[0] as any).orders.cancelled_at) {
-      setMessage('⚠️ 취소 주문입니다. 출고하지 마세요.')
+    // 출고 전 취소된 상품은 목록에서 제외만 하고, 같은 운송장의 나머지 정상 상품은
+    // 그대로 검수 진행 — 상품 하나가 취소됐다고 같은 운송장에 묶인 다른 정상 상품까지
+    // 막아버리면 안 됨(부분취소, 2026-09-11). 전부 취소된 경우에만 완전히 막음
+    const activeItems = (itemData as any[]).filter(i => !(i.order_status && /^C/.test(i.order_status)))
+    const cancelledCount = itemData.length - activeItems.length
+
+    if (!activeItems.length) {
+      setMessage('⚠️ 이 운송장의 상품이 모두 취소됐습니다. 출고하지 마세요.')
       setItems([])
       setOrderInfo(null)
       return
     }
 
-    const order = (itemData[0] as any).orders
+    const order = activeItems[0].orders
     setOrderInfo({ id: order.id, cafe24_order_no: order.cafe24_order_no, customer_name: order.customer_name, tracking_number: tracking })
-    setItems(itemData.map(({ orders, ...rest }: any) => rest))
-    setMessage('')
+    setItems(activeItems.map(({ orders, order_status, ...rest }) => rest))
+    setMessage(cancelledCount ? `⚠️ 취소된 상품 ${cancelledCount}건은 제외했습니다.` : '')
     setTimeout(() => barcodeRef.current?.focus(), 100)
   }
 
