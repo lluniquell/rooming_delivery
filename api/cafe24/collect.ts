@@ -25,6 +25,22 @@ async function getToken(): Promise<string> {
       body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: data.refresh_token }),
     })
     const refreshed = await tokenRes.json()
+
+    // 갱신 실패 응답을 그대로 반영하면 안 됨 — access_token/refresh_token이 없는 채로
+    // upsert하면 이 시점까지는 멀쩡했던 기존 토큰을 덮어써버릴 수 있음(2026-09-14,
+    // refresh_token invalid_grant 사고)
+    if (!tokenRes.ok || !refreshed.access_token || !refreshed.refresh_token) {
+      // 카페24 refresh_token은 1회용(사용하면 새 값으로 회전)이라, 동시에 두 요청이 같은
+      // 옛 refresh_token으로 갱신을 시도하면 하나만 성공하고 나머지는 여기로 옴 — 그 경우
+      // 진짜 실패가 아니라 "이미 다른 요청이 갱신해놨다"는 뜻이므로, DB를 다시 읽어서
+      // 내가 썼던 값과 달라져 있고(=누가 갱신함) 아직 유효하면 그 새 토큰을 그대로 씀
+      const { data: latest } = await supabase.from('cafe24_tokens').select('*').eq('id', 1).single()
+      if (latest && latest.refresh_token !== data.refresh_token && new Date(latest.access_expires_at) > new Date()) {
+        return latest.access_token
+      }
+      throw new Error(`카페24 토큰 갱신 실패: ${refreshed.error_description ?? refreshed.error ?? JSON.stringify(refreshed)}`)
+    }
+
     await supabase.from('cafe24_tokens').upsert({
       id: 1,
       access_token: refreshed.access_token,
