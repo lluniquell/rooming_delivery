@@ -18,7 +18,7 @@ interface OrderStop {
 type CombinedStop =
   | { kind: 'order'; route_order: number; order: OrderStop }
   | { kind: 'preset'; route_order: number; name: string; address: string | null }
-  | { kind: 'adhoc'; route_order: number; id: string; name: string; address: string | null; phone: string | null; reason: string | null; companionName: string | null; realOrderId: string | null; realOrderDelivered: boolean }
+  | { kind: 'adhoc'; route_order: number; id: string; name: string; address: string | null; phone: string | null; reason: string | null; companionName: string | null; realOrderId: string | null; realOrderStatus: 'pending' | 'done' | 'failed' | null }
 
 const STATUS_LABEL: Record<string, string> = { pending: '대기', done: '완료', failed: '불가' }
 const STATUS_COLOR: Record<string, string> = {
@@ -121,14 +121,14 @@ export default function DriverList() {
         (adhocData ?? []).map(a => a.reason?.match(/\d{8}-\d{7}/)?.[0]).filter((n): n is string => !!n)
       )]
       const companionNameByOrderNo: Record<string, string> = {}
-      // 동행 항목의 "촬영"을 원래 주문 상세 화면으로 바로 연결하기 위한 실제 order_id/완료여부
+      // 동행 항목을 실제 주문 카드처럼 그대로 보여주기 위한 실제 order_id/상태
       // — 동행자가 여기서 직접 완료 처리까지 할 수 있게(2026-09-22)
       const companionOrderIdByOrderNo: Record<string, string> = {}
-      const companionDeliveredByOrderNo: Record<string, boolean> = {}
+      const companionStatusByOrderNo: Record<string, 'pending' | 'done' | 'failed'> = {}
       if (companionOrderNos.length) {
         const { data: originalOrders } = await supabase
           .from('orders')
-          .select('id, cafe24_order_no, route_id, delivered_at')
+          .select('id, cafe24_order_no, route_id, delivered_at, delivery_memo')
           .in('cafe24_order_no', companionOrderNos)
         const originalRouteIds = [...new Set((originalOrders ?? []).map(o => o.route_id).filter((id): id is string => !!id))]
         if (originalRouteIds.length) {
@@ -148,7 +148,7 @@ export default function DriverList() {
         }
         for (const o of originalOrders ?? []) {
           companionOrderIdByOrderNo[o.cafe24_order_no] = o.id
-          companionDeliveredByOrderNo[o.cafe24_order_no] = !!o.delivered_at
+          companionStatusByOrderNo[o.cafe24_order_no] = o.delivered_at ? 'done' : o.delivery_memo ? 'failed' : 'pending'
         }
       }
 
@@ -218,7 +218,7 @@ export default function DriverList() {
             reason: a.reason,
             companionName: orderNo ? companionNameByOrderNo[orderNo] ?? null : null,
             realOrderId: orderNo ? companionOrderIdByOrderNo[orderNo] ?? null : null,
-            realOrderDelivered: orderNo ? companionDeliveredByOrderNo[orderNo] ?? false : false,
+            realOrderStatus: orderNo ? companionStatusByOrderNo[orderNo] ?? null : null,
           }
         }),
       ].sort((a, b) => a.route_order - b.route_order)
@@ -352,17 +352,41 @@ export default function DriverList() {
               </div>
             )
           }
+          if (s.kind === 'adhoc' && s.realOrderId) {
+            // 동행이면서 원래 주문을 찾을 수 있는 경우 — 그냥 실제 주문 카드와 완전히 동일하게
+            // 보여줌. "기타" 취급을 걷어내고 바로 원래 주문 상세로 연결해서, 실제 완료 처리
+            // (상품별 사진, 운송장 재사용, 카페24 전환)는 그 화면 로직을 그대로 재사용함(2026-09-22)
+            const status = s.realOrderStatus ?? 'pending'
+            return (
+              <Link
+                key={s.id}
+                to={`/delivery/${s.realOrderId}`}
+                className="block bg-white rounded-xl border p-4 hover:shadow-sm"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <span className="text-xs text-gray-400 mr-2">{i + 1}번째</span>
+                    <span className="font-medium">{s.name}</span>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLOR[status]}`}>
+                    {STATUS_LABEL[status]}
+                  </span>
+                </div>
+                {s.address && <p className="text-sm text-gray-500 mt-1">{s.address}</p>}
+                {s.companionName && (
+                  <p className="text-xs text-purple-600 mt-1">동행자: {s.companionName}</p>
+                )}
+              </Link>
+            )
+          }
           {
-            // s.kind === 'adhoc' — 원래 배송(주문) 카드와 동일하게, 클릭해서 펼쳐야
-            // 전화/문자/지도/촬영 버튼이 나오게 함(2026-09-21).
-            // 동행(realOrderId 있음)이면 "촬영" 대신 원래 주문 상세로 바로 연결 — 실제 완료
-            // 처리(상품별 사진, 운송장 재사용, 카페24 전환)는 그 화면 로직을 그대로 재사용하고
-            // 여기서 따로 만들지 않음(2026-09-22)
+            // s.kind === 'adhoc' (원래 주문을 찾을 수 없는 진짜 기타 배송지만 여기로 옴) —
+            // 클릭해서 펼쳐야 전화/문자/지도/촬영 버튼이 나오게 함(2026-09-21)
             const photographed = photoTakenAdhoc.has(s.id)
             const uploading = uploadingAdhocId === s.id
             const expanded = expandedAdhoc.has(s.id)
             const links = s.address ? mapDeeplink(s.address) : null
-            const done = s.realOrderId ? s.realOrderDelivered : photographed
+            const done = photographed
             return (
               <div key={s.id} className="bg-purple-50 border border-purple-200 rounded-xl p-4">
                 <button
@@ -377,7 +401,7 @@ export default function DriverList() {
                     <span className="text-xs text-gray-400">{i + 1}번째</span>
                     <span className="text-[10px] px-1 rounded font-bold bg-purple-100 text-purple-700">기타</span>
                     <span className="font-medium">{s.name}</span>
-                    {done && <span className="text-green-600 text-xs font-medium ml-auto">✓ {s.realOrderId ? '완료' : '촬영완료'}</span>}
+                    {done && <span className="text-green-600 text-xs font-medium ml-auto">✓ 촬영완료</span>}
                   </div>
                   {s.address && <p className="text-sm text-gray-500 mt-1">{s.address}</p>}
                 </button>
@@ -385,7 +409,7 @@ export default function DriverList() {
                   <>
                     {(s.phone || s.reason) && (
                       <p className="text-xs text-gray-400 mt-1">
-                        {[s.phone, s.companionName ? `${s.reason} · 동행자: ${s.companionName}` : s.reason].filter(Boolean).join(' · ')}
+                        {[s.phone, s.reason].filter(Boolean).join(' · ')}
                       </p>
                     )}
                     <div className="flex gap-2 mt-2">
@@ -401,29 +425,21 @@ export default function DriverList() {
                       {links && (
                         <a href={links.naver} className="flex-1 text-center bg-white text-gray-700 border py-1.5 rounded-lg text-xs font-medium">📍 네이버</a>
                       )}
-                      {s.realOrderId ? (
-                        !s.realOrderDelivered && (
-                          <Link to={`/delivery/${s.realOrderId}`} className="flex-1 text-center bg-purple-600 text-white py-1.5 rounded-lg text-xs font-medium">
-                            📦 주문 상세 열기
-                          </Link>
-                        )
-                      ) : (
-                        !photographed && (
-                          <label className="flex-1 text-center bg-purple-600 text-white py-1.5 rounded-lg text-xs font-medium cursor-pointer">
-                            {uploading ? '업로드 중...' : '📷 촬영'}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              capture="environment"
-                              className="hidden"
-                              disabled={uploading}
-                              onChange={e => {
-                                const file = e.target.files?.[0]
-                                if (file) handleAdhocPhoto(s.id, file)
-                              }}
-                            />
-                          </label>
-                        )
+                      {!photographed && (
+                        <label className="flex-1 text-center bg-purple-600 text-white py-1.5 rounded-lg text-xs font-medium cursor-pointer">
+                          {uploading ? '업로드 중...' : '📷 촬영'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            disabled={uploading}
+                            onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (file) handleAdhocPhoto(s.id, file)
+                            }}
+                          />
+                        </label>
                       )}
                     </div>
                   </>
