@@ -949,7 +949,7 @@ export default function SoumBatch() {
                           </td>
                           <td className={`px-4 py-3 text-center font-semibold text-gray-800 ${inspected ? 'bg-blue-50' : ''}`}>{item.quantity}</td>
                           <td className={`px-4 py-3 text-sm text-gray-600 ${inspected ? 'bg-blue-50' : ''}`}>{item.delivery_method ?? '-'}</td>
-                          {activeBatch?.name === '팀무버 예약' ? (
+                          {activeBatch?.name?.includes('팀무버') ? (
                             idx === 0 && (
                               <td rowSpan={group.items.length} className="px-4 py-3 align-top bg-white">
                                 <input
@@ -966,7 +966,7 @@ export default function SoumBatch() {
                           {idx === 0 && (
                             <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top bg-white">
                               <div className="flex items-center justify-end gap-1.5">
-                                {activeBatch?.name === '팀무버 예약' && (
+                                {activeBatch?.name?.includes('팀무버') && (
                                   <button
                                     onClick={() => completeTeamMoverReservation(group)}
                                     disabled={completingOrderNo === group.cafe24_order_no}
