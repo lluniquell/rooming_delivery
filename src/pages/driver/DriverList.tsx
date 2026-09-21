@@ -9,6 +9,7 @@ interface OrderStop {
   address: string
   delivered_at: string | null
   delivery_memo: string | null
+  companionName: string | null
 }
 
 // 관리자 화면(ScheduleDay)의 루트 순서에는 실제 주문뿐 아니라 경유지/기타 배송지도 자기 순번을
@@ -16,7 +17,7 @@ interface OrderStop {
 type CombinedStop =
   | { kind: 'order'; route_order: number; order: OrderStop }
   | { kind: 'preset'; route_order: number; name: string; address: string | null }
-  | { kind: 'adhoc'; route_order: number; id: string; name: string; address: string | null; phone: string | null; reason: string | null }
+  | { kind: 'adhoc'; route_order: number; id: string; name: string; address: string | null; phone: string | null; reason: string | null; companionName: string | null }
 
 const STATUS_LABEL: Record<string, string> = { pending: '대기', done: '완료', failed: '불가' }
 const STATUS_COLOR: Record<string, string> = {
@@ -87,7 +88,7 @@ export default function DriverList() {
       const [{ data: orderData }, { data: waypointData }, { data: adhocData }] = await Promise.all([
         supabase
           .from('orders')
-          .select('id, customer_name, receiver_name, address, route_order, delivered_at, delivery_memo')
+          .select('id, cafe24_order_no, customer_name, receiver_name, address, route_order, delivered_at, delivery_memo')
           .in('route_id', routeIds)
           .eq('scheduled_date', viewDate),
         supabase
@@ -113,6 +114,69 @@ export default function DriverList() {
       }
       setPinned(depotWaypoint ? presetMap[depotWaypoint.preset_key] ?? null : null)
 
+      // 동행(다른 배송원 루트에 "동행 (주문번호)"로 남겨진 기타 배송지) — 원래 그 주문을
+      // 담당하는 배송원 이름을 같이 보여줘야 누구랑 같이 가는 건지 알 수 있음(2026-09-22)
+      const companionOrderNos = [...new Set(
+        (adhocData ?? []).map(a => a.reason?.match(/\d{8}-\d{7}/)?.[0]).filter((n): n is string => !!n)
+      )]
+      const companionNameByOrderNo: Record<string, string> = {}
+      if (companionOrderNos.length) {
+        const { data: originalOrders } = await supabase
+          .from('orders')
+          .select('cafe24_order_no, route_id')
+          .in('cafe24_order_no', companionOrderNos)
+        const originalRouteIds = [...new Set((originalOrders ?? []).map(o => o.route_id).filter((id): id is string => !!id))]
+        if (originalRouteIds.length) {
+          const { data: originalRoutes } = await supabase.from('schedule_routes').select('id, driver_ids').in('id', originalRouteIds)
+          const originalDriverIds = [...new Set((originalRoutes ?? []).flatMap(r => r.driver_ids as string[]))]
+          let nameById: Record<string, string> = {}
+          if (originalDriverIds.length) {
+            const { data: driverRows } = await supabase.from('drivers').select('id, name').in('id', originalDriverIds)
+            nameById = Object.fromEntries((driverRows ?? []).map(d => [d.id, d.name]))
+          }
+          const namesByRoute = Object.fromEntries(
+            (originalRoutes ?? []).map(r => [r.id, (r.driver_ids as string[]).map(id => nameById[id] ?? '?').join('/')])
+          )
+          for (const o of originalOrders ?? []) {
+            if (o.route_id && namesByRoute[o.route_id]) companionNameByOrderNo[o.cafe24_order_no] = namesByRoute[o.route_id]
+          }
+        }
+      }
+
+      // 반대 방향 — 내 실제 주문에 다른 배송원이 "동행"으로 붙어있는지. 위 조회는 내 루트
+      // 안의 기타 배송지만 봤으니, 이번엔 그 날 전체 기타 배송지를 봐서 내 주문 번호를
+      // 참조하는 게 있으면 그 배송원 이름을 찾음(동행자 쪽과 대칭되게 표시)
+      const myOrderNos = [...new Set((orderData ?? []).map((o: any) => o.cafe24_order_no).filter(Boolean))]
+      const accompaniedByOrderNo: Record<string, string> = {}
+      if (myOrderNos.length) {
+        const { data: allAdhocForDate } = await supabase
+          .from('schedule_adhoc_stops')
+          .select('route_id, reason')
+          .eq('date', viewDate)
+        const routeIdsByOrderNo: Record<string, string[]> = {}
+        for (const a of allAdhocForDate ?? []) {
+          const orderNo = a.reason?.match(/\d{8}-\d{7}/)?.[0]
+          if (orderNo && myOrderNos.includes(orderNo)) (routeIdsByOrderNo[orderNo] ??= []).push(a.route_id)
+        }
+        const companionRouteIds = [...new Set(Object.values(routeIdsByOrderNo).flat())]
+        if (companionRouteIds.length) {
+          const { data: companionRoutes } = await supabase.from('schedule_routes').select('id, driver_ids').in('id', companionRouteIds)
+          const companionDriverIds = [...new Set((companionRoutes ?? []).flatMap(r => r.driver_ids as string[]))]
+          let nameById2: Record<string, string> = {}
+          if (companionDriverIds.length) {
+            const { data: driverRows2 } = await supabase.from('drivers').select('id, name').in('id', companionDriverIds)
+            nameById2 = Object.fromEntries((driverRows2 ?? []).map(d => [d.id, d.name]))
+          }
+          const namesByCompanionRoute = Object.fromEntries(
+            (companionRoutes ?? []).map(r => [r.id, (r.driver_ids as string[]).map(id => nameById2[id] ?? '?').join('/')])
+          )
+          for (const [orderNo, rIds] of Object.entries(routeIdsByOrderNo)) {
+            const names = rIds.map(id => namesByCompanionRoute[id]).filter(Boolean).join(', ')
+            if (names) accompaniedByOrderNo[orderNo] = names
+          }
+        }
+      }
+
       const combined: CombinedStop[] = [
         ...(orderData ?? []).map((o: any): CombinedStop => ({
           kind: 'order',
@@ -123,6 +187,7 @@ export default function DriverList() {
             address: o.address,
             delivered_at: o.delivered_at,
             delivery_memo: o.delivery_memo,
+            companionName: accompaniedByOrderNo[o.cafe24_order_no] ?? null,
           },
         })),
         ...routedWaypoints.map((w): CombinedStop => ({
@@ -131,15 +196,19 @@ export default function DriverList() {
           name: presetMap[w.preset_key]?.name ?? w.preset_key,
           address: presetMap[w.preset_key]?.address ?? null,
         })),
-        ...(adhocData ?? []).map((a): CombinedStop => ({
-          kind: 'adhoc',
-          route_order: a.route_order,
-          id: a.id,
-          name: a.name,
-          address: a.address,
-          phone: a.phone,
-          reason: a.reason,
-        })),
+        ...(adhocData ?? []).map((a): CombinedStop => {
+          const orderNo = a.reason?.match(/\d{8}-\d{7}/)?.[0]
+          return {
+            kind: 'adhoc',
+            route_order: a.route_order,
+            id: a.id,
+            name: a.name,
+            address: a.address,
+            phone: a.phone,
+            reason: a.reason,
+            companionName: orderNo ? companionNameByOrderNo[orderNo] ?? null : null,
+          }
+        }),
       ].sort((a, b) => a.route_order - b.route_order)
 
       setStops(combined)
@@ -250,6 +319,9 @@ export default function DriverList() {
                   </span>
                 </div>
                 <p className="text-sm text-gray-500 mt-1">{s.order.address}</p>
+                {s.order.companionName && (
+                  <p className="text-xs text-purple-600 mt-1">동행: {s.order.companionName}</p>
+                )}
               </Link>
             )
           }
@@ -293,7 +365,9 @@ export default function DriverList() {
                 {expanded && (
                   <>
                     {(s.phone || s.reason) && (
-                      <p className="text-xs text-gray-400 mt-1">{[s.phone, s.reason].filter(Boolean).join(' · ')}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {[s.phone, s.companionName ? `${s.reason} · 동행자: ${s.companionName}` : s.reason].filter(Boolean).join(' · ')}
+                      </p>
                     )}
                     <div className="flex gap-2 mt-2">
                       {s.phone && (
