@@ -763,31 +763,32 @@ export default function ScheduleDay() {
     }
   }
 
-  // 이 루트의 현재 배송 순서를 직배 수기 엑셀과 동일한 양식으로 다운로드
-  function downloadRouteExcel(route: RouteLane) {
+  // 이 루트의 현재 배송 순서를 직배 수기 엑셀과 동일한 양식의 시트로 만듦
+  function buildRouteSheet(route: RouteLane) {
     const laneStops = stopsForRoute(route.id)
     const pinned = pinnedForRoute(route.id)
-    if (!laneStops.length && !pinned) { alert('이 루트에 배정된 배송건이 없습니다.'); return }
+    if (!laneStops.length && !pinned) return null
 
+    const driverNames = route.driver_ids.map(id => drivers.find(d => d.id === id)?.name).filter(Boolean).join('/')
     const header = ['배송 담당자', '판매담당자', '고객명', '번호', '제품명', '도착시간', '연락처', '주소']
     const lines: { groupKey: string; cells: string[] }[] = []
 
     if (pinned) {
-      lines.push({ groupKey: `pinned-${route.id}`, cells: ['', '', `${pinned.name} 출발`, '', '', '', '', pinned.address ?? ''] })
+      lines.push({ groupKey: `pinned-${route.id}`, cells: [driverNames, '', `${pinned.name} 출발`, '', '', '', '', pinned.address ?? ''] })
     }
 
     for (const stop of laneStops) {
       if (stop.kind === 'preset') {
-        lines.push({ groupKey: stop.id, cells: ['', '', stop.name, '', '', '', '', stop.address ?? ''] })
+        lines.push({ groupKey: stop.id, cells: [driverNames, '', stop.name, '', '', '', '', stop.address ?? ''] })
       } else if (stop.kind === 'adhoc') {
-        lines.push({ groupKey: stop.id, cells: ['', '', stop.name, '', stop.reason ?? '', '', stop.phone ?? '', stop.address ?? ''] })
+        lines.push({ groupKey: stop.id, cells: [driverNames, '', stop.name, '', stop.reason ?? '', '', stop.phone ?? '', stop.address ?? ''] })
       } else {
         const total = stop.items.length
         stop.items.forEach((item, idx) => {
           lines.push({
             groupKey: stop.id,
             cells: [
-              '',
+              driverNames,
               stop.orderer_name ?? '',
               stop.name,
               total > 1 ? `${idx + 1}-${total}` : '',
@@ -809,9 +810,9 @@ export default function ScheduleDay() {
       if (ws[cellRef]) ws[cellRef].s = { alignment: { wrapText: true, vertical: 'top' } }
     }
 
-    // 같은 배송지(주문/경유지/기타)의 여러 상품 행은 판매담당자/고객명/연락처/주소가 똑같으니 셀 병합
+    // 같은 배송지(주문/경유지/기타)의 여러 상품 행은 배송담당자/판매담당자/고객명/연락처/주소가 똑같으니 셀 병합
     const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = []
-    const mergeCols = [1, 2, 6, 7]
+    const mergeCols = [0, 1, 2, 6, 7]
     let runStart = 0
     for (let i = 1; i <= lines.length; i++) {
       const sameGroup = i < lines.length && lines[i].groupKey === lines[runStart].groupKey
@@ -847,9 +848,25 @@ export default function ScheduleDay() {
       return { hpt: ROW_HEIGHT_PT * lineCount }
     })]
 
+    return ws
+  }
+
+  // 차별로 따로 받던 걸 걷어내고, 그 날의 루트를 전부 한 파일에 시트별로 묶어서 한 번에 다운로드
+  function downloadAllRoutesExcel() {
+    const usedNames = new Set<string>()
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, route.label.slice(0, 28) || '루트')
-    XLSX.writeFile(wb, `루트_${route.label}_${date}.xlsx`)
+    let sheetCount = 0
+    for (const route of routes) {
+      const ws = buildRouteSheet(route)
+      if (!ws) continue
+      let name = route.label.slice(0, 28) || '루트'
+      while (usedNames.has(name)) name = `${name}_`
+      usedNames.add(name)
+      XLSX.utils.book_append_sheet(wb, ws, name)
+      sheetCount++
+    }
+    if (!sheetCount) { alert('배정된 배송건이 있는 루트가 없습니다.'); return }
+    XLSX.writeFile(wb, `배송루트_${date}.xlsx`)
   }
 
   async function toggleWaypoint(route: RouteLane, preset: PresetLocation) {
@@ -1086,6 +1103,11 @@ export default function ScheduleDay() {
                     </>
                   )}
                   <button
+                    onClick={downloadAllRoutesExcel}
+                    title="그 날 모든 루트를 시트별로 묶어서 한 번에 다운로드"
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  >⬇ 전체 루트 엑셀</button>
+                  <button
                     onClick={addRoute}
                     className="px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700"
                   >+ 루트 추가</button>
@@ -1132,11 +1154,6 @@ export default function ScheduleDay() {
                             <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-gray-200 text-gray-600 shrink-0">🔒 마감</span>
                           )}
                           <div className="flex gap-1 ml-auto items-center">
-                            <button
-                              onClick={() => downloadRouteExcel(route)}
-                              title="이 루트를 직배 수기 엑셀과 동일한 양식으로 다운로드"
-                              className="px-2 py-0.5 rounded-lg text-[11px] font-medium border border-gray-300 text-gray-600 hover:bg-gray-50"
-                            >⬇ 엑셀</button>
                             {waypointPresets.map(p => {
                               const active = dayWaypoints.some(w => w.route_id === route.id && w.preset_key === p.key)
                               const verb = WAYPOINT_VERB[p.key] ?? '경유'
