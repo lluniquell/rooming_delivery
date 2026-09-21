@@ -257,7 +257,9 @@ export default function SoumBatch() {
         alert(`카페24 배송완료 처리 실패:\n${result.errors.join('\n')}`)
         return
       }
-      await supabase.from('order_items').update({ tracking_number: trackingNo }).in('id', group.items.map(i => i.id))
+      await supabase.from('order_items')
+        .update({ tracking_number: trackingNo, status: 'in_transit', shipped_at: new Date().toISOString() })
+        .in('id', group.items.map(i => i.id))
       alert('배송완료 처리되었습니다.')
       if (activeBatchId) selectBatch(activeBatchId)
     } catch (e: any) {
