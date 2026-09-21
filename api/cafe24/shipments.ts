@@ -5,6 +5,9 @@ const MALL_ID = (process.env.VITE_CAFE24_MALL_ID ?? '').trim()
 // 카페24 배송사 코드 — 0006 "CJ대한통운" (일반). 1040 "CJ대한통운(연동)"은
 // 카페24가 API로 직접 수정하는 걸 막아둔 코드라("연동된 배송사로 수정 불가" 422 에러) 사용 불가.
 const CJ_CARRIER_CODE = (process.env.CAFE24_CJ_CARRIER_CODE ?? '0006').trim()
+// 이 주문자(카페24 로그인 아이디)의 주문은 스케줄러/배송 작업은 평소대로 진행하되
+// 카페24 배송상태(배송대기/배송중) 전환만 걸러서 건드리지 않음(2026-09-22)
+const EXCLUDED_MEMBER_IDS = new Set(['ajpk'])
 
 const supabase = createClient(
   (process.env.VITE_SUPABASE_URL ?? '').trim(),
@@ -60,10 +63,11 @@ async function handleStandby(req: VercelRequest, res: VercelResponse) {
       try {
         const { data: orderRow } = await supabase
           .from('orders')
-          .select('id')
+          .select('id, member_id')
           .eq('cafe24_order_no', order_no)
           .maybeSingle()
         if (!orderRow) { errors.push(`${order_no}: 주문을 찾을 수 없음`); continue }
+        if (orderRow.member_id && EXCLUDED_MEMBER_IDS.has(orderRow.member_id)) continue
 
         // 이 주문에서 해당 배송방법으로 배정된 상품 행만 대상으로 함 — 같은 주문에 다른
         // 배송방법 상품이 섞여 있어도 그쪽 상품은 절대 건드리지 않기 위함
@@ -148,6 +152,13 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
     for (const { order_no: orderNo, item_codes, tracking_no, carrier_code } of targets) {
       if (!orderNo) continue
       try {
+        const { data: orderRow } = await supabase
+          .from('orders')
+          .select('member_id')
+          .eq('cafe24_order_no', orderNo)
+          .maybeSingle()
+        if (orderRow?.member_id && EXCLUDED_MEMBER_IDS.has(orderRow.member_id)) continue
+
         // shipping_code는 D-{주문번호}-00으로 고정이 아님 — 상품(라인)이 서로 다른
         // 배송 그룹으로 나뉘면 -01, -02 등 별도 코드를 갖는 경우가 실제로 있어서,
         // 주문의 실제 아이템을 조회해 존재하는 shipping_code를 전부 처리해야 함

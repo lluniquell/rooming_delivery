@@ -401,7 +401,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (!existed.hasPlaceName && order.order_place_name) {
             await supabase.from('orders').update({ order_place_name: order.order_place_name }).eq('id', existed.id)
           }
-          await supabase.from('orders').update({ admin_memo: memos }).eq('id', existed.id)
+          await supabase.from('orders').update({ admin_memo: memos, member_id: order.member_id || null }).eq('id', existed.id)
           if (existed.itemCount === 0) {
             const rows = itemRowsOf(order, existed.id)
             if (rows.length) {
@@ -458,6 +458,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           order_date: order.order_date,
           order_place_name: order.order_place_name ?? null,
           admin_memo: memos,
+          member_id: order.member_id || null,
           ...receiverFieldsOf(order),
         }).select('id').single()
 
