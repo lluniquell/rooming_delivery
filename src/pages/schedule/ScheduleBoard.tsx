@@ -122,8 +122,12 @@ export default function ScheduleBoard() {
   }
 
   async function unschedule(stop: Stop) {
+    // route_id/route_order도 같이 지워야 함 — 이미 루트에 배정된 주문을 여기서
+    // 배정 해제만 하고 route_id를 남겨두면, 나중에 scheduled_date를 다른 날짜로
+    // 옮겼을 때 예전 route_id가 그 날짜엔 존재하지 않는 값이라 스케줄 화면의
+    // 루트에도 미배정 목록에도 안 나타나고 사라져버림(2026-09-22 실제 발생)
     await supabase.from('orders')
-      .update({ scheduled_date: null, crew_size: null })
+      .update({ scheduled_date: null, crew_size: null, route_id: null, route_order: null, visit_time: null })
       .eq('id', stop.order_id)
     if (batchId) { loadUnscheduled(batchId); loadScheduled(batchId) }
   }
