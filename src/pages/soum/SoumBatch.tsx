@@ -899,8 +899,8 @@ export default function SoumBatch() {
                 <col />
                 <col className="w-16" />
                 <col className="w-24" />
-                <col className="w-28" />
-                <col className="w-48" />
+                <col className={activeBatch?.name?.includes('팀무버') ? 'w-40' : 'w-28'} />
+                <col className={activeBatch?.name?.includes('팀무버') ? 'w-32' : 'w-48'} />
               </colgroup>
               <thead className="border-b bg-gray-50">
                 <tr>
@@ -965,12 +965,12 @@ export default function SoumBatch() {
                           )}
                           {idx === 0 && (
                             <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top bg-white">
-                              <div className="flex items-center justify-end gap-1.5">
+                              <div className={`flex ${activeBatch?.name?.includes('팀무버') ? 'flex-col items-end' : 'items-center justify-end'} gap-1.5`}>
                                 {activeBatch?.name?.includes('팀무버') && (
                                   <button
                                     onClick={() => completeTeamMoverReservation(group)}
                                     disabled={completingOrderNo === group.cafe24_order_no}
-                                    className="px-2 py-1 rounded-lg text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+                                    className="w-full px-2 py-1 rounded-lg text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
                                   >
                                     {completingOrderNo === group.cafe24_order_no ? '처리 중...' : '카페24 배송완료'}
                                   </button>
@@ -986,7 +986,7 @@ export default function SoumBatch() {
                                     e.target.value = ''
                                   }}
                                   title="이 주문의 상품 전체를 다른 배치나 미배정/보류로 옮깁니다"
-                                  className="text-xs border rounded-lg px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                  className={`text-xs border rounded-lg px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 ${activeBatch?.name?.includes('팀무버') ? 'w-full' : ''}`}
                                 >
                                   <option value="" disabled>다른 배치로</option>
                                   <option value="__unassigned__">미배정으로</option>
