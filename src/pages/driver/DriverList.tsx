@@ -33,7 +33,10 @@ function statusOf(s: OrderStop): 'pending' | 'done' | 'failed' {
 
 function mapDeeplink(address: string) {
   const encoded = encodeURIComponent(address)
-  return `tmap://search?name=${encoded}`
+  return {
+    tmap: `tmap://search?name=${encoded}`,
+    naver: `nmap://search?query=${encoded}&appname=com.rooming.delivery`,
+  }
 }
 
 // 로컬(KST) 기준 날짜 — toISOString은 UTC라 오전 9시 전에 하루 밀림
@@ -55,6 +58,7 @@ export default function DriverList() {
   const [stops, setStops] = useState<CombinedStop[]>([])
   const [pinned, setPinned] = useState<{ name: string; address: string | null } | null>(null)
   const [photoTakenAdhoc, setPhotoTakenAdhoc] = useState<Set<string>>(new Set())
+  const [expandedAdhoc, setExpandedAdhoc] = useState<Set<string>>(new Set())
   const [uploadingAdhocId, setUploadingAdhocId] = useState<string | null>(null)
   const [driverName, setDriverName] = useState('')
   const todayStr = fmtDate(new Date())
@@ -262,48 +266,67 @@ export default function DriverList() {
             )
           }
           {
-            // s.kind === 'adhoc'
+            // s.kind === 'adhoc' — 원래 배송(주문) 카드와 동일하게, 클릭해서 펼쳐야
+            // 전화/문자/지도/촬영 버튼이 나오게 함(2026-09-21)
             const photographed = photoTakenAdhoc.has(s.id)
             const uploading = uploadingAdhocId === s.id
+            const expanded = expandedAdhoc.has(s.id)
+            const links = s.address ? mapDeeplink(s.address) : null
             return (
               <div key={s.id} className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400">{i + 1}번째</span>
-                  <span className="text-[10px] px-1 rounded font-bold bg-purple-100 text-purple-700">기타</span>
-                  <span className="font-medium">{s.name}</span>
-                  {photographed && <span className="text-green-600 text-xs font-medium ml-auto">✓ 촬영완료</span>}
-                </div>
-                {s.address && <p className="text-sm text-gray-500 mt-1">{s.address}</p>}
-                {(s.phone || s.reason) && (
-                  <p className="text-xs text-gray-400 mt-1">{[s.phone, s.reason].filter(Boolean).join(' · ')}</p>
+                <button
+                  className="w-full text-left"
+                  onClick={() => setExpandedAdhoc(prev => {
+                    const next = new Set(prev)
+                    next.has(s.id) ? next.delete(s.id) : next.add(s.id)
+                    return next
+                  })}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">{i + 1}번째</span>
+                    <span className="text-[10px] px-1 rounded font-bold bg-purple-100 text-purple-700">기타</span>
+                    <span className="font-medium">{s.name}</span>
+                    {photographed && <span className="text-green-600 text-xs font-medium ml-auto">✓ 촬영완료</span>}
+                  </div>
+                  {s.address && <p className="text-sm text-gray-500 mt-1">{s.address}</p>}
+                </button>
+                {expanded && (
+                  <>
+                    {(s.phone || s.reason) && (
+                      <p className="text-xs text-gray-400 mt-1">{[s.phone, s.reason].filter(Boolean).join(' · ')}</p>
+                    )}
+                    <div className="flex gap-2 mt-2">
+                      {s.phone && (
+                        <a href={`tel:${s.phone}`} className="flex-1 text-center bg-white text-gray-700 border py-1.5 rounded-lg text-xs font-medium">📞 전화</a>
+                      )}
+                      {s.phone && (
+                        <a href={`sms:${s.phone}`} className="flex-1 text-center bg-white text-gray-700 border py-1.5 rounded-lg text-xs font-medium">💬 문자</a>
+                      )}
+                      {links && (
+                        <a href={links.tmap} className="flex-1 text-center bg-white text-gray-700 border py-1.5 rounded-lg text-xs font-medium">🗺️ 티맵</a>
+                      )}
+                      {links && (
+                        <a href={links.naver} className="flex-1 text-center bg-white text-gray-700 border py-1.5 rounded-lg text-xs font-medium">📍 네이버</a>
+                      )}
+                      {!photographed && (
+                        <label className="flex-1 text-center bg-purple-600 text-white py-1.5 rounded-lg text-xs font-medium cursor-pointer">
+                          {uploading ? '업로드 중...' : '📷 촬영'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            disabled={uploading}
+                            onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (file) handleAdhocPhoto(s.id, file)
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </>
                 )}
-                <div className="flex gap-2 mt-2">
-                  {s.phone && (
-                    <a href={`tel:${s.phone}`} className="flex-1 text-center bg-white text-gray-700 border py-1.5 rounded-lg text-xs font-medium">📞 전화</a>
-                  )}
-                  {s.phone && (
-                    <a href={`sms:${s.phone}`} className="flex-1 text-center bg-white text-gray-700 border py-1.5 rounded-lg text-xs font-medium">💬 문자</a>
-                  )}
-                  {s.address && (
-                    <a href={mapDeeplink(s.address)} className="flex-1 text-center bg-white text-gray-700 border py-1.5 rounded-lg text-xs font-medium">🗺️ 티맵</a>
-                  )}
-                  {!photographed && (
-                    <label className="flex-1 text-center bg-purple-600 text-white py-1.5 rounded-lg text-xs font-medium cursor-pointer">
-                      {uploading ? '업로드 중...' : '📷 촬영'}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        disabled={uploading}
-                        onChange={e => {
-                          const file = e.target.files?.[0]
-                          if (file) handleAdhocPhoto(s.id, file)
-                        }}
-                      />
-                    </label>
-                  )}
-                </div>
               </div>
             )
           }
