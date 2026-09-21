@@ -9,6 +9,7 @@ interface OrderStop {
   address: string
   delivered_at: string | null
   delivery_memo: string | null
+  schedule_note: string | null
   companionName: string | null
 }
 
@@ -88,7 +89,7 @@ export default function DriverList() {
       const [{ data: orderData }, { data: waypointData }, { data: adhocData }] = await Promise.all([
         supabase
           .from('orders')
-          .select('id, cafe24_order_no, customer_name, receiver_name, address, route_order, delivered_at, delivery_memo')
+          .select('id, cafe24_order_no, customer_name, receiver_name, address, route_order, delivered_at, delivery_memo, schedule_note')
           .in('route_id', routeIds)
           .eq('scheduled_date', viewDate),
         supabase
@@ -187,6 +188,7 @@ export default function DriverList() {
             address: o.address,
             delivered_at: o.delivered_at,
             delivery_memo: o.delivery_memo,
+            schedule_note: o.schedule_note,
             companionName: accompaniedByOrderNo[o.cafe24_order_no] ?? null,
           },
         })),
@@ -319,6 +321,9 @@ export default function DriverList() {
                   </span>
                 </div>
                 <p className="text-sm text-gray-500 mt-1">{s.order.address}</p>
+                {s.order.schedule_note && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 mt-1">{s.order.schedule_note}</p>
+                )}
                 {s.order.companionName && (
                   <p className="text-xs text-purple-600 mt-1">동행: {s.order.companionName}</p>
                 )}

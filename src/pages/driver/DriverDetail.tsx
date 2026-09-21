@@ -10,6 +10,7 @@ interface OrderItem {
   quantity: number
   cafe24_item_code: string | null
   tracking_number: string | null
+  item_note: string | null
 }
 
 interface OrderStop {
@@ -20,6 +21,7 @@ interface OrderStop {
   receiver_phone: string | null
   delivered_at: string | null
   delivery_memo: string | null
+  schedule_note: string | null
   items: OrderItem[]
 }
 
@@ -54,13 +56,13 @@ export default function DriverDetail() {
 
       const { data: o } = await supabase
         .from('orders')
-        .select('id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, delivered_at, delivery_memo')
+        .select('id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, delivered_at, delivery_memo, schedule_note')
         .eq('id', id)
         .single()
       if (!o) return
       const { data: items } = await supabase
         .from('order_items')
-        .select('id, product_name, option_info, quantity, cafe24_item_code, tracking_number')
+        .select('id, product_name, option_info, quantity, cafe24_item_code, tracking_number, item_note')
         .eq('order_id', id)
       setOrder({
         id: o.id,
@@ -70,6 +72,7 @@ export default function DriverDetail() {
         receiver_phone: o.receiver_phone,
         delivered_at: o.delivered_at,
         delivery_memo: o.delivery_memo,
+        schedule_note: o.schedule_note,
         items: items ?? [],
       })
 
@@ -168,6 +171,11 @@ export default function DriverDetail() {
       <div className="bg-white rounded-xl border p-5 mb-4">
         <h2 className="font-bold text-lg mb-3">{order.customer_name}</h2>
         <p className="text-gray-600 text-sm mb-4">{order.address}</p>
+        {order.schedule_note && (
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4 text-sm text-amber-800">
+            {order.schedule_note}
+          </div>
+        )}
         <div className="flex gap-2 mb-2">
           <a href={links.tmap} className="flex-1 text-center bg-blue-50 text-blue-700 py-2 rounded-lg text-sm font-medium">
             티맵으로 열기
@@ -206,6 +214,9 @@ export default function DriverDetail() {
                       {item.option_info && <span className="text-gray-400 ml-1">({item.option_info})</span>}
                     </div>
                     <div className="text-xs text-gray-400">x{item.quantity}</div>
+                    {item.item_note && (
+                      <div className="text-xs font-bold text-red-600 mt-0.5">{item.item_note}</div>
+                    )}
                   </div>
                   {done ? (
                     <span className="text-green-600 text-xl shrink-0">✓</span>

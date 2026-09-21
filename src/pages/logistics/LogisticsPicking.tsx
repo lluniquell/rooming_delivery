@@ -12,6 +12,7 @@ interface Item {
   quantity: number
   inspected_qty: number
   picked_at: string | null
+  item_note: string | null
   customer_name: string
   cafe24_order_no: string
   route_id: string | null
@@ -39,6 +40,7 @@ interface PickingRow {
   quantity: number
   item_ids: string[]
   order_ids: Set<string>
+  item_notes: string[]
 }
 
 interface Label {
@@ -84,6 +86,7 @@ function buildPickingList(items: Item[], sort: 'location' | 'brand', barcodeMap:
       merged[key].quantity += remaining
       merged[key].item_ids.push(item.id)
       merged[key].order_ids.add(item.order_id)
+      if (item.item_note && !merged[key].item_notes.includes(item.item_note)) merged[key].item_notes.push(item.item_note)
     } else {
       merged[key] = {
         key,
@@ -98,6 +101,7 @@ function buildPickingList(items: Item[], sort: 'location' | 'brand', barcodeMap:
         quantity: remaining,
         item_ids: [item.id],
         order_ids: new Set([item.order_id]),
+        item_notes: item.item_note ? [item.item_note] : [],
       }
     }
   }
@@ -143,7 +147,7 @@ export default function LogisticsPicking() {
 
     const { data } = await supabase
       .from('order_items')
-      .select('id, order_id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, picked_at, orders!inner(cafe24_order_no, receiver_name, customer_name, route_id, route_order, scheduled_date)')
+      .select('id, order_id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, picked_at, item_note, orders!inner(cafe24_order_no, receiver_name, customer_name, route_id, route_order, scheduled_date)')
       .eq('batch_id', jikbae.id)
       .in('status', ['confirmed', 'in_transit'])
       .eq('orders.scheduled_date', date)
@@ -158,6 +162,7 @@ export default function LogisticsPicking() {
       quantity: row.quantity,
       inspected_qty: row.inspected_qty,
       picked_at: row.picked_at,
+      item_note: row.item_note,
       customer_name: row.orders.receiver_name || row.orders.customer_name,
       cafe24_order_no: row.orders.cafe24_order_no,
       route_id: row.orders.route_id,
@@ -430,6 +435,9 @@ export default function LogisticsPicking() {
         </div>
         <div className="text-sm font-medium text-gray-800 break-words">{row.product_name}</div>
         {row.option_info && <div className="text-xs text-gray-400 mt-0.5">{row.option_info}</div>}
+        {row.item_notes.length > 0 && (
+          <div className="text-xs font-bold text-red-600 mt-0.5 break-words">{row.item_notes.join(' / ')}</div>
+        )}
         <div className="mt-1.5">
           <span className="text-xs text-gray-500">{row.brand || '-'}</span>
           {row.supplier_note && <div className="text-xs text-gray-400 mt-0.5 break-words">{row.supplier_note}</div>}

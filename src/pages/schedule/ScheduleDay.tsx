@@ -28,6 +28,7 @@ interface StopItem {
   quantity: number
   supplier_name: string | null
   brand: string | null
+  item_note: string | null
 }
 
 // 소품팀 피킹 화면(SoumPicking.tsx)과 동일한 규칙 — 공급자 상품명에 섞여있는
@@ -150,10 +151,31 @@ function loadKakaoSdk(): Promise<void> {
   })
 }
 
-function SortableStop({ stop, index, color, locked, onRemove, onTimeChange, onNoteChange }: {
+// 상품별 메모 입력칸 — 상품마다 독립된 입력 상태가 필요해서(같은 주문 안 다른 상품과
+// 값이 안 섞이게) 작은 별도 컴포넌트로 분리
+function ItemNoteInput({ itemId, value, locked, onChange }: {
+  itemId: string; value: string | null; locked: boolean; onChange: (itemId: string, note: string) => void
+}) {
+  const [draft, setDraft] = useState(value ?? '')
+  useEffect(() => { setDraft(value ?? '') }, [itemId, value])
+  return (
+    <input
+      value={draft}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={() => { if (draft !== (value ?? '')) onChange(itemId, draft) }}
+      onClick={e => e.stopPropagation()}
+      disabled={locked}
+      placeholder="상품 메모 (예: 시공 필요, 전시품)"
+      className="mt-1.5 w-full text-[11px] border rounded px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-400 disabled:opacity-50 disabled:bg-transparent"
+    />
+  )
+}
+
+function SortableStop({ stop, index, color, locked, onRemove, onTimeChange, onNoteChange, onItemNoteChange }: {
   stop: RouteStop; index: number; color: string; locked: boolean; onRemove: (s: RouteStop) => void
   onTimeChange: (s: RouteStop, time: string) => void
   onNoteChange: (s: RouteStop, note: string) => void
+  onItemNoteChange: (itemId: string, note: string) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.id, disabled: locked })
   const style = { transform: CSS.Transform.toString(transform), transition }
@@ -219,6 +241,7 @@ function SortableStop({ stop, index, color, locked, onRemove, onTimeChange, onNo
                   ×{i.quantity}
                 </span>
               </div>
+              <ItemNoteInput itemId={i.id} value={i.item_note} locked={locked} onChange={onItemNoteChange} />
             </div>
           )
         })}
@@ -425,13 +448,13 @@ export default function ScheduleDay() {
           items: [],
         }
       }
-      map[o.id].items.push({ id: row.id, product_name: row.product_name, quantity: row.quantity, supplier_name: row.supplier_name, brand: row.brand })
+      map[o.id].items.push({ id: row.id, product_name: row.product_name, quantity: row.quantity, supplier_name: row.supplier_name, brand: row.brand, item_note: row.item_note })
     }
     return Object.values(map)
   }
 
   async function loadAll(bid: string, routesForDate: RouteLane[], waypointsForDate: DayWaypoint[] = dayWaypoints, presetsForDate: PresetLocation[] = presets) {
-    const SELECT = 'id, product_name, quantity, supplier_name, brand, orders!inner(id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time, schedule_note)'
+    const SELECT = 'id, product_name, quantity, supplier_name, brand, item_note, orders!inner(id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time, schedule_note)'
 
     const { data: scheduledData } = await supabase
       .from('order_items')
@@ -637,6 +660,18 @@ export default function ScheduleDay() {
     const value = note.trim() || null
     await supabase.from('orders').update({ schedule_note: value }).eq('id', stop.id)
     setStops(prev => prev.map(s => s.order_id === stop.id ? { ...s, schedule_note: value } : s))
+  }
+
+  // 상품별 메모(시공 필요, 전시품 등) — schedule_note와 달리 그 주문의 특정 상품 하나에만
+  // 붙는 정보라 order_items에 저장. 여러 상품이 섞인 주문에서 상품마다 다른 안내가
+  // 필요한 실제 사례가 있어서 분리함(2026-09-22)
+  async function updateItemNote(itemId: string, note: string) {
+    const value = note.trim() || null
+    await supabase.from('order_items').update({ item_note: value }).eq('id', itemId)
+    setStops(prev => prev.map(s => ({
+      ...s,
+      items: s.items.map(i => i.id === itemId ? { ...i, item_note: value } : i),
+    })))
   }
 
   async function removeStop(stop: RouteStop) {
@@ -1172,7 +1207,7 @@ export default function ScheduleDay() {
                               <div className="p-4 text-center text-xs text-gray-300">이 루트에 배정된 배송건이 없습니다</div>
                             ) : (
                               laneStops.map((s, i) => (
-                                <SortableStop key={s.id} stop={s} index={i} color={color} locked={route.closed} onRemove={removeStop} onTimeChange={updateVisitTime} onNoteChange={updateScheduleNote} />
+                                <SortableStop key={s.id} stop={s} index={i} color={color} locked={route.closed} onRemove={removeStop} onTimeChange={updateVisitTime} onNoteChange={updateScheduleNote} onItemNoteChange={updateItemNote} />
                               ))
                             )}
                           </LaneDropZone>
