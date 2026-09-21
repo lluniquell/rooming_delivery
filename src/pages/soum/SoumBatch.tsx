@@ -129,6 +129,10 @@ export default function SoumBatch() {
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null)
+  // 팀무버 예약 배치 전용 — 운송장번호를 엑셀 업로드 대신 주문별로 수기 입력해서
+  // 바로 카페24 배송완료 처리(등록+전환)까지 한 번에 함(2026-09-22)
+  const [manualTracking, setManualTracking] = useState<Record<string, string>>({})
+  const [completingOrderNo, setCompletingOrderNo] = useState<string | null>(null)
 
   useEffect(() => { loadBatches() }, [])
 
@@ -224,6 +228,43 @@ export default function SoumBatch() {
       .sort((a, b) => (a.order_date ?? '').localeCompare(b.order_date ?? '') || a.cafe24_order_no.localeCompare(b.cafe24_order_no))
     setItems(rows)
     setLoading(false)
+
+    // 이미 입력해둔 운송장번호가 있으면 수기 입력칸에 미리 채워둠
+    const seeded: Record<string, string> = {}
+    for (const row of rows) {
+      if (row.tracking_number && !seeded[row.cafe24_order_no]) seeded[row.cafe24_order_no] = row.tracking_number
+    }
+    setManualTracking(seeded)
+  }
+
+  // 팀무버 예약 — 수기로 입력한 운송장번호로 카페24 배송 등록 + 배송완료(배송중) 전환을
+  // 한 번에 처리. 이미 등록된 그룹이 아니라도 handleTransit이 등록부터 알아서 해줌
+  async function completeTeamMoverReservation(group: OrderGroup) {
+    const trackingNo = (manualTracking[group.cafe24_order_no] ?? '').trim()
+    if (!trackingNo) { alert('운송장번호를 입력해주세요.'); return }
+    const itemCodes = group.items.map(i => i.cafe24_item_code).filter(Boolean) as string[]
+    if (!itemCodes.length) { alert('카페24 상품코드가 없습니다 (재수집 필요).'); return }
+
+    setCompletingOrderNo(group.cafe24_order_no)
+    try {
+      const res = await fetch('/api/cafe24/shipments?action=transit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orders: [{ order_no: group.cafe24_order_no, item_codes: itemCodes, tracking_no: trackingNo }] }),
+      })
+      const result = await res.json()
+      if (result.errors?.length) {
+        alert(`카페24 배송완료 처리 실패:\n${result.errors.join('\n')}`)
+        return
+      }
+      await supabase.from('order_items').update({ tracking_number: trackingNo }).in('id', group.items.map(i => i.id))
+      alert('배송완료 처리되었습니다.')
+      if (activeBatchId) selectBatch(activeBatchId)
+    } catch (e: any) {
+      alert(`처리 중 오류: ${e.message}`)
+    } finally {
+      setCompletingOrderNo(null)
+    }
   }
 
   // 상품 하나만 옮기면 같은 주문의 나머지 상품이 배치에 남아 배송이 쪼개지므로,
@@ -908,29 +949,53 @@ export default function SoumBatch() {
                           </td>
                           <td className={`px-4 py-3 text-center font-semibold text-gray-800 ${inspected ? 'bg-blue-50' : ''}`}>{item.quantity}</td>
                           <td className={`px-4 py-3 text-sm text-gray-600 ${inspected ? 'bg-blue-50' : ''}`}>{item.delivery_method ?? '-'}</td>
-                          <td className={`px-4 py-3 text-xs font-mono text-gray-500 truncate ${inspected ? 'bg-blue-50' : ''}`} title={item.tracking_number ?? ''}>{item.tracking_number ?? ''}</td>
+                          {activeBatch?.name === '팀무버 예약' ? (
+                            idx === 0 && (
+                              <td rowSpan={group.items.length} className="px-4 py-3 align-top bg-white">
+                                <input
+                                  value={manualTracking[group.cafe24_order_no] ?? ''}
+                                  onChange={e => setManualTracking(prev => ({ ...prev, [group.cafe24_order_no]: e.target.value }))}
+                                  placeholder="운송장번호 입력"
+                                  className="w-full text-xs font-mono border rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                />
+                              </td>
+                            )
+                          ) : (
+                            <td className={`px-4 py-3 text-xs font-mono text-gray-500 truncate ${inspected ? 'bg-blue-50' : ''}`} title={item.tracking_number ?? ''}>{item.tracking_number ?? ''}</td>
+                          )}
                           {idx === 0 && (
                             <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top bg-white">
-                              <select
-                                defaultValue=""
-                                onChange={e => {
-                                  const v = e.target.value
-                                  if (!v) return
-                                  if (v === '__unassigned__') moveToUnassigned(item.id)
-                                  else if (v === '__hold__') moveToHold(item.id)
-                                  else moveToOtherBatch(item.id, v)
-                                  e.target.value = ''
-                                }}
-                                title="이 주문의 상품 전체를 다른 배치나 미배정/보류로 옮깁니다"
-                                className="text-xs border rounded-lg px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                              >
-                                <option value="" disabled>다른 배치로</option>
-                                <option value="__unassigned__">미배정으로</option>
-                                {activeBatch?.type !== 'hold' && <option value="__hold__">보류로</option>}
-                                {batches.filter(b => b.type !== 'hold' && b.id !== activeBatchId).map(b => (
-                                  <option key={b.id} value={b.id}>{b.batch_no}번 {b.name}</option>
-                                ))}
-                              </select>
+                              <div className="flex items-center justify-end gap-1.5">
+                                {activeBatch?.name === '팀무버 예약' && (
+                                  <button
+                                    onClick={() => completeTeamMoverReservation(group)}
+                                    disabled={completingOrderNo === group.cafe24_order_no}
+                                    className="px-2 py-1 rounded-lg text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
+                                  >
+                                    {completingOrderNo === group.cafe24_order_no ? '처리 중...' : '카페24 배송완료'}
+                                  </button>
+                                )}
+                                <select
+                                  defaultValue=""
+                                  onChange={e => {
+                                    const v = e.target.value
+                                    if (!v) return
+                                    if (v === '__unassigned__') moveToUnassigned(item.id)
+                                    else if (v === '__hold__') moveToHold(item.id)
+                                    else moveToOtherBatch(item.id, v)
+                                    e.target.value = ''
+                                  }}
+                                  title="이 주문의 상품 전체를 다른 배치나 미배정/보류로 옮깁니다"
+                                  className="text-xs border rounded-lg px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                >
+                                  <option value="" disabled>다른 배치로</option>
+                                  <option value="__unassigned__">미배정으로</option>
+                                  {activeBatch?.type !== 'hold' && <option value="__hold__">보류로</option>}
+                                  {batches.filter(b => b.type !== 'hold' && b.id !== activeBatchId).map(b => (
+                                    <option key={b.id} value={b.id}>{b.batch_no}번 {b.name}</option>
+                                  ))}
+                                </select>
+                              </div>
                             </td>
                           )}
                         </tr>
