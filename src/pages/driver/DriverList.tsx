@@ -18,7 +18,7 @@ interface OrderStop {
 type CombinedStop =
   | { kind: 'order'; route_order: number; order: OrderStop }
   | { kind: 'preset'; route_order: number; name: string; address: string | null }
-  | { kind: 'adhoc'; route_order: number; id: string; name: string; address: string | null; phone: string | null; reason: string | null; companionName: string | null; realOrderId: string | null; realOrderStatus: 'pending' | 'done' | 'failed' | null }
+  | { kind: 'adhoc'; route_order: number; id: string; name: string; address: string | null; phone: string | null; reason: string | null; companionName: string | null; realOrderId: string | null; realOrderStatus: 'pending' | 'done' | 'failed' | null; realOrderScheduleNote: string | null }
 
 const STATUS_LABEL: Record<string, string> = { pending: '대기', done: '완료', failed: '불가' }
 const STATUS_COLOR: Record<string, string> = {
@@ -125,10 +125,11 @@ export default function DriverList() {
       // — 동행자가 여기서 직접 완료 처리까지 할 수 있게(2026-09-22)
       const companionOrderIdByOrderNo: Record<string, string> = {}
       const companionStatusByOrderNo: Record<string, 'pending' | 'done' | 'failed'> = {}
+      const companionScheduleNoteByOrderNo: Record<string, string | null> = {}
       if (companionOrderNos.length) {
         const { data: originalOrders } = await supabase
           .from('orders')
-          .select('id, cafe24_order_no, route_id, delivered_at, delivery_memo')
+          .select('id, cafe24_order_no, route_id, delivered_at, delivery_memo, schedule_note')
           .in('cafe24_order_no', companionOrderNos)
         const originalRouteIds = [...new Set((originalOrders ?? []).map(o => o.route_id).filter((id): id is string => !!id))]
         if (originalRouteIds.length) {
@@ -149,6 +150,7 @@ export default function DriverList() {
         for (const o of originalOrders ?? []) {
           companionOrderIdByOrderNo[o.cafe24_order_no] = o.id
           companionStatusByOrderNo[o.cafe24_order_no] = o.delivered_at ? 'done' : o.delivery_memo ? 'failed' : 'pending'
+          companionScheduleNoteByOrderNo[o.cafe24_order_no] = o.schedule_note
         }
       }
 
@@ -219,6 +221,7 @@ export default function DriverList() {
             companionName: orderNo ? companionNameByOrderNo[orderNo] ?? null : null,
             realOrderId: orderNo ? companionOrderIdByOrderNo[orderNo] ?? null : null,
             realOrderStatus: orderNo ? companionStatusByOrderNo[orderNo] ?? null : null,
+            realOrderScheduleNote: orderNo ? companionScheduleNoteByOrderNo[orderNo] ?? null : null,
           }
         }),
       ].sort((a, b) => a.route_order - b.route_order)
@@ -373,6 +376,9 @@ export default function DriverList() {
                   </span>
                 </div>
                 {s.address && <p className="text-sm text-gray-500 mt-1">{s.address}</p>}
+                {s.realOrderScheduleNote && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 mt-1">{s.realOrderScheduleNote}</p>
+                )}
                 {s.companionName && (
                   <p className="text-xs text-purple-600 mt-1">동행자: {s.companionName}</p>
                 )}
