@@ -22,6 +22,7 @@ interface OrderStop {
   delivered_at: string | null
   delivery_memo: string | null
   schedule_note: string | null
+  companionName: string | null
   items: OrderItem[]
 }
 
@@ -56,7 +57,7 @@ export default function DriverDetail() {
 
       const { data: o } = await supabase
         .from('orders')
-        .select('id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, delivered_at, delivery_memo, schedule_note')
+        .select('id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, delivered_at, delivery_memo, schedule_note, scheduled_date')
         .eq('id', id)
         .single()
       if (!o) return
@@ -64,6 +65,27 @@ export default function DriverDetail() {
         .from('order_items')
         .select('id, product_name, option_info, quantity, cafe24_item_code, tracking_number, item_note')
         .eq('order_id', id)
+
+      // 이 주문이 다른 배송원 루트에 "동행 (주문번호)" 기타 배송지로 붙어있는지 확인 —
+      // 원래 담당자도 2인 배송인 걸 상세 화면에서 바로 알 수 있어야 함(2026-09-22)
+      let companionName: string | null = null
+      if (o.scheduled_date && o.cafe24_order_no) {
+        const { data: adhocStops } = await supabase
+          .from('schedule_adhoc_stops')
+          .select('route_id, reason')
+          .eq('date', o.scheduled_date)
+          .ilike('reason', `%${o.cafe24_order_no}%`)
+        const companionRouteIds = [...new Set((adhocStops ?? []).map(a => a.route_id))]
+        if (companionRouteIds.length) {
+          const { data: companionRoutes } = await supabase.from('schedule_routes').select('id, driver_ids').in('id', companionRouteIds)
+          const companionDriverIds = [...new Set((companionRoutes ?? []).flatMap(r => r.driver_ids as string[]))]
+          if (companionDriverIds.length) {
+            const { data: driverRows } = await supabase.from('drivers').select('id, name').in('id', companionDriverIds)
+            companionName = (driverRows ?? []).map(d => d.name).join('/') || null
+          }
+        }
+      }
+
       setOrder({
         id: o.id,
         cafe24_order_no: o.cafe24_order_no,
@@ -73,6 +95,7 @@ export default function DriverDetail() {
         delivered_at: o.delivered_at,
         delivery_memo: o.delivery_memo,
         schedule_note: o.schedule_note,
+        companionName,
         items: items ?? [],
       })
 
@@ -174,6 +197,11 @@ export default function DriverDetail() {
         {order.schedule_note && (
           <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4 text-sm text-amber-800">
             {order.schedule_note}
+          </div>
+        )}
+        {order.companionName && (
+          <div className="bg-purple-50 border border-purple-200 rounded-lg px-3 py-2 mb-4 text-sm text-purple-700">
+            동행: {order.companionName}
           </div>
         )}
         <div className="flex gap-2 mb-2">
