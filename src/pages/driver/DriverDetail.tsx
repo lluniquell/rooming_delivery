@@ -142,6 +142,13 @@ export default function DriverDetail() {
       delivered_at: new Date().toISOString(),
     }).eq('id', order.id)
 
+    // order_items.status를 안 바꾸면 배송완료 후에도 계속 'confirmed'로 남아서
+    // 주문/배치 화면(SoumOrders/SoumBatch)의 직배 배치에 영원히 남아있게 됨(2026-09-22
+    // 발견) — CJ 출고검수(SoumOutgoing)/팀무버 완료 처리와 동일하게 in_transit으로 전환
+    await supabase.from('order_items')
+      .update({ status: 'in_transit', shipped_at: new Date().toISOString() })
+      .eq('order_id', order.id)
+
     // 카페24 배송완료 전환 — 실패해도 로컬 완료 처리는 유지 (나중에 수동 확인 필요)
     try {
       const itemCodes = order.items.map(i => i.cafe24_item_code).filter(Boolean) as string[]
