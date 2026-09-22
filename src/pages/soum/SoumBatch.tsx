@@ -37,7 +37,6 @@ interface Item {
   shipping_message: string | null
   visit_time: string | null
   order_date: string | null
-  tm_barcode: string | null
   tm_external_order_no: string | null
   tm_order_type: string | null
   tm_invoice_type: string | null
@@ -50,6 +49,21 @@ const TEAM_MOVER_TYPES: Record<string, string[]> = {
   '방문': ['방문설치', '방문철거', '재설치'],
   '회수': ['B급회수'],
   '교환': ['교환설치(동일)', '교환회수(동일)', '교환배송(동일)', '교환배송(상이)'],
+}
+
+// 송장유형별 고정 바코드값 — 상품/주문마다 다른 값이 아니라, 현장 작업이 있는 유형
+// (설치/철거/회수)인지 아닌지에 따라 팀무버 쪽에서 미리 정해둔 두 값 중 하나로 고정됨
+const INVOICE_TYPE_BARCODE: Record<string, string> = {
+  '단순배송': 'ROOMING000001',
+  '교환배송(동일)': 'ROOMING000001',
+  '교환배송(상이)': 'ROOMING000001',
+  '배송설치': 'ROOMING000002',
+  '방문설치': 'ROOMING000002',
+  '방문철거': 'ROOMING000002',
+  '재설치': 'ROOMING000002',
+  'B급회수': 'ROOMING000002',
+  '교환설치(동일)': 'ROOMING000002',
+  '교환회수(동일)': 'ROOMING000002',
 }
 
 // 각 자리는 숫자/문자 상관없이 올 수 있음 (예: NK-01-02-03, NK-A1-B2-C3)
@@ -210,7 +224,7 @@ export default function SoumBatch() {
     for (let offset = 0; ; offset += PAGE) {
       const { data: page } = await supabase
         .from('order_items')
-        .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, order_status, tm_barcode, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no, tm_order_type, tm_invoice_type)')
+        .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, order_status, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no, tm_order_type, tm_invoice_type)')
         .eq('batch_id', batchId)
         .eq('status', 'confirmed')
         .range(offset, offset + PAGE - 1)
@@ -243,7 +257,6 @@ export default function SoumBatch() {
         shipping_message: row.orders.shipping_message,
         visit_time: row.orders.visit_time,
         order_date: row.orders.order_date ?? null,
-        tm_barcode: row.tm_barcode ?? null,
         tm_external_order_no: row.orders.tm_external_order_no ?? null,
         tm_order_type: row.orders.tm_order_type ?? null,
         tm_invoice_type: row.orders.tm_invoice_type ?? null,
@@ -672,28 +685,6 @@ export default function SoumBatch() {
     // (제품수량은 합산, 상품명 칸은 비움 — 개별 상품 목록은 고객요청사항에 이미 나열됨)
     const orderGroups = groupItemsByOrder(items)
 
-    // 2) 바코드 — 주문(행) 단위로 부여, 고정 접두어 ROOMING + 전역 순번. 합쳐진 행의
-    // 대표 상품(첫 번째)만 바코드가 필요하므로 나머지 상품엔 새로 발급하지 않음
-    const itemsNeedingBarcode = orderGroups.map(g => g.items[0]).filter(i => !i.tm_barcode)
-    const newBarcodeById = new Map<string, string>()
-    if (itemsNeedingBarcode.length) {
-      const { data: maxRow } = await supabase
-        .from('order_items')
-        .select('tm_barcode')
-        .not('tm_barcode', 'is', null)
-        .order('tm_barcode', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      let seq = maxRow?.tm_barcode ? parseInt(String(maxRow.tm_barcode).replace('ROOMING', ''), 10) : 0
-      for (const item of itemsNeedingBarcode) {
-        seq += 1
-        newBarcodeById.set(item.id, `ROOMING${String(seq).padStart(6, '0')}`)
-      }
-      await Promise.all([...newBarcodeById.entries()].map(([id, code]) =>
-        supabase.from('order_items').update({ tm_barcode: code }).eq('id', id)
-      ))
-    }
-
     const header = [
       '판매사(필)', '외부주문번호(필)', '외부송장번호(필)', '묶음주문번호', '운송장번호', '주문유형(필)', '송장유형(필)',
       '주문인(필)', '주문인전화번호1(필)', '주문인전화번호2', '주문인주소(필)', '주문인우편번호',
@@ -708,7 +699,7 @@ export default function SoumBatch() {
       const externalNo = externalNoByOrderNo.get(item.cafe24_order_no) ?? ''
       const personName = `${item.receiver_name || item.customer_name}님`
       const addr = splitAddressDetail(item.address)
-      const barcode = item.tm_barcode ?? newBarcodeById.get(item.id) ?? ''
+      const barcode = INVOICE_TYPE_BARCODE[item.tm_invoice_type ?? ''] ?? ''
       const totalQty = group.items.reduce((sum, i) => sum + i.quantity, 0)
       return [
         '(주)루밍', externalNo, externalNo, '', '', item.tm_order_type ?? '', item.tm_invoice_type ?? '',
@@ -740,12 +731,11 @@ export default function SoumBatch() {
     XLSX.utils.book_append_sheet(wb, ws, '주문등록')
     XLSX.writeFile(wb, `팀무버_주문등록_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
 
-    // 방금 새로 발급한 값들은 다음 화면 새로고침 없이도 바로 반영 — 외부주문번호는
-    // 매번 재할당되므로 기존 값 유무와 무관하게 항상 새 값으로 덮어씀
+    // 방금 새로 발급한 외부주문번호는 다음 화면 새로고침 없이도 바로 반영 — 매번
+    // 재할당되므로 기존 값 유무와 무관하게 항상 새 값으로 덮어씀
     setItems(prev => prev.map(i => ({
       ...i,
       tm_external_order_no: externalNoByOrderNo.get(i.cafe24_order_no) ?? i.tm_external_order_no,
-      tm_barcode: i.tm_barcode ?? newBarcodeById.get(i.id) ?? null,
     })))
   }
 
