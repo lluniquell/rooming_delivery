@@ -643,6 +643,7 @@ export default function SoumBatch() {
 
     const today = new Date()
     const todayYmd = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
+    const todayDashed = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
     const pickupDateObj = new Date(`${pickupDate}T00:00:00`)
 
     // 1) 외부주문번호 — 주문 단위로 부여 (같은 주문의 상품 행들은 값을 공유). 예전 값이
@@ -705,14 +706,13 @@ export default function SoumBatch() {
         '(주)루밍', externalNo, externalNo, '', '', item.tm_order_type ?? '', item.tm_invoice_type ?? '',
         personName, item.receiver_phone ?? '', '', addr, item.zipcode ?? '',
         personName, item.receiver_phone ?? '', '', addr, item.zipcode ?? '',
-        todayYmd, '', pickupNoteByOrderNo.get(item.cafe24_order_no) ?? '', '', '', '',
+        todayDashed, '', pickupNoteByOrderNo.get(item.cafe24_order_no) ?? '', '', '', '',
         barcode, '', '구성품', String(totalQty), '', '', '', '',
         '', '', '', '', '', '', '',
         '', '', '', '', '',
       ]
     })
 
-    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
     const ws = XLSX.utils.aoa_to_sheet([header, ...dataRows])
     ws['!cols'] = autoColWidths(header, dataRows, { 10: 40, 15: 40, 19: 35 })
 
@@ -729,7 +729,7 @@ export default function SoumBatch() {
 
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, '주문등록')
-    XLSX.writeFile(wb, `팀무버_주문등록_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
+    XLSX.writeFile(wb, `팀무버_주문등록_${activeBatch?.name ?? '배치'}_${todayDashed}.xlsx`)
 
     // 방금 새로 발급한 외부주문번호는 다음 화면 새로고침 없이도 바로 반영 — 매번
     // 재할당되므로 기존 값 유무와 무관하게 항상 새 값으로 덮어씀
