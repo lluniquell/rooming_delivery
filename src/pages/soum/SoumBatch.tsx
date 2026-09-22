@@ -592,15 +592,16 @@ export default function SoumBatch() {
     XLSX.writeFile(wb, `팀무버_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
   }
 
-  // 팀무버 주문 등록(외부 업로드용) 엑셀 — 외부주문번호/외부송장번호/주문일/고객요청사항의
-  // 픽업일은 전부 화면에서 고른 픽업일 기준(다운로드 당일이 아님). 바코드는 상품 고유값이라
-  // 픽업일과 무관하게 한번 발급되면 계속 재사용
+  // 팀무버 주문 등록(외부 업로드용) 엑셀 — 외부주문번호/외부송장번호/주문일(필)은 다운로드
+  // 당일 기준이고, 고객요청사항의 픽업일 문구만 화면에서 고른 픽업일을 씀. 픽업일은 값
+  // 자체보다는 "선택 안 하면 다운로드 자체를 막는" 안전장치 용도가 큼
   async function downloadTeamMoverRegisterExcel() {
     if (!items.length) { alert('이 배치에 상품이 없습니다.'); return }
     if (!pickupDate) { alert('픽업일을 먼저 선택해주세요.'); return }
 
-    const today = new Date(`${pickupDate}T00:00:00`)
-    const todayYmd = pickupDate.replace(/-/g, '')
+    const today = new Date()
+    const todayYmd = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
+    const pickupDateObj = new Date(`${pickupDate}T00:00:00`)
 
     // 1) 외부주문번호 — 주문 단위로 부여 (같은 주문의 상품 행들은 값을 공유). 예전 값이
     // 있어도 무시하고 다운로드할 때마다 전부 오늘 날짜 YYYYMMDD + 순번(01부터)으로 재할당함
@@ -626,7 +627,7 @@ export default function SoumBatch() {
     ))
 
     // 고객요청사항 — 원래 배송메시지 대신, 주문에 포함된 상품을 번호 매겨 나열한
-    // "다운로드일 픽업건" 안내문으로 대체. 같은 주문의 상품 행들은 전부 같은 문구를 공유
+    // "픽업일 픽업건" 안내문으로 대체. 같은 주문의 상품 행들은 전부 같은 문구를 공유
     const productNamesByOrderNo = new Map<string, string[]>()
     for (const item of items) {
       if (!productNamesByOrderNo.has(item.cafe24_order_no)) productNamesByOrderNo.set(item.cafe24_order_no, [])
@@ -635,7 +636,7 @@ export default function SoumBatch() {
     const pickupNoteByOrderNo = new Map<string, string>()
     for (const [orderNo, names] of productNamesByOrderNo) {
       const lines = names.map((n, idx) => `${idx + 1}. ${n}`)
-      pickupNoteByOrderNo.set(orderNo, `${today.getMonth() + 1}월 ${today.getDate()}일 픽업건\n${lines.join('\n')}`)
+      pickupNoteByOrderNo.set(orderNo, `${pickupDateObj.getMonth() + 1}월 ${pickupDateObj.getDate()}일 픽업건\n${lines.join('\n')}`)
     }
 
     // 팀무버 쪽 양식은 한 줄 = 한 주문이라, 같은 주문의 여러 상품은 한 행으로 합침
