@@ -191,6 +191,11 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
     const RESOLVED_STATUSES = new Set(['N30', 'N40', 'N50', 'C40', 'E40', 'E41', 'R30', 'R40'])
     pendingRows = pendingRows.filter((row: any) => !row.order_status || !RESOLVED_STATUSES.has(row.order_status))
 
+    // 배치 해제/PII 정리 대상 판정 — 예전엔 /^(N[34]|C)/ 정규식만 써서 구매확정(N50)·교환
+    // 완료(E40/E41)·반품완료(R30/R40) 상품이 다 끝났는데도 안 걸러졌음(20260806-0000460,
+    // 2026-09-22 발견). 취소는 접수 단계(C10 등)부터도 걸러야 해서 RESOLVED_STATUSES와 별개로 챙김
+    const isDone = (status: string) => /^C/.test(status) || RESOLVED_STATUSES.has(status)
+
     const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null; order_status: string | null; batch_id: string | null }[]>()
     const orderIdByNo = new Map<string, string>()
     for (const row of (pendingRows ?? []) as any[]) {
@@ -241,7 +246,7 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
           // 배송중/배송완료(N3x/N4x)뿐 아니라 취소(C계열, 취소접수/취소완료 전부)도 우리 쪽에서
           // 더 할 일이 없으니 같이 배치해제 — 검수 전 취소는 CS가 별도로 연락 준다고 확인함
           // (2026-08-20 결정)
-          if (match.order_status && /^(N[34]|C)/.test(match.order_status) && pendingItem.batch_id) {
+          if (match.order_status && isDone(match.order_status) && pendingItem.batch_id) {
             patch.batch_id = null
             unassigned++
           }
@@ -263,7 +268,7 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
         // clearPiiIfOrderComplete와 같은 기준 — 자동 배치해제 경로엔 이 처리가 없어서
         // 지금까지 빠져있었음, 2026-08-20). liveItems는 카페24에서 방금 받아온 이 주문의
         // 전체 상품이라 배송방법 불문 다 포함됨 — 로컬 status 대신 이걸로 판단하는 게 더 정확함
-        if (liveItems.length && liveItems.every((i: any) => i.order_status && /^(N[34]|C)/.test(i.order_status))) {
+        if (liveItems.length && liveItems.every((i: any) => i.order_status && isDone(i.order_status))) {
           const orderId = orderIdByNo.get(no)
           if (orderId) {
             await supabase.from('orders').update({
