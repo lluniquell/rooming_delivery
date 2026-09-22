@@ -23,7 +23,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let headerName: string
   let orderNoSuffix = ''
   let address: string | null = null
-  let photoUrls: string[] = []
+  // 사진마다 어떤 상품 사진인지 같이 보여주기 위해 상품명을 같이 들고 다님(2026-09-22)
+  let photoEntries: { url: string; productName: string | null }[] = []
 
   if (kind === 'order') {
     const { data: order } = await supabase
@@ -36,8 +37,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     orderNoSuffix = ` (${order.cafe24_order_no})`
     address = order.address
 
-    const { data: photos } = await supabase.from('delivery_photos').select('storage_path').eq('order_id', id)
-    photoUrls = (photos ?? []).map(p => `${SUPABASE_URL}/storage/v1/object/public/delivery-photos/${p.storage_path}`)
+    const { data: photos } = await supabase.from('delivery_photos').select('storage_path, order_item_id').eq('order_id', id)
+    const itemIds = [...new Set((photos ?? []).map(p => p.order_item_id).filter((v): v is string => !!v))]
+    let productNameById: Record<string, string> = {}
+    if (itemIds.length) {
+      const { data: itemRows } = await supabase.from('order_items').select('id, product_name').in('id', itemIds)
+      productNameById = Object.fromEntries((itemRows ?? []).map(i => [i.id, i.product_name]))
+    }
+    photoEntries = (photos ?? []).map(p => ({
+      url: `${SUPABASE_URL}/storage/v1/object/public/delivery-photos/${p.storage_path}`,
+      productName: p.order_item_id ? productNameById[p.order_item_id] ?? null : null,
+    }))
   } else {
     const { data: adhoc } = await supabase
       .from('schedule_adhoc_stops')
@@ -49,17 +59,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     address = adhoc.address
 
     const { data: photos } = await supabase.from('delivery_photos').select('storage_path').eq('adhoc_stop_id', id)
-    photoUrls = (photos ?? []).map(p => `${SUPABASE_URL}/storage/v1/object/public/delivery-photos/${p.storage_path}`)
+    photoEntries = (photos ?? []).map(p => ({
+      url: `${SUPABASE_URL}/storage/v1/object/public/delivery-photos/${p.storage_path}`,
+      productName: null,
+    }))
   }
 
   const label = kind === 'order' ? '배송완료' : '처리완료'
-  const lines = [
+  const headerText = [
     `${label}(${driver_name ?? '알 수 없음'}) ${headerName}${orderNoSuffix}`,
     address ?? '',
-    ...(photoUrls.length ? ['', '사진:', ...photoUrls] : []),
-  ]
+  ].filter(Boolean).join('\n')
 
-  try {
+  async function sendMessage(plainText: string) {
     const chRes = await fetch(`https://api.channel.io/open/groups/@${encodeURIComponent(GROUP_NAME)}/messages`, {
       method: 'POST',
       headers: {
@@ -68,10 +80,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Channel-Version': '2026-06-01',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ plainText: lines.filter(Boolean).join('\n') }),
+      body: JSON.stringify({ plainText }),
     })
     const chData = await chRes.json()
-    if (!chRes.ok) return res.status(502).json({ error: chData })
+    if (!chRes.ok) throw new Error(JSON.stringify(chData))
+  }
+
+  try {
+    await sendMessage(headerText)
+    // 채널톡은 한 메시지에 링크가 여러 개 있으면 첫 번째 것만 미리보기가 뜨므로,
+    // 사진마다 미리보기가 다 뜨게 사진 1장 = 메시지 1개로 나눠서 보냄(2026-09-22)
+    for (const { url, productName } of photoEntries) {
+      await sendMessage([productName, url].filter(Boolean).join('\n'))
+    }
     res.status(200).json({ ok: true })
   } catch (e: any) {
     res.status(500).json({ error: e.message })
