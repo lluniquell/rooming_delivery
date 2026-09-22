@@ -149,7 +149,7 @@ export default function DriverDetail() {
         const res = await fetch('/api/cafe24/shipments?action=transit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orders: [{ order_no: order.cafe24_order_no, item_codes: itemCodes, tracking_no: invoiceNo, status: 'shipped' }] }),
+          body: JSON.stringify({ orders: [{ order_no: order.cafe24_order_no, item_codes: itemCodes, tracking_no: invoiceNo, status: 'shipped', carrier_code: '0001' }] }),
         })
         const result = await res.json()
         if (result.errors?.length) {
