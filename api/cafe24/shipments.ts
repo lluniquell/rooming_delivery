@@ -128,6 +128,24 @@ async function handleStandby(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+// 카페24는 배송상태 전환 시 단계를 건너뛰는 걸 허용 안 함 — 배송대기(standby/N21)에서
+// 곧장 배송완료(shipped/N40)로 못 가고 반드시 배송중(shipping/N30)을 한 번 거쳐야 함
+// ("You cannot change to that order state." 에러로 실제 확인, 2026-09-22). 이미 그
+// 상태거나 지나쳤으면 중간 단계·최종 단계 모두 건너뜀(중복 전환 시도 에러 방지)
+async function transitionShipment(
+  orderNo: string, shippingCode: string, currentStatus: string | undefined, finalStatus: 'shipping' | 'shipped', token: string
+) {
+  const finalCode = finalStatus === 'shipped' ? 'N40' : 'N30'
+  if (currentStatus === finalCode) return { ok: true, data: {} }
+  if (finalStatus === 'shipped' && currentStatus !== 'N30') {
+    const stepRes = await cafe24Req('PUT', `/api/v2/admin/orders/${orderNo}/shipments/${shippingCode}`, token,
+      { shop_no: 1, request: { status: 'shipping' } })
+    if (!stepRes.ok || stepRes.data.error) return stepRes
+  }
+  return cafe24Req('PUT', `/api/v2/admin/orders/${orderNo}/shipments/${shippingCode}`, token,
+    { shop_no: 1, request: { status: finalStatus } })
+}
+
 // 출고검수1 완료(실제 택배사 인계) 또는 자체배송 배송완료 시 카페24 상태 전환 (POST ?action=transit)
 // CJ/경동 등 실제 택배사가 있는 건은 인계 시점엔 아직 도착 전이라 'shipping'(배송중)이 맞고,
 // 그 뒤 배송완료(N40)는 택배사 추적 연동으로 카페24가 자동으로 매김. 반면 직배/팀무버처럼
@@ -195,11 +213,11 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
           // 그 그룹 상품의 tracking_no 존재 여부로 판단해야 함 (2026-07-29 실제로 이 체크가
           // 없어서 미등록 그룹에 DELETE를 시도하다 실패해 등록/전환 자체가 통째로 스킵된 적 있음)
           const groupTrackingNo = allItems.find((i: any) => i.shipping_code === shippingCode)?.tracking_no as string | undefined
+          const groupStatus = allItems.find((i: any) => i.shipping_code === shippingCode)?.order_status as string | undefined
 
           if (isFullGroup && groupTrackingNo) {
             // 이미 등록된 그룹 전체가 대상 — 그대로 전환
-            const r = await cafe24Req('PUT', `/api/v2/admin/orders/${orderNo}/shipments/${shippingCode}`, token,
-              { shop_no: 1, request: { status: finalStatus } })
+            const r = await transitionShipment(orderNo, shippingCode, groupStatus, finalStatus, token)
             if (!r.ok || r.data.error) {
               errors.push(`${orderNo} (${shippingCode}): ${r.data.error?.message ?? JSON.stringify(r.data).slice(0, 150)}`)
             }
@@ -230,8 +248,8 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
               errors.push(`${orderNo}: 운송장 등록 실패 — ${JSON.stringify(postRes.data).slice(0, 150)}`)
               continue
             }
-            const putRes = await cafe24Req('PUT', `/api/v2/admin/orders/${orderNo}/shipments/${newCode}`, token,
-              { shop_no: 1, request: { status: finalStatus } })
+            // 방금 만든 그룹은 항상 standby(N21) 상태에서 시작하므로 currentStatus는 그대로 넘김
+            const putRes = await transitionShipment(orderNo, newCode, 'N21', finalStatus, token)
             if (!putRes.ok || putRes.data.error) {
               errors.push(`${orderNo} (${newCode}): ${putRes.data.error?.message ?? JSON.stringify(putRes.data).slice(0, 150)}`)
             }
