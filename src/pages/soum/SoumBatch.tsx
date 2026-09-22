@@ -135,6 +135,9 @@ export default function SoumBatch() {
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null)
+  // 팀무버 주문 등록 엑셀의 외부주문번호/주문일/고객요청사항 픽업일 기준이 되는 날짜 —
+  // 선택 안 하면 다운로드가 안 되게 막아서, 엑셀에 날짜가 빠지거나 틀리게 나가는 걸 방지
+  const [pickupDate, setPickupDate] = useState('')
   // 팀무버 예약 배치 전용 — 운송장번호를 엑셀 업로드 대신 주문별로 수기 입력해서
   // 바로 카페24 배송완료 처리(등록+전환)까지 한 번에 함(2026-09-22)
   const [manualTracking, setManualTracking] = useState<Record<string, string>>({})
@@ -589,13 +592,15 @@ export default function SoumBatch() {
     XLSX.writeFile(wb, `팀무버_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
   }
 
-  // 팀무버 주문 등록(외부 업로드용) 엑셀 — 외부주문번호/외부송장번호/바코드는 한번 발급되면
-  // 재다운로드해도 같은 값을 계속 써야 해서(중복 등록 방지) orders/order_items에 영구 저장해 재사용
+  // 팀무버 주문 등록(외부 업로드용) 엑셀 — 외부주문번호/외부송장번호/주문일/고객요청사항의
+  // 픽업일은 전부 화면에서 고른 픽업일 기준(다운로드 당일이 아님). 바코드는 상품 고유값이라
+  // 픽업일과 무관하게 한번 발급되면 계속 재사용
   async function downloadTeamMoverRegisterExcel() {
     if (!items.length) { alert('이 배치에 상품이 없습니다.'); return }
+    if (!pickupDate) { alert('픽업일을 먼저 선택해주세요.'); return }
 
-    const today = new Date()
-    const todayYmd = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
+    const today = new Date(`${pickupDate}T00:00:00`)
+    const todayYmd = pickupDate.replace(/-/g, '')
 
     // 1) 외부주문번호 — 주문 단위로 부여 (같은 주문의 상품 행들은 값을 공유). 예전 값이
     // 있어도 무시하고 다운로드할 때마다 전부 오늘 날짜 YYYYMMDD + 순번(01부터)으로 재할당함
@@ -865,6 +870,13 @@ export default function SoumBatch() {
                   </button>
                 ) : activeBatch?.name?.includes('팀무버') ? (
                   <>
+                    <input
+                      type="date"
+                      value={pickupDate}
+                      onChange={e => setPickupDate(e.target.value)}
+                      title="주문 등록 엑셀의 픽업일"
+                      className="px-2 py-1.5 rounded-lg text-sm border border-gray-300 text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                    />
                     <button
                       onClick={downloadTeamMoverExcel}
                       className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
@@ -873,7 +885,9 @@ export default function SoumBatch() {
                     </button>
                     <button
                       onClick={downloadTeamMoverRegisterExcel}
-                      className="px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700"
+                      disabled={!pickupDate}
+                      title={!pickupDate ? '픽업일을 먼저 선택해주세요' : undefined}
+                      className="px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       팀무버 주문 등록 엑셀 다운로드
                     </button>
