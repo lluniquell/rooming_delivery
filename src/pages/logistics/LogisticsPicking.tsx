@@ -528,10 +528,10 @@ export default function LogisticsPicking() {
                   key={l.key}
                   className="w-[80mm] h-[60mm] mx-auto border border-gray-300 print:border-0 rounded-lg print:rounded-none px-4 pt-4 pb-3 flex flex-col justify-start gap-1.5 break-inside-avoid print:break-after-page"
                 >
-                  <div className="flex items-baseline gap-2">
+                  <div className="flex items-start justify-between gap-2">
                     <div className="text-2xl font-bold text-gray-800">{l.driverName}</div>
                     {l.routeOrder != null && (
-                      <div className="text-2xl font-bold text-indigo-600">{l.routeOrder}번</div>
+                      <div className="text-4xl font-bold text-indigo-600 leading-none shrink-0">{l.routeOrder}</div>
                     )}
                   </div>
                   <div className="text-base text-gray-500">{l.dateLabel}</div>
