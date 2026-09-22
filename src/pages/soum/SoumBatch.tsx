@@ -597,41 +597,28 @@ export default function SoumBatch() {
     const today = new Date()
     const todayYmd = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
 
-    // 1) 외부주문번호 — 주문 단위로 부여 (같은 주문의 상품 행들은 값을 공유). 주문 원래
-    // 날짜가 아니라 이 엑셀을 "다운로드하는 날" 기준 YYYYMMDD + 그날 안에서의 순번(01부터)
-    const orderInfoByNo = new Map<string, { tm_external_order_no: string | null }>()
-    for (const item of items) {
-      if (!orderInfoByNo.has(item.cafe24_order_no)) {
-        orderInfoByNo.set(item.cafe24_order_no, { tm_external_order_no: item.tm_external_order_no })
-      }
-    }
-
-    const needAssignment = [...orderInfoByNo.entries()].filter(([, o]) => !o.tm_external_order_no)
+    // 1) 외부주문번호 — 주문 단위로 부여 (같은 주문의 상품 행들은 값을 공유). 예전 값이
+    // 있어도 무시하고 다운로드할 때마다 전부 오늘 날짜 YYYYMMDD + 순번(01부터)으로 재할당함
+    // — 이 배치 밖의 다른 주문이 오늘 이미 써둔 번호와만 안 겹치게 그 최대값 이후로 이어감
+    const orderNos = [...new Set(items.map(i => i.cafe24_order_no))]
+    const { data: usedRows } = await supabase
+      .from('orders')
+      .select('tm_external_order_no')
+      .like('tm_external_order_no', `${todayYmd}%`)
+      .not('cafe24_order_no', 'in', `(${orderNos.join(',')})`)
     let maxSeq = 0
-    if (needAssignment.length) {
-      const { data: usedRows } = await supabase
-        .from('orders')
-        .select('tm_external_order_no')
-        .like('tm_external_order_no', `${todayYmd}%`)
-      for (const row of usedRows ?? []) {
-        const seqPart = parseInt(String(row.tm_external_order_no).slice(8), 10)
-        if (!isNaN(seqPart)) maxSeq = Math.max(maxSeq, seqPart)
-      }
-    }
-    const newExternalNoByOrderNo = new Map<string, string>()
-    for (const [orderNo] of needAssignment) {
-      maxSeq += 1
-      newExternalNoByOrderNo.set(orderNo, `${todayYmd}${String(maxSeq).padStart(2, '0')}`)
-    }
-    if (newExternalNoByOrderNo.size) {
-      await Promise.all([...newExternalNoByOrderNo.entries()].map(([orderNo, no]) =>
-        supabase.from('orders').update({ tm_external_order_no: no }).eq('cafe24_order_no', orderNo)
-      ))
+    for (const row of usedRows ?? []) {
+      const seqPart = parseInt(String(row.tm_external_order_no).slice(8), 10)
+      if (!isNaN(seqPart)) maxSeq = Math.max(maxSeq, seqPart)
     }
     const externalNoByOrderNo = new Map<string, string>()
-    for (const [orderNo, o] of orderInfoByNo) {
-      externalNoByOrderNo.set(orderNo, o.tm_external_order_no ?? newExternalNoByOrderNo.get(orderNo) ?? '')
+    for (const orderNo of orderNos) {
+      maxSeq += 1
+      externalNoByOrderNo.set(orderNo, `${todayYmd}${String(maxSeq).padStart(2, '0')}`)
     }
+    await Promise.all([...externalNoByOrderNo.entries()].map(([orderNo, no]) =>
+      supabase.from('orders').update({ tm_external_order_no: no }).eq('cafe24_order_no', orderNo)
+    ))
 
     // 고객요청사항 — 원래 배송메시지 대신, 주문에 포함된 상품을 번호 매겨 나열한
     // "다운로드일 픽업건" 안내문으로 대체. 같은 주문의 상품 행들은 전부 같은 문구를 공유
@@ -711,14 +698,13 @@ export default function SoumBatch() {
     XLSX.utils.book_append_sheet(wb, ws, '주문등록')
     XLSX.writeFile(wb, `팀무버_주문등록_${activeBatch?.name ?? '배치'}_${dateStr}.xlsx`)
 
-    // 방금 새로 발급한 값들은 다음 화면 새로고침 없이도 바로 반영
-    if (newExternalNoByOrderNo.size || newBarcodeById.size) {
-      setItems(prev => prev.map(i => ({
-        ...i,
-        tm_external_order_no: i.tm_external_order_no ?? newExternalNoByOrderNo.get(i.cafe24_order_no) ?? null,
-        tm_barcode: i.tm_barcode ?? newBarcodeById.get(i.id) ?? null,
-      })))
-    }
+    // 방금 새로 발급한 값들은 다음 화면 새로고침 없이도 바로 반영 — 외부주문번호는
+    // 매번 재할당되므로 기존 값 유무와 무관하게 항상 새 값으로 덮어씀
+    setItems(prev => prev.map(i => ({
+      ...i,
+      tm_external_order_no: externalNoByOrderNo.get(i.cafe24_order_no) ?? i.tm_external_order_no,
+      tm_barcode: i.tm_barcode ?? newBarcodeById.get(i.id) ?? null,
+    })))
   }
 
   async function uploadTracking(e: React.ChangeEvent<HTMLInputElement>) {
