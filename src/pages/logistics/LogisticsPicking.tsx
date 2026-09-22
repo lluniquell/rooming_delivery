@@ -45,12 +45,11 @@ interface PickingRow {
 
 interface Label {
   key: string
-  driverName: string
+  rows: { name: string; routeOrder: number | null }[]
   orderPosition: string
   productName: string
   customerName: string
   dateLabel: string
-  routeOrder: number | null
 }
 
 // SoumBatch.tsx/SoumPicking.tsx와 동일한 규칙 — 공급자 상품명에 섞여있는
@@ -116,7 +115,7 @@ export default function LogisticsPicking() {
   const [items, setItems] = useState<Item[]>([])
   const [barcodeMap, setBarcodeMap] = useState<Record<string, BarcodeRow[]>>({})
   const [driverNameByRoute, setDriverNameByRoute] = useState<Record<string, string>>({})
-  const [companionRoutesByOrderNo, setCompanionRoutesByOrderNo] = useState<Record<string, string[]>>({})
+  const [companionRoutesByOrderNo, setCompanionRoutesByOrderNo] = useState<Record<string, { route_id: string; route_order: number | null }[]>>({})
   const [sort, setSort] = useState<'location' | 'brand'>('location')
   const [loading, setLoading] = useState(true)
   const [showDone, setShowDone] = useState(false)
@@ -201,12 +200,12 @@ export default function LogisticsPicking() {
     // 2인 배송 등으로 다른 루트에 "동행"으로 같이 붙어있는 주문 — 라벨엔 원래 루트
     // 담당자와 동행 루트 담당자를 같이 표시해야 함 (ScheduleDay.tsx의 addOrderAsAdhoc이
     // reason에 "동행 (주문번호)" 형식으로 남겨둔 걸 파싱)
-    const { data: adhocData } = await supabase.from('schedule_adhoc_stops').select('route_id, reason').eq('date', date)
-    const companions: Record<string, string[]> = {}
+    const { data: adhocData } = await supabase.from('schedule_adhoc_stops').select('route_id, route_order, reason').eq('date', date)
+    const companions: Record<string, { route_id: string; route_order: number | null }[]> = {}
     for (const a of adhocData ?? []) {
       const orderNo = a.reason?.match(/\d{8}-\d{7}/)?.[0]
       if (!orderNo) continue
-      (companions[orderNo] ??= []).push(a.route_id)
+      (companions[orderNo] ??= []).push({ route_id: a.route_id, route_order: a.route_order })
     }
     setCompanionRoutesByOrderNo(companions)
 
@@ -326,22 +325,26 @@ export default function LogisticsPicking() {
 
   const labels: Label[] = items
     .flatMap(i => {
-      const routeIds = [i.route_id, ...(companionRoutesByOrderNo[i.cafe24_order_no] ?? [])].filter((id): id is string => !!id)
-      const driverNames = [...new Set(routeIds.map(id => driverNameByRoute[id]).filter((n): n is string => !!n))]
-      const driverName = driverNames.join(',') || '미배정'
+      // 2인 배송(동행)은 원래 담당자 루트와 동행 담당자 루트의 배송순서가 서로 다를 수 있어서
+      // (예: A 루트에선 2번째, B 루트에선 3번째) 하나로 합치지 않고 담당자별로 각자의 순서를 따로 둠
+      const routeEntries = [
+        { route_id: i.route_id, route_order: i.route_order },
+        ...(companionRoutesByOrderNo[i.cafe24_order_no] ?? []),
+      ].filter((r): r is { route_id: string; route_order: number | null } => !!r.route_id)
+      const rows = routeEntries
+        .map(r => ({ name: driverNameByRoute[r.route_id] ?? '미배정', routeOrder: r.route_order }))
       const { start, total } = boxRangeByItemId[i.id] ?? { start: 0, total: i.quantity * boxCountOf(i.product_code) }
       const unitCount = i.quantity * boxCountOf(i.product_code)
       return Array.from({ length: unitCount }, (_, k) => ({
         key: `${i.id}-${k}`,
-        driverName,
+        rows: rows.length ? rows : [{ name: '미배정', routeOrder: null }],
         orderPosition: `${start + k + 1}-${total}`,
         productName: i.product_name,
         customerName: i.customer_name,
         dateLabel,
-        routeOrder: i.route_order,
       }))
     })
-    .sort((a, b) => a.driverName.localeCompare(b.driverName) || (a.routeOrder ?? 999) - (b.routeOrder ?? 999))
+    .sort((a, b) => a.rows[0].name.localeCompare(b.rows[0].name) || (a.rows[0].routeOrder ?? 999) - (b.rows[0].routeOrder ?? 999))
 
   function renderRow(row: PickingRow, done: boolean) {
     return (
@@ -528,12 +531,14 @@ export default function LogisticsPicking() {
                   key={l.key}
                   className="w-[80mm] h-[60mm] mx-auto border border-gray-300 print:border-0 rounded-lg print:rounded-none px-4 pt-4 pb-3 flex flex-col justify-start gap-1.5 break-inside-avoid print:break-after-page"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="text-2xl font-bold text-gray-800">{l.driverName}</div>
-                    {l.routeOrder != null && (
-                      <div className="text-4xl font-bold text-indigo-600 leading-none shrink-0">{l.routeOrder}</div>
-                    )}
-                  </div>
+                  {l.rows.map((row, idx) => (
+                    <div key={idx} className="flex items-start justify-between gap-2">
+                      <div className={`font-bold text-gray-800 ${l.rows.length > 1 ? 'text-xl' : 'text-2xl'}`}>{row.name}</div>
+                      {row.routeOrder != null && (
+                        <div className={`font-bold text-indigo-600 leading-none shrink-0 ${l.rows.length > 1 ? 'text-3xl' : 'text-4xl'}`}>{row.routeOrder}</div>
+                      )}
+                    </div>
+                  ))}
                   <div className="text-base text-gray-500">{l.dateLabel}</div>
                   <div className="text-lg text-gray-700 break-words">{l.orderPosition} {l.productName}</div>
                   <div className="text-base text-gray-500">{l.customerName}</div>
