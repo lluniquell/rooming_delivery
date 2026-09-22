@@ -142,23 +142,32 @@ export default function DriverDetail() {
       delivered_at: new Date().toISOString(),
     }).eq('id', order.id)
 
-    // 카페24 배송중 전환 — 실패해도 로컬 완료 처리는 유지 (나중에 수동 확인 필요)
+    // 카페24 배송완료 전환 — 실패해도 로컬 완료 처리는 유지 (나중에 수동 확인 필요)
     try {
       const itemCodes = order.items.map(i => i.cafe24_item_code).filter(Boolean) as string[]
       if (itemCodes.length) {
         const res = await fetch('/api/cafe24/shipments?action=transit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orders: [{ order_no: order.cafe24_order_no, item_codes: itemCodes, tracking_no: invoiceNo }] }),
+          body: JSON.stringify({ orders: [{ order_no: order.cafe24_order_no, item_codes: itemCodes, tracking_no: invoiceNo, status: 'shipped' }] }),
         })
         const result = await res.json()
         if (result.errors?.length) {
-          setMessage(`카페24 배송중 전환 실패: ${result.errors[0]}`)
+          setMessage(`카페24 배송완료 전환 실패: ${result.errors[0]}`)
         }
       }
     } catch {
-      setMessage('카페24 배송중 전환 중 네트워크 오류가 발생했습니다.')
+      setMessage('카페24 배송완료 전환 중 네트워크 오류가 발생했습니다.')
     }
+
+    // 카페24 어드민 메모에 담당 배송원 이름 남김 — 실패해도 완료 처리엔 영향 없음
+    try {
+      await fetch('/api/cafe24/shipments?action=memo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_no: order.cafe24_order_no, content: `배송완료 처리: ${driverName}` }),
+      })
+    } catch { /* 메모 등록 실패는 배송 완료 처리에 영향 없음 */ }
 
     // 채널톡 알림 — 실패해도 배송 완료 처리 자체는 이미 끝난 상태라 조용히 넘어감
     try {

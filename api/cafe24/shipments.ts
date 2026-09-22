@@ -128,15 +128,20 @@ async function handleStandby(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-// 출고검수1 완료 시 배송중 전환 (POST ?action=transit)
+// 출고검수1 완료(실제 택배사 인계) 또는 자체배송 배송완료 시 카페24 상태 전환 (POST ?action=transit)
+// CJ/경동 등 실제 택배사가 있는 건은 인계 시점엔 아직 도착 전이라 'shipping'(배송중)이 맞고,
+// 그 뒤 배송완료(N40)는 택배사 추적 연동으로 카페24가 자동으로 매김. 반면 직배/팀무버처럼
+// 택배사 연동이 없는 자체배송은 그 자동 전환이 없어서, 실제로 다 배송한 시점에 호출자가
+// status:'shipped'를 넘겨 직접 배송완료(N40) 처리해야 함(2026-09-22, 'shipping'에서 멈추고
+// 그 뒤로 안 넘어간다는 걸 실제 API 테스트로 확인. status를 안 넘기면 기존처럼 'shipping')
 async function handleTransit(req: VercelRequest, res: VercelResponse) {
-  // orders: [{ order_no, item_codes, tracking_no }] — item_codes가 있으면 그 상품들만 배송중 전환 대상.
+  // orders: [{ order_no, item_codes, tracking_no }] — item_codes가 있으면 그 상품들만 대상.
   // 카페24는 배송상태를 상품 단위가 아니라 shipping_code(운송장 그룹) 단위로만 바꿀 수 있어서,
   // item_codes가 그 그룹의 일부만 가리키면(예: 매장 재고 부족으로 일부만 먼저 출고) 그룹 전체를
-  // 지우고 item_codes만 같은 tracking_no로 새 그룹을 만들어 그 그룹만 배송중 전환한다.
+  // 지우고 item_codes만 같은 tracking_no로 새 그룹을 만들어 그 그룹만 전환한다.
   // (실제로 이 필터를 무시하고 그룹 전체를 전환해버려 정상 출고분까지 상태가 꼬인 적 있음 — 2026-07-26)
   const { order_nos, orders } = req.body ?? {}
-  const targets: { order_no: string; item_codes?: string[]; tracking_no?: string; carrier_code?: string }[] =
+  const targets: { order_no: string; item_codes?: string[]; tracking_no?: string; carrier_code?: string; status?: 'shipping' | 'shipped' }[] =
     Array.isArray(orders) ? orders
     : Array.isArray(order_nos) ? order_nos.map((o: string) => ({ order_no: o }))
     : []
@@ -149,7 +154,8 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
     let updated = 0
     const errors: string[] = []
 
-    for (const { order_no: orderNo, item_codes, tracking_no, carrier_code } of targets) {
+    for (const { order_no: orderNo, item_codes, tracking_no, carrier_code, status: targetStatus } of targets) {
+      const finalStatus = targetStatus === 'shipped' ? 'shipped' : 'shipping'
       if (!orderNo) continue
       try {
         const { data: orderRow } = await supabase
@@ -191,9 +197,9 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
           const groupTrackingNo = allItems.find((i: any) => i.shipping_code === shippingCode)?.tracking_no as string | undefined
 
           if (isFullGroup && groupTrackingNo) {
-            // 이미 등록된 그룹 전체가 대상 — 그대로 배송중 전환
+            // 이미 등록된 그룹 전체가 대상 — 그대로 전환
             const r = await cafe24Req('PUT', `/api/v2/admin/orders/${orderNo}/shipments/${shippingCode}`, token,
-              { shop_no: 1, request: { status: 'shipping' } })
+              { shop_no: 1, request: { status: finalStatus } })
             if (!r.ok || r.data.error) {
               errors.push(`${orderNo} (${shippingCode}): ${r.data.error?.message ?? JSON.stringify(r.data).slice(0, 150)}`)
             }
@@ -225,7 +231,7 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
               continue
             }
             const putRes = await cafe24Req('PUT', `/api/v2/admin/orders/${orderNo}/shipments/${newCode}`, token,
-              { shop_no: 1, request: { status: 'shipping' } })
+              { shop_no: 1, request: { status: finalStatus } })
             if (!putRes.ok || putRes.data.error) {
               errors.push(`${orderNo} (${newCode}): ${putRes.data.error?.message ?? JSON.stringify(putRes.data).slice(0, 150)}`)
             }

@@ -250,7 +250,7 @@ export default function SoumBatch() {
       const res = await fetch('/api/cafe24/shipments?action=transit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orders: [{ order_no: group.cafe24_order_no, item_codes: itemCodes, tracking_no: trackingNo }] }),
+        body: JSON.stringify({ orders: [{ order_no: group.cafe24_order_no, item_codes: itemCodes, tracking_no: trackingNo, status: 'shipped' }] }),
       })
       const result = await res.json()
       if (result.errors?.length) {
