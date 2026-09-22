@@ -44,6 +44,12 @@ interface Item {
 // 각 자리는 숫자/문자 상관없이 올 수 있음 (예: NK-01-02-03, NK-A1-B2-C3)
 const LOC_REGEX = /[A-Z]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}/
 
+// 취소(C*)됐거나 교환으로 대체되어 끝난(E40/E41) 상품은 로컬 status는 여전히 'confirmed'로
+// 남아있어도 실제로는 죽은 라인이라 배치 화면에 계속 보이면 안 됨 (SoumOutgoing.tsx와 동일 규칙)
+function isDeadOrderStatus(status: string | null) {
+  return !!status && /^C|^E4/.test(status)
+}
+
 // 배치 이름으로 배송방법을 유추 — SoumOrders.tsx의 동일 함수와 같은 규칙
 // (보류에서 다른 배치로 옮길 때, 그 배치에 맞는 배송방법으로 다시 맞춰줌)
 function methodOfBatch(name: string): string | null {
@@ -149,7 +155,7 @@ export default function SoumBatch() {
     for (let from = 0; ; from += PAGE_SIZE) {
       const { data: page } = await supabase
         .from('order_items')
-        .select('batch_id, quantity, orders(cafe24_order_no)')
+        .select('batch_id, quantity, order_status, orders(cafe24_order_no)')
         .eq('status', 'confirmed')
         .range(from, from + PAGE_SIZE - 1)
       if (!page || page.length === 0) break
@@ -161,7 +167,7 @@ export default function SoumBatch() {
     const eaMap: Record<string, number> = {}
     const orderSetMap: Record<string, Set<string>> = {}
     for (const it of itemData) {
-      if (!it.batch_id) continue
+      if (!it.batch_id || isDeadOrderStatus(it.order_status)) continue
       countMap[it.batch_id] = (countMap[it.batch_id] ?? 0) + 1
       eaMap[it.batch_id] = (eaMap[it.batch_id] ?? 0) + it.quantity
       const orderNo = it.orders?.cafe24_order_no
@@ -198,6 +204,7 @@ export default function SoumBatch() {
       if (!page || page.length < PAGE) break
     }
     const rows = (data as any[])
+      .filter(row => !isDeadOrderStatus(row.order_status))
       .map(row => ({
         id: row.id,
         product_code: row.product_code,

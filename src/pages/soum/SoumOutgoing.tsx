@@ -91,7 +91,7 @@ export default function SoumOutgoing() {
       .not('tracking_number', 'is', null)
     const map: Record<string, PendingOrder> = {}
     for (const row of (data ?? []) as any[]) {
-      if (row.order_status && /^C/.test(row.order_status)) continue
+      if (row.order_status && /^C|^E4/.test(row.order_status)) continue
       const t = row.tracking_number
       if (!map[t]) map[t] = { tracking_number: t, customer_name: row.orders.customer_name, item_count: 0, ea_count: 0 }
       map[t].item_count++
@@ -121,11 +121,11 @@ export default function SoumOutgoing() {
     // 출고 전 취소된 상품은 목록에서 제외만 하고, 같은 운송장의 나머지 정상 상품은
     // 그대로 검수 진행 — 상품 하나가 취소됐다고 같은 운송장에 묶인 다른 정상 상품까지
     // 막아버리면 안 됨(부분취소, 2026-09-11). 전부 취소된 경우에만 완전히 막음
-    const activeItems = (itemData as any[]).filter(i => !(i.order_status && /^C/.test(i.order_status)))
+    const activeItems = (itemData as any[]).filter(i => !(i.order_status && /^C|^E4/.test(i.order_status)))
     const cancelledCount = itemData.length - activeItems.length
 
     if (!activeItems.length) {
-      setMessage('⚠️ 이 운송장의 상품이 모두 취소됐습니다. 출고하지 마세요.')
+      setMessage('⚠️ 이 운송장의 상품이 모두 취소/교환 완료됐습니다. 출고하지 마세요.')
       setItems([])
       setOrderInfo(null)
       return
@@ -134,7 +134,7 @@ export default function SoumOutgoing() {
     const order = activeItems[0].orders
     setOrderInfo({ id: order.id, cafe24_order_no: order.cafe24_order_no, customer_name: order.customer_name, tracking_number: tracking })
     setItems(activeItems.map(({ orders, order_status, ...rest }) => rest))
-    setMessage(cancelledCount ? `⚠️ 취소된 상품 ${cancelledCount}건은 제외했습니다.` : '')
+    setMessage(cancelledCount ? `⚠️ 취소/교환 완료된 상품 ${cancelledCount}건은 제외했습니다.` : '')
     setTimeout(() => barcodeRef.current?.focus(), 100)
   }
 
