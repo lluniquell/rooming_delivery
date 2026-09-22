@@ -188,13 +188,18 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
     // PostgREST의 not.in 필터는 order_status가 NULL인 행을 걸러버려서(NULL NOT IN (...)
     // 은 NULL) DB 쿼리 대신 여기서 걸러냄 — 아직 한 번도 확인 안 된(NULL) 상품은 계속 대상에
     // 남아야 함 (2026-08-21 결정)
-    const RESOLVED_STATUSES = new Set(['N30', 'N40', 'N50', 'C40', 'E40', 'E41', 'R30', 'R40'])
-    pendingRows = pendingRows.filter((row: any) => !row.order_status || !RESOLVED_STATUSES.has(row.order_status))
-
     // 배치 해제/PII 정리 대상 판정 — 예전엔 /^(N[34]|C)/ 정규식만 써서 구매확정(N50)·교환
     // 완료(E40/E41)·반품완료(R30/R40) 상품이 다 끝났는데도 안 걸러졌음(20260806-0000460,
     // 2026-09-22 발견). 취소는 접수 단계(C10 등)부터도 걸러야 해서 RESOLVED_STATUSES와 별개로 챙김
+    const RESOLVED_STATUSES = new Set(['N30', 'N40', 'N50', 'C40', 'E40', 'E41', 'R30', 'R40'])
     const isDone = (status: string) => /^C/.test(status) || RESOLVED_STATUSES.has(status)
+
+    // batch_id가 아직 안 지워진 건 로컬 order_status가 이미 최종이어도 배치 해제/PII
+    // 정리가 안 끝난 것일 수 있어 계속 대상에 남겨야 함 — 그 판정 조건이 위 isDone으로
+    // 바뀌기 전까진 이 정리 자체가 아예 안 됐어서, "이미 최종 확인됨" 필터에 걸려 영원히
+    // 재확인 대상에서 빠진 채 방치된 주문들이 있었음(20260724-0000261, 2026-09-22 발견)
+    pendingRows = pendingRows.filter((row: any) =>
+      !row.order_status || !RESOLVED_STATUSES.has(row.order_status) || row.batch_id)
 
     const byOrderNo = new Map<string, { id: string; cafe24_item_code: string; labels: string[] | null; order_status: string | null; batch_id: string | null }[]>()
     const orderIdByNo = new Map<string, string>()
