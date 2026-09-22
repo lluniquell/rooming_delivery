@@ -633,8 +633,13 @@ export default function SoumBatch() {
       pickupNoteByOrderNo.set(orderNo, `${today.getMonth() + 1}월 ${today.getDate()}일 픽업건\n${lines.join('\n')}`)
     }
 
-    // 2) 바코드 — 상품(order_item) 단위로 부여, 고정 접두어 ROOMING + 전역 순번
-    const itemsNeedingBarcode = items.filter(i => !i.tm_barcode)
+    // 팀무버 쪽 양식은 한 줄 = 한 주문이라, 같은 주문의 여러 상품은 한 행으로 합침
+    // (제품수량은 합산, 상품명 칸은 비움 — 개별 상품 목록은 고객요청사항에 이미 나열됨)
+    const orderGroups = groupItemsByOrder(items)
+
+    // 2) 바코드 — 주문(행) 단위로 부여, 고정 접두어 ROOMING + 전역 순번. 합쳐진 행의
+    // 대표 상품(첫 번째)만 바코드가 필요하므로 나머지 상품엔 새로 발급하지 않음
+    const itemsNeedingBarcode = orderGroups.map(g => g.items[0]).filter(i => !i.tm_barcode)
     const newBarcodeById = new Map<string, string>()
     if (itemsNeedingBarcode.length) {
       const { data: maxRow } = await supabase
@@ -663,17 +668,19 @@ export default function SoumBatch() {
       '추천인고유번호', '추천인이름', '취소비용 고객부담 여부', '택배사', '택배사(직접입력)', '운임구분', '운임비',
       '판매채널', '판매처', '등록유형', '도선료', '기타',
     ]
-    const dataRows = items.map(item => {
+    const dataRows = orderGroups.map(group => {
+      const item = group.items[0]
       const externalNo = externalNoByOrderNo.get(item.cafe24_order_no) ?? ''
       const personName = `${item.receiver_name || item.customer_name}님`
       const addr = splitAddressDetail(item.address)
       const barcode = item.tm_barcode ?? newBarcodeById.get(item.id) ?? ''
+      const totalQty = group.items.reduce((sum, i) => sum + i.quantity, 0)
       return [
         '(주)루밍', externalNo, externalNo, '', '', '배송', '단순배송',
         personName, item.receiver_phone ?? '', '', addr, item.zipcode ?? '',
         personName, item.receiver_phone ?? '', '', addr, item.zipcode ?? '',
         todayYmd, '', pickupNoteByOrderNo.get(item.cafe24_order_no) ?? '', '', '', '',
-        barcode, '', '구성품', String(item.quantity), '', '', '', item.product_name,
+        barcode, '', '구성품', String(totalQty), '', '', '', '',
         '', '', '', '', '', '', '',
         '', '', '', '', '',
       ]
