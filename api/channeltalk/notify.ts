@@ -8,14 +8,17 @@ const GROUP_NAME = (process.env.CHANNEL_TALK_GROUP_NAME ?? '').trim()
 
 const supabase = createClient(SUPABASE_URL, (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim())
 
-// 채널톡 오픈 API는 메시지에 새 이미지를 업로드/첨부하는 기능이 없고(files는 채널 자체
-// 스토리지에 이미 있는 파일만 참조 가능), plainText/blocks로 텍스트·링크만 보낼 수 있음
+// 채널톡 오픈 API는 blocks 타입이 text/code 뿐이라 이미지 첨부나 링크 미리보기 블록이
+// 아예 없음(2026-09-22 실제 API 테스트로 확인) — 사진은 plainText에 URL을 그대로 넣어
+// 채널톡 자동 링크 미리보기에 기대는 방법뿐. 대신 Supabase 스토리지 원본 URL이 너무 길어서
+// (주문id/사진id/타임스탬프.jpg) /api/p/[id] 리다이렉트로 줄인 짧은 링크를 사용함
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).end()
   if (!ACCESS_KEY || !ACCESS_SECRET || !GROUP_NAME) {
     return res.status(500).json({ error: 'CHANNEL_TALK_ACCESS_KEY / CHANNEL_TALK_ACCESS_SECRET / CHANNEL_TALK_GROUP_NAME 환경변수가 설정되지 않았습니다.' })
   }
 
+  const origin = `https://${req.headers.host}`
   const { kind, id, driver_name } = req.body ?? {}
   if (!kind || !id) return res.status(400).json({ error: 'kind, id 필요' })
   if (kind !== 'order' && kind !== 'adhoc') return res.status(400).json({ error: "kind는 'order' 또는 'adhoc'" })
@@ -37,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     orderNoSuffix = ` (${order.cafe24_order_no})`
     address = order.address
 
-    const { data: photos } = await supabase.from('delivery_photos').select('storage_path, order_item_id').eq('order_id', id)
+    const { data: photos } = await supabase.from('delivery_photos').select('id, order_item_id').eq('order_id', id)
     const itemIds = [...new Set((photos ?? []).map(p => p.order_item_id).filter((v): v is string => !!v))]
     let productNameById: Record<string, string> = {}
     if (itemIds.length) {
@@ -45,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       productNameById = Object.fromEntries((itemRows ?? []).map(i => [i.id, i.product_name]))
     }
     photoEntries = (photos ?? []).map(p => ({
-      url: `${SUPABASE_URL}/storage/v1/object/public/delivery-photos/${p.storage_path}`,
+      url: `${origin}/api/p/${p.id}`,
       productName: p.order_item_id ? productNameById[p.order_item_id] ?? null : null,
     }))
   } else {
@@ -58,9 +61,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     headerName = adhoc.name
     address = adhoc.address
 
-    const { data: photos } = await supabase.from('delivery_photos').select('storage_path').eq('adhoc_stop_id', id)
+    const { data: photos } = await supabase.from('delivery_photos').select('id').eq('adhoc_stop_id', id)
     photoEntries = (photos ?? []).map(p => ({
-      url: `${SUPABASE_URL}/storage/v1/object/public/delivery-photos/${p.storage_path}`,
+      url: `${origin}/api/p/${p.id}`,
       productName: null,
     }))
   }
