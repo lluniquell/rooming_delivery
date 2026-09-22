@@ -87,10 +87,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    await sendMessage(headerText)
-    // 채널톡은 한 메시지에 링크가 여러 개 있으면 첫 번째 것만 미리보기가 뜨므로,
-    // 사진마다 미리보기가 다 뜨게 사진 1장 = 메시지 1개로 나눠서 보냄(2026-09-22)
-    for (const { url, productName } of photoEntries) {
+    // 상품 1개짜리 배송이 훨씬 많아서, 그 흔한 경우엔 메시지가 안내문+사진 2개로
+    // 안 쪼개지게 첫 번째 사진은 안내문에 같이 담아 보냄. 둘째 장부터만 따로 보냄
+    // — 채널톡은 한 메시지에 링크가 여러 개 있으면 첫 번째 것만 미리보기가 뜨기 때문(2026-09-22)
+    const [first, ...rest] = photoEntries
+    await sendMessage(first ? [headerText, '', first.productName, first.url].filter(Boolean).join('\n') : headerText)
+    for (const { url, productName } of rest) {
       await sendMessage([productName, url].filter(Boolean).join('\n'))
     }
     res.status(200).json({ ok: true })
