@@ -39,6 +39,17 @@ interface Item {
   order_date: string | null
   tm_barcode: string | null
   tm_external_order_no: string | null
+  tm_order_type: string | null
+  tm_invoice_type: string | null
+}
+
+// 팀무버 주문 등록 엑셀의 주문유형(필)/송장유형(필) — 이 조합 외의 값은 허용 안 함.
+// 주문유형을 고르면 그에 속한 송장유형만 고를 수 있음(2026-09-22)
+const TEAM_MOVER_TYPES: Record<string, string[]> = {
+  '배송': ['배송설치', '단순배송'],
+  '방문': ['방문설치', '방문철거', '재설치'],
+  '회수': ['B급회수'],
+  '교환': ['교환설치(동일)', '교환회수(동일)', '교환배송(동일)', '교환배송(상이)'],
 }
 
 // 각 자리는 숫자/문자 상관없이 올 수 있음 (예: NK-01-02-03, NK-A1-B2-C3)
@@ -199,7 +210,7 @@ export default function SoumBatch() {
     for (let offset = 0; ; offset += PAGE) {
       const { data: page } = await supabase
         .from('order_items')
-        .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, order_status, tm_barcode, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no)')
+        .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, order_status, tm_barcode, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no, tm_order_type, tm_invoice_type)')
         .eq('batch_id', batchId)
         .eq('status', 'confirmed')
         .range(offset, offset + PAGE - 1)
@@ -234,6 +245,8 @@ export default function SoumBatch() {
         order_date: row.orders.order_date ?? null,
         tm_barcode: row.tm_barcode ?? null,
         tm_external_order_no: row.orders.tm_external_order_no ?? null,
+        tm_order_type: row.orders.tm_order_type ?? null,
+        tm_invoice_type: row.orders.tm_invoice_type ?? null,
       }))
       .sort((a, b) => (a.order_date ?? '').localeCompare(b.order_date ?? '') || a.cafe24_order_no.localeCompare(b.cafe24_order_no))
     setItems(rows)
@@ -277,6 +290,17 @@ export default function SoumBatch() {
     } finally {
       setCompletingOrderNo(null)
     }
+  }
+
+  // 팀무버 주문유형/송장유형 — 주문(orders) 단위로 저장. 주문유형이 바뀌면 그 밑의
+  // 송장유형 목록도 바뀌므로 기존 선택은 같이 초기화함
+  async function updateTeamMoverType(group: OrderGroup, orderType: string, invoiceType: string) {
+    await supabase.from('orders')
+      .update({ tm_order_type: orderType || null, tm_invoice_type: invoiceType || null })
+      .eq('cafe24_order_no', group.cafe24_order_no)
+    setItems(prev => prev.map(i => i.cafe24_order_no === group.cafe24_order_no
+      ? { ...i, tm_order_type: orderType || null, tm_invoice_type: invoiceType || null }
+      : i))
   }
 
   // 상품 하나만 옮기면 같은 주문의 나머지 상품이 배치에 남아 배송이 쪼개지므로,
@@ -598,6 +622,11 @@ export default function SoumBatch() {
   async function downloadTeamMoverRegisterExcel() {
     if (!items.length) { alert('이 배치에 상품이 없습니다.'); return }
     if (!pickupDate) { alert('픽업일을 먼저 선택해주세요.'); return }
+    const unselected = groupItemsByOrder(items).filter(g => !g.items[0].tm_order_type || !g.items[0].tm_invoice_type)
+    if (unselected.length) {
+      alert(`주문유형/송장유형을 선택 안 한 주문이 ${unselected.length}건 있습니다. 전부 선택 후 다시 시도해주세요.`)
+      return
+    }
 
     const today = new Date()
     const todayYmd = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`
@@ -682,7 +711,7 @@ export default function SoumBatch() {
       const barcode = item.tm_barcode ?? newBarcodeById.get(item.id) ?? ''
       const totalQty = group.items.reduce((sum, i) => sum + i.quantity, 0)
       return [
-        '(주)루밍', externalNo, externalNo, '', '', '배송', '단순배송',
+        '(주)루밍', externalNo, externalNo, '', '', item.tm_order_type ?? '', item.tm_invoice_type ?? '',
         personName, item.receiver_phone ?? '', '', addr, item.zipcode ?? '',
         personName, item.receiver_phone ?? '', '', addr, item.zipcode ?? '',
         todayYmd, '', pickupNoteByOrderNo.get(item.cafe24_order_no) ?? '', '', '', '',
@@ -886,8 +915,12 @@ export default function SoumBatch() {
                     </button>
                     <button
                       onClick={downloadTeamMoverRegisterExcel}
-                      disabled={!pickupDate}
-                      title={!pickupDate ? '픽업일을 먼저 선택해주세요' : undefined}
+                      disabled={!pickupDate || orderGroups.some(g => !g.items[0].tm_order_type || !g.items[0].tm_invoice_type)}
+                      title={
+                        !pickupDate ? '픽업일을 먼저 선택해주세요'
+                          : orderGroups.some(g => !g.items[0].tm_order_type || !g.items[0].tm_invoice_type) ? '모든 주문의 주문유형/송장유형을 선택해주세요'
+                          : undefined
+                      }
                       className="px-3 py-1.5 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       팀무버 주문 등록 엑셀 다운로드
@@ -936,7 +969,7 @@ export default function SoumBatch() {
                 <col className="w-24" />
                 <col />
                 <col className="w-16" />
-                <col className="w-24" />
+                <col className={activeBatch?.name?.includes('팀무버') ? 'w-32' : 'w-24'} />
                 <col className={activeBatch?.name?.includes('팀무버') ? 'w-40' : 'w-28'} />
                 <col className={activeBatch?.name?.includes('팀무버') ? 'w-32' : 'w-48'} />
               </colgroup>
@@ -947,7 +980,7 @@ export default function SoumBatch() {
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">수령인명</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">상품</th>
                   <th className="text-center px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">수량</th>
-                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">배송방법</th>
+                  <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">{activeBatch?.name?.includes('팀무버') ? '주문/송장유형' : '배송방법'}</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">운송장</th>
                   <th className="px-4 py-2" />
                 </tr>
@@ -986,7 +1019,31 @@ export default function SoumBatch() {
                             {item.option_info && <span className="text-gray-400 text-xs ml-1.5">{item.option_info}</span>}
                           </td>
                           <td className={`px-4 py-3 text-center font-semibold text-gray-800 ${inspected ? 'bg-blue-50' : ''}`}>{item.quantity}</td>
-                          <td className={`px-4 py-3 text-sm text-gray-600 ${inspected ? 'bg-blue-50' : ''}`}>{item.delivery_method ?? '-'}</td>
+                          {activeBatch?.name?.includes('팀무버') ? (
+                            idx === 0 && (
+                              <td rowSpan={group.items.length} className="px-4 py-3 align-top bg-white space-y-1">
+                                <select
+                                  value={item.tm_order_type ?? ''}
+                                  onChange={e => updateTeamMoverType(group, e.target.value, '')}
+                                  className="w-full text-xs border rounded px-1.5 py-1 text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                >
+                                  <option value="" disabled>주문유형</option>
+                                  {Object.keys(TEAM_MOVER_TYPES).map(t => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                                <select
+                                  value={item.tm_invoice_type ?? ''}
+                                  onChange={e => updateTeamMoverType(group, item.tm_order_type ?? '', e.target.value)}
+                                  disabled={!item.tm_order_type}
+                                  className="w-full text-xs border rounded px-1.5 py-1 text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-400 disabled:opacity-50"
+                                >
+                                  <option value="" disabled>송장유형</option>
+                                  {(TEAM_MOVER_TYPES[item.tm_order_type ?? ''] ?? []).map(t => <option key={t} value={t}>{t}</option>)}
+                                </select>
+                              </td>
+                            )
+                          ) : (
+                            <td className={`px-4 py-3 text-sm text-gray-600 ${inspected ? 'bg-blue-50' : ''}`}>{item.delivery_method ?? '-'}</td>
+                          )}
                           {activeBatch?.name?.includes('팀무버') ? (
                             idx === 0 && (
                               <td rowSpan={group.items.length} className="px-4 py-3 align-top bg-white">
