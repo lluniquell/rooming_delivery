@@ -172,7 +172,7 @@ export default function DriverDetail() {
       await fetch('/api/cafe24/shipments?action=memo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_no: order.cafe24_order_no, content: `배송완료 처리: ${driverName}` }),
+        body: JSON.stringify({ order_no: order.cafe24_order_no, content: `배송 담당자 : ${driverName}` }),
       })
     } catch { /* 메모 등록 실패는 배송 완료 처리에 영향 없음 */ }
 
