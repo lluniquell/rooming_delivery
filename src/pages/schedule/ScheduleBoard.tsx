@@ -115,8 +115,11 @@ export default function ScheduleBoard() {
   }
 
   async function assignDate(stop: Stop, dateStr: string) {
+    // 새 날짜로 배정 = 새로 시도하는 것이므로, 예전에 이 주문이 배송불가로 처리됐을 때
+    // 남은 delivery_memo를 안 지우면 새 날짜에서도 배송원 앱에 계속 "불가"(빨간색)로
+    // 뜸 — statusOf()가 delivered_at 다음으로 이 필드만 보고 상태를 판단하기 때문(2026-09-23)
     await supabase.from('orders')
-      .update({ scheduled_date: dateStr })
+      .update({ scheduled_date: dateStr, delivery_memo: null })
       .eq('id', stop.order_id)
     if (batchId) { loadUnscheduled(batchId); loadScheduled(batchId) }
   }
