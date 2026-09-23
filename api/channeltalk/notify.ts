@@ -11,8 +11,18 @@ const supabase = createClient(SUPABASE_URL, (process.env.SUPABASE_SERVICE_ROLE_K
 // 채널톡 오픈 API는 blocks 타입이 text/code 뿐이라 이미지 첨부나 링크 미리보기 블록이
 // 아예 없음(2026-09-22 실제 API 테스트로 확인) — 사진은 plainText에 URL을 그대로 넣어
 // 채널톡 자동 링크 미리보기에 기대는 방법뿐. 대신 Supabase 스토리지 원본 URL이 너무 길어서
-// (주문id/사진id/타임스탬프.jpg) /api/p/[id] 리다이렉트로 줄인 짧은 링크를 사용함
+// (주문id/사진id/타임스탬프.jpg) ?photo=id 리다이렉트로 줄인 짧은 링크를 사용함 — 별도
+// 파일로 만들면 Vercel Hobby 플랜 서버리스 함수 12개 제한에 걸려 배포가 실패해서
+// (2026-09-23 실제로 겪음) 이 파일 안에 GET 분기로 합쳐둠
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'GET') {
+    const { photo } = req.query
+    if (!photo || typeof photo !== 'string') return res.status(400).send('photo id 필요')
+    const { data } = await supabase.from('delivery_photos').select('storage_path').eq('id', photo).maybeSingle()
+    if (!data) return res.status(404).send('사진을 찾을 수 없습니다.')
+    return res.redirect(302, `${SUPABASE_URL}/storage/v1/object/public/delivery-photos/${data.storage_path}`)
+  }
+
   if (req.method !== 'POST') return res.status(405).end()
   if (!ACCESS_KEY || !ACCESS_SECRET || !GROUP_NAME) {
     return res.status(500).json({ error: 'CHANNEL_TALK_ACCESS_KEY / CHANNEL_TALK_ACCESS_SECRET / CHANNEL_TALK_GROUP_NAME 환경변수가 설정되지 않았습니다.' })
@@ -48,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       productNameById = Object.fromEntries((itemRows ?? []).map(i => [i.id, i.product_name]))
     }
     photoEntries = (photos ?? []).map(p => ({
-      url: `${origin}/api/p/${p.id}`,
+      url: `${origin}/api/channeltalk/notify?photo=${p.id}`,
       productName: p.order_item_id ? productNameById[p.order_item_id] ?? null : null,
     }))
   } else {
@@ -63,7 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { data: photos } = await supabase.from('delivery_photos').select('id').eq('adhoc_stop_id', id)
     photoEntries = (photos ?? []).map(p => ({
-      url: `${origin}/api/p/${p.id}`,
+      url: `${origin}/api/channeltalk/notify?photo=${p.id}`,
       productName: null,
     }))
   }
