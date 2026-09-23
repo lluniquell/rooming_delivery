@@ -321,6 +321,63 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+// 특정 주문 하나만 카페24 실제 배송상태로 강제 덮어쓰기 — 주문재확인은 운송장번호가 이미
+// 있는 상품은 아예 재조회 대상에서 빼기 때문에, 한 번 잘못 등록된 값(예: 출고 처리 실수,
+// 카페24 등록 실패 후 방치)은 영원히 안 고쳐짐. 이건 그 상품만 콕 집어 카페24 값으로
+// 무조건 덮어씀 — 배송완료된 주문도 예외 없이 카페24 기준으로 다시 씀(2026-09-23)
+async function handleForceSync(req: VercelRequest, res: VercelResponse) {
+  const { order_no: orderNo } = req.body ?? {}
+  if (!orderNo || typeof orderNo !== 'string') return res.status(400).json({ error: 'order_no 필요' })
+
+  try {
+    const token = await getToken()
+    const { data: orderRow } = await supabase.from('orders').select('id').eq('cafe24_order_no', orderNo).maybeSingle()
+    if (!orderRow) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' })
+
+    const itemsData = await cafe24Get(`/api/v2/admin/orders/${orderNo}/items?shop_no=1`, token)
+    const liveItems: any[] = itemsData.items ?? []
+
+    const { data: localItems } = await supabase
+      .from('order_items')
+      .select('id, cafe24_item_code, status, batch_id')
+      .eq('order_id', orderRow.id)
+
+    const RESOLVED_STATUSES = new Set(['N30', 'N40', 'N50', 'C40', 'E40', 'E41', 'R30', 'R40'])
+    const isDone = (status: string) => /^C/.test(status) || RESOLVED_STATUSES.has(status)
+    const isShipped = (status: string) => /^(N[345]|R[34])/.test(status)
+
+    const updated: { code: string; patch: Record<string, any> }[] = []
+    for (const local of localItems ?? []) {
+      const match = liveItems.find((i: any) => i.order_item_code === local.cafe24_item_code)
+      if (!match || !match.order_status) continue
+
+      const liveStatus: string = match.order_status
+      const patch: Record<string, any> = {
+        order_status: liveStatus,
+        tracking_number: match.tracking_no || null,
+      }
+
+      if (isShipped(liveStatus)) {
+        patch.status = 'in_transit'
+        patch.shipped_at = match.shipped_date ? new Date(match.shipped_date).toISOString() : new Date().toISOString()
+      } else {
+        // 카페24 기준 아직 미출고(N10/N20/N21/N22)거나 교환/취소 등으로 끝난 상태 — 로컬이
+        // 잘못 앞서갔던 배송중/완료 표시를 되돌림. 배치 배정 자체는 안 건드림(수동으로 판단)
+        patch.status = 'confirmed'
+        patch.shipped_at = null
+        if (isDone(liveStatus) && local.batch_id) patch.batch_id = null
+      }
+
+      await supabase.from('order_items').update(patch).eq('id', local.id)
+      updated.push({ code: local.cafe24_item_code, patch })
+    }
+
+    res.status(200).json({ ok: true, updated })
+  } catch (e: any) {
+    res.status(500).json({ error: e.message })
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 주문 1건 상세 조회 (orders/[orderNo].ts 병합) — GET ?order_no=xxx
   if (req.method === 'GET') {
@@ -337,6 +394,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method !== 'POST') return res.status(405).end()
   if (req.query.phase === 'recheck') return handleRecheck(req, res)
+  if (req.query.phase === 'force-sync') return handleForceSync(req, res)
 
   try {
     const token = await getToken()

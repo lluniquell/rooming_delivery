@@ -134,7 +134,7 @@ const PRESETS = [
 // 그려지면 화면이 버벅여서(스크롤도 멈춤), 실제로 바뀐 주문만 다시 그리도록 분리 + memo 처리
 const OrderRow = memo(function OrderRow({
   group, batches, shipStats, isAssigning, selected, assignedIds, onToggleItem, onToggleGroup, onQuickAssign, onDelete,
-  readOnly, activeBatchIds, statusLabel, onRefreshOrder, isRefreshing,
+  readOnly, activeBatchIds, statusLabel, onRefreshOrder, isRefreshing, onForceSync, isForceSyncing,
 }: {
   group: OrderGroup
   batches: Batch[]
@@ -152,6 +152,8 @@ const OrderRow = memo(function OrderRow({
   statusLabel?: string
   onRefreshOrder?: (group: OrderGroup) => void
   isRefreshing?: boolean
+  onForceSync?: (group: OrderGroup) => void
+  isForceSyncing?: boolean
 }) {
   const activeItems = group.items.filter(i => !assignedIds.has(i.id))
   // 배정된 상품은 배열에서 지우지 않고 화면에서만 안 보이게(invisible) 함 — 지우면 그 아래
@@ -211,6 +213,16 @@ const OrderRow = memo(function OrderRow({
             <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-100 text-indigo-700 shrink-0">
               {statusLabel}
             </span>
+          )}
+          {onForceSync && (
+            <button
+              onClick={e => { e.stopPropagation(); onForceSync(group) }}
+              disabled={isForceSyncing}
+              title="이 주문의 배송상태/운송장번호를 카페24 실제 값으로 강제로 덮어씁니다"
+              className="px-1.5 py-0.5 rounded text-[10px] font-medium border border-orange-300 text-orange-600 hover:bg-orange-50 disabled:opacity-50 shrink-0"
+            >
+              {isForceSyncing ? '동기화 중...' : '⟳ 강제 동기화'}
+            </button>
           )}
         </div>
         <div className="flex items-center flex-wrap gap-1.5 sm:gap-1 sm:ml-auto sm:justify-end" onClick={e => e.stopPropagation()}>
@@ -324,6 +336,8 @@ const OrderRow = memo(function OrderRow({
   if (prev.statusLabel !== next.statusLabel) return false
   if (prev.onRefreshOrder !== next.onRefreshOrder) return false
   if (prev.isRefreshing !== next.isRefreshing) return false
+  if (prev.onForceSync !== next.onForceSync) return false
+  if (prev.isForceSyncing !== next.isForceSyncing) return false
   // selected/assignedIds Set 자체는 매번 새로 만들어지지만, 이 주문에 실제로 영향 있을 때만 다시 그림
   for (const item of next.group.items) {
     if (prev.selected.has(item.id) !== next.selected.has(item.id)) return false
@@ -353,6 +367,7 @@ export default function SoumOrders() {
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [assigningOrderId, setAssigningOrderId] = useState<string | null>(null)
   const [refreshingOrderId, setRefreshingOrderId] = useState<string | null>(null)
+  const [forceSyncingOrderId, setForceSyncingOrderId] = useState<string | null>(null)
   // 배정된 상품 id — groups 배열에서는 안 지우고 여기만 기록해서 화면에서 invisible 처리함
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set())
   // 폰에서는 날짜/검색 툴바가 화면을 너무 많이 차지해서 기본적으로 접어둠 (데스크톱은 항상 펼침)
@@ -846,6 +861,29 @@ export default function SoumOrders() {
     }
   }, [])
 
+  // 이 주문 하나만 카페24 실제 배송상태(운송장/상태)로 강제 덮어씀 — 주문재확인은 운송장이
+  // 이미 있는 상품을 건드리지 않아서, 잘못 등록되거나 카페24 전송이 실패한 채 방치된 건은
+  // 이걸로만 고칠 수 있음. 확인창을 한 번 거쳐서 실수로 누르는 걸 방지함
+  const forceSyncOrder = useCallback(async (group: OrderGroup) => {
+    if (!confirm(`${group.cafe24_order_no} 주문의 배송상태/운송장번호를 카페24 실제 값으로 강제로 덮어쓸까요?\n(로컬에서 잘못 처리된 값이 있다면 되돌아갑니다)`)) return
+    setForceSyncingOrderId(group.order_id)
+    try {
+      const res = await fetch(`/api/cafe24/collect?phase=force-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_no: group.cafe24_order_no }),
+      })
+      const data = await res.json()
+      if (!res.ok) { alert(`강제 동기화 실패: ${data.error ?? res.status}`); return }
+      alert(`${data.updated?.length ?? 0}개 상품의 상태를 카페24 기준으로 맞췄습니다.`)
+      loadOrders()
+    } catch {
+      alert('강제 동기화 중 네트워크 오류가 발생했습니다.')
+    } finally {
+      setForceSyncingOrderId(null)
+    }
+  }, [])
+
   return (
     <div className="max-w-5xl">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-6">
@@ -1002,6 +1040,8 @@ export default function SoumOrders() {
                 statusLabel={m.statusLabel}
                 onRefreshOrder={refreshOrder}
                 isRefreshing={refreshingOrderId === m.order_id}
+                onForceSync={forceSyncOrder}
+                isForceSyncing={forceSyncingOrderId === m.order_id}
               />
             ))}
           </div>
@@ -1069,6 +1109,8 @@ export default function SoumOrders() {
               onDelete={deleteOrder}
               onRefreshOrder={refreshOrder}
               isRefreshing={refreshingOrderId === group.order_id}
+              onForceSync={forceSyncOrder}
+              isForceSyncing={forceSyncingOrderId === group.order_id}
             />
           ))}
 
