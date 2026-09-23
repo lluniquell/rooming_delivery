@@ -13,6 +13,11 @@ interface OrderItem {
   item_note: string | null
 }
 
+interface Photo {
+  id: string
+  storage_path: string
+}
+
 interface OrderStop {
   id: string
   cafe24_order_no: string
@@ -39,7 +44,7 @@ export default function DriverDetail() {
   const navigate = useNavigate()
   const [order, setOrder] = useState<OrderStop | null>(null)
   const [driverName, setDriverName] = useState('')
-  const [photoTaken, setPhotoTaken] = useState<Set<string>>(new Set())
+  const [photosByItem, setPhotosByItem] = useState<Record<string, Photo[]>>({})
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null)
   const [memo, setMemo] = useState('')
   const [processing, setProcessing] = useState(false)
@@ -99,17 +104,22 @@ export default function DriverDetail() {
         items: items ?? [],
       })
 
-      // 앱을 도중에 나갔다 다시 들어온 경우를 대비해 이미 찍은 사진은 미리 체크 표시
+      // 앱을 도중에 나갔다 다시 들어온 경우를 대비해 이미 찍은 사진들을 미리 불러와둠
       const { data: photos } = await supabase
         .from('delivery_photos')
-        .select('order_item_id')
+        .select('id, order_item_id, storage_path')
         .eq('order_id', id)
         .not('order_item_id', 'is', null)
-      setPhotoTaken(new Set((photos ?? []).map((p: any) => p.order_item_id)))
+      const grouped: Record<string, Photo[]> = {}
+      for (const p of photos ?? []) {
+        (grouped[p.order_item_id] ??= []).push({ id: p.id, storage_path: p.storage_path })
+      }
+      setPhotosByItem(grouped)
     }
     load()
   }, [id])
 
+  // 상품 1개에 사진 여러 장 촬영 가능 — 매번 새 파일로 추가만 하고 기존 사진은 안 건드림
   async function handleItemPhoto(item: OrderItem, file: File) {
     if (!order) return
     setUploadingItemId(item.id)
@@ -118,12 +128,25 @@ export default function DriverDetail() {
       const path = `${order.id}/${item.id}/${Date.now()}.jpg`
       const { error: uploadError } = await supabase.storage.from('delivery-photos').upload(path, compressed)
       if (uploadError) { alert(`사진 업로드 실패: ${uploadError.message}`); return }
-      const { error: insertError } = await supabase.from('delivery_photos').insert({ order_id: order.id, order_item_id: item.id, storage_path: path })
-      if (insertError) { alert(`사진 저장 실패: ${insertError.message}`); return }
-      setPhotoTaken(prev => new Set([...prev, item.id]))
+      const { data: inserted, error: insertError } = await supabase
+        .from('delivery_photos')
+        .insert({ order_id: order.id, order_item_id: item.id, storage_path: path })
+        .select('id')
+        .single()
+      if (insertError || !inserted) { alert(`사진 저장 실패: ${insertError?.message}`); return }
+      setPhotosByItem(prev => ({ ...prev, [item.id]: [...(prev[item.id] ?? []), { id: inserted.id, storage_path: path }] }))
     } finally {
       setUploadingItemId(null)
     }
+  }
+
+  // 잘못 찍은 사진 삭제 — 배송원이 직접 다시 찍기 전에 지울 수 있게
+  async function handleDeletePhoto(item: OrderItem, photo: Photo) {
+    if (!confirm('이 사진을 삭제할까요?')) return
+    const { error: dbError } = await supabase.from('delivery_photos').delete().eq('id', photo.id)
+    if (dbError) { alert(`사진 삭제 실패: ${dbError.message}`); return }
+    await supabase.storage.from('delivery-photos').remove([photo.storage_path])
+    setPhotosByItem(prev => ({ ...prev, [item.id]: (prev[item.id] ?? []).filter(p => p.id !== photo.id) }))
   }
 
   async function handleDone() {
@@ -201,7 +224,8 @@ export default function DriverDetail() {
 
   const links = mapDeeplink(order.address)
   const pending = !order.delivered_at && !order.delivery_memo
-  const allPhotographed = order.items.length > 0 && order.items.every(i => photoTaken.has(i.id))
+  const photographedCount = order.items.filter(i => (photosByItem[i.id]?.length ?? 0) > 0).length
+  const allPhotographed = order.items.length > 0 && photographedCount === order.items.length
 
   return (
     <div>
@@ -241,46 +265,74 @@ export default function DriverDetail() {
 
         <div className="border-t pt-4">
           <p className="text-sm font-medium text-gray-700 mb-2">
-            상품별 완료 사진 {pending && <span className="text-gray-400 font-normal">({photoTaken.size}/{order.items.length})</span>}
+            상품별 완료 사진 {pending && <span className="text-gray-400 font-normal">({photographedCount}/{order.items.length})</span>}
           </p>
           <ul className="space-y-2">
             {order.items.map(item => {
-              const done = photoTaken.has(item.id)
+              const photos = photosByItem[item.id] ?? []
+              const done = photos.length > 0
               const uploading = uploadingItemId === item.id
               return (
                 <li
                   key={item.id}
-                  className={`flex items-center justify-between gap-2 p-2.5 rounded-lg border ${done ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}
+                  className={`p-2.5 rounded-lg border ${done ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}
                 >
-                  <div className="text-sm min-w-0">
-                    <div className={done ? 'text-green-700 font-medium' : 'text-gray-800'}>
-                      {item.product_name}
-                      {item.option_info && <span className="text-gray-400 ml-1">({item.option_info})</span>}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm min-w-0">
+                      <div className={done ? 'text-green-700 font-medium' : 'text-gray-800'}>
+                        {item.product_name}
+                        {item.option_info && <span className="text-gray-400 ml-1">({item.option_info})</span>}
+                      </div>
+                      <div className="text-xs text-gray-400">x{item.quantity}</div>
+                      {item.item_note && (
+                        <div className="text-xs font-bold text-red-600 mt-0.5">{item.item_note}</div>
+                      )}
                     </div>
-                    <div className="text-xs text-gray-400">x{item.quantity}</div>
-                    {item.item_note && (
-                      <div className="text-xs font-bold text-red-600 mt-0.5">{item.item_note}</div>
+                    {!done && !pending && (
+                      <span className="text-gray-300 text-xs shrink-0">미촬영</span>
                     )}
                   </div>
-                  {done ? (
-                    <span className="text-green-600 text-xl shrink-0">✓</span>
-                  ) : pending ? (
-                    <label className="shrink-0 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium cursor-pointer">
-                      {uploading ? '업로드 중...' : '사진 촬영'}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        disabled={uploading}
-                        onChange={e => {
-                          const file = e.target.files?.[0]
-                          if (file) handleItemPhoto(item, file)
-                        }}
-                      />
-                    </label>
-                  ) : (
-                    <span className="text-gray-300 text-xs shrink-0">미촬영</span>
+                  {/* 상품 1개에 여러 장 촬영 가능 — 잘못 찍은 사진은 눌러서 지우고 다시 찍음.
+                      완료 처리 전(pending)에만 촬영/삭제 가능(2026-09-23) */}
+                  {(done || pending) && (
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
+                      {photos.map(photo => (
+                        <div key={photo.id} className="relative shrink-0">
+                          <img
+                            src={supabase.storage.from('delivery-photos').getPublicUrl(photo.storage_path).data.publicUrl}
+                            alt=""
+                            className="w-16 h-16 object-cover rounded-lg border"
+                          />
+                          {pending && (
+                            <button
+                              onClick={() => handleDeletePhoto(item, photo)}
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs leading-none flex items-center justify-center shadow"
+                            >×</button>
+                          )}
+                        </div>
+                      ))}
+                      {pending && (
+                        <label className="w-16 h-16 shrink-0 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 text-xs flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:text-blue-500">
+                          {uploading ? '업로드 중' : (
+                            <>
+                              <span className="text-xl leading-none">＋</span>
+                              사진
+                            </>
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            className="hidden"
+                            disabled={uploading}
+                            onChange={e => {
+                              const file = e.target.files?.[0]
+                              if (file) handleItemPhoto(item, file)
+                            }}
+                          />
+                        </label>
+                      )}
+                    </div>
                   )}
                 </li>
               )
@@ -298,7 +350,7 @@ export default function DriverDetail() {
             disabled={processing || !allPhotographed}
             className="w-full bg-green-600 text-white py-3 rounded-xl font-medium text-lg hover:bg-green-700 disabled:opacity-50"
           >
-            {processing ? '처리 중...' : allPhotographed ? '배송 완료' : `상품 사진을 모두 찍어주세요 (${photoTaken.size}/${order.items.length})`}
+            {processing ? '처리 중...' : allPhotographed ? '배송 완료' : `상품 사진을 모두 찍어주세요 (${photographedCount}/${order.items.length})`}
           </button>
 
           {!showFailForm ? (
