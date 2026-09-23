@@ -5,6 +5,8 @@ const SUPABASE_URL = (process.env.VITE_SUPABASE_URL ?? '').trim()
 const ACCESS_KEY = (process.env.CHANNEL_TALK_ACCESS_KEY ?? '').trim()
 const ACCESS_SECRET = (process.env.CHANNEL_TALK_ACCESS_SECRET ?? '').trim()
 const GROUP_NAME = (process.env.CHANNEL_TALK_GROUP_NAME ?? '').trim()
+// 배송불가는 완료 알림과 다른 채널(물류팀-이슈사항)로 보냄 — 없으면 기존 채널로 폴백
+const ISSUE_GROUP_NAME = (process.env.CHANNEL_TALK_ISSUE_GROUP_NAME ?? '').trim() || GROUP_NAME
 
 const supabase = createClient(SUPABASE_URL, (process.env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim())
 
@@ -29,9 +31,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const origin = `https://${req.headers.host}`
-  const { kind, id, driver_name } = req.body ?? {}
+  const { kind, id, driver_name, memo } = req.body ?? {}
   if (!kind || !id) return res.status(400).json({ error: 'kind, id 필요' })
-  if (kind !== 'order' && kind !== 'adhoc') return res.status(400).json({ error: "kind는 'order' 또는 'adhoc'" })
+  if (kind !== 'order' && kind !== 'adhoc' && kind !== 'fail') return res.status(400).json({ error: "kind는 'order', 'adhoc' 또는 'fail'" })
+
+  async function sendMessage(plainText: string, groupName: string) {
+    const chRes = await fetch(`https://api.channel.io/open/groups/@${encodeURIComponent(groupName)}/messages`, {
+      method: 'POST',
+      headers: {
+        'x-access-key': ACCESS_KEY,
+        'x-access-secret': ACCESS_SECRET,
+        'Channel-Version': '2026-06-01',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ plainText }),
+    })
+    const chData = await chRes.json()
+    if (!chRes.ok) throw new Error(JSON.stringify(chData))
+  }
+
+  // 배송불가 — 완료 알림과 양식은 같되(담당자/수령인/주문번호/주소) 사유를 덧붙여서
+  // 물류팀-이슈사항 채널로 따로 보냄(2026-09-23)
+  if (kind === 'fail') {
+    const { data: order } = await supabase
+      .from('orders')
+      .select('cafe24_order_no, customer_name, receiver_name, address')
+      .eq('id', id)
+      .maybeSingle()
+    if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' })
+    const text = [
+      `배송불가(${driver_name ?? '알 수 없음'}) ${order.receiver_name || order.customer_name} (${order.cafe24_order_no})`,
+      order.address ?? '',
+      memo ? `사유: ${memo}` : '',
+    ].filter(Boolean).join('\n')
+    try {
+      await sendMessage(text, ISSUE_GROUP_NAME)
+      return res.status(200).json({ ok: true })
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message })
+    }
+  }
 
   let headerName: string
   let orderNoSuffix = ''
@@ -84,29 +123,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     address ?? '',
   ].filter(Boolean).join('\n')
 
-  async function sendMessage(plainText: string) {
-    const chRes = await fetch(`https://api.channel.io/open/groups/@${encodeURIComponent(GROUP_NAME)}/messages`, {
-      method: 'POST',
-      headers: {
-        'x-access-key': ACCESS_KEY,
-        'x-access-secret': ACCESS_SECRET,
-        'Channel-Version': '2026-06-01',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ plainText }),
-    })
-    const chData = await chRes.json()
-    if (!chRes.ok) throw new Error(JSON.stringify(chData))
-  }
-
   try {
     // 상품 1개짜리 배송이 훨씬 많아서, 그 흔한 경우엔 메시지가 안내문+사진 2개로
     // 안 쪼개지게 첫 번째 사진은 안내문에 같이 담아 보냄. 둘째 장부터만 따로 보냄
     // — 채널톡은 한 메시지에 링크가 여러 개 있으면 첫 번째 것만 미리보기가 뜨기 때문(2026-09-22)
     const [first, ...rest] = photoEntries
-    await sendMessage(first ? [headerText, '', first.productName, first.url].filter(Boolean).join('\n') : headerText)
+    await sendMessage(first ? [headerText, '', first.productName, first.url].filter(Boolean).join('\n') : headerText, GROUP_NAME)
     for (const { url, productName } of rest) {
-      await sendMessage([productName, url].filter(Boolean).join('\n'))
+      await sendMessage([productName, url].filter(Boolean).join('\n'), GROUP_NAME)
     }
     res.status(200).json({ ok: true })
   } catch (e: any) {

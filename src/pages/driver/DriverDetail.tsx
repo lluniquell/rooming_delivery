@@ -216,6 +216,16 @@ export default function DriverDetail() {
     if (!order || !memo.trim()) return
     setProcessing(true)
     await supabase.from('orders').update({ delivery_memo: memo }).eq('id', order.id)
+
+    // 채널톡 물류팀-이슈사항 알림 — 실패해도 배송 불가 처리 자체는 이미 끝난 상태라 조용히 넘어감
+    try {
+      await fetch('/api/channeltalk/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'fail', id: order.id, driver_name: driverName, memo }),
+      })
+    } catch { /* 알림 실패는 배송 불가 처리에 영향 없음 */ }
+
     setProcessing(false)
     navigate('/')
   }
