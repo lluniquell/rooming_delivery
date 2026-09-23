@@ -66,10 +66,17 @@ export default function DriverDetail() {
         .eq('id', id)
         .single()
       if (!o) return
+      // 카페24 주문 하나에는 이 주문의 전체 이력(예전 교환/취소/CJ로 이미 나간 상품 등)이
+      // 다 order_items로 남아있어서, 이번 직배 배송분(delivery_method='직배', 아직
+      // 확정~진행중 단계)만 걸러야 함 — 안 그러면 몇 달 전에 이미 끝난 무관한 상품까지
+      // 다 같이 나와서 "상품 사진을 모두 찍어주세요"에 안 찍힌 걸로 잡힘(20260227-0000613
+      // 발견, 2026-09-23)
       const { data: items } = await supabase
         .from('order_items')
         .select('id, product_name, option_info, quantity, cafe24_item_code, tracking_number, item_note')
         .eq('order_id', id)
+        .eq('delivery_method', '직배')
+        .in('status', ['confirmed', 'in_transit'])
 
       // 이 주문이 다른 배송원 루트에 "동행 (주문번호)" 기타 배송지로 붙어있는지 확인 —
       // 원래 담당자도 2인 배송인 걸 상세 화면에서 바로 알 수 있어야 함(2026-09-22)
@@ -167,10 +174,14 @@ export default function DriverDetail() {
 
     // order_items.status를 안 바꾸면 배송완료 후에도 계속 'confirmed'로 남아서
     // 주문/배치 화면(SoumOrders/SoumBatch)의 직배 배치에 영원히 남아있게 됨(2026-09-22
-    // 발견) — CJ 출고검수(SoumOutgoing)/팀무버 완료 처리와 동일하게 in_transit으로 전환
+    // 발견) — CJ 출고검수(SoumOutgoing)/팀무버 완료 처리와 동일하게 in_transit으로 전환.
+    // delivery_method='직배' + status='confirmed'로 좁혀야 이 주문의 예전 이력(이미
+    // 다른 방법으로 나갔거나 취소/교환된 상품)까지 같이 안 건드림(2026-09-23)
     await supabase.from('order_items')
       .update({ status: 'in_transit', shipped_at: new Date().toISOString() })
       .eq('order_id', order.id)
+      .eq('delivery_method', '직배')
+      .eq('status', 'confirmed')
 
     // 카페24 배송완료 전환 — 실패해도 로컬 완료 처리는 유지 (나중에 수동 확인 필요)
     try {
