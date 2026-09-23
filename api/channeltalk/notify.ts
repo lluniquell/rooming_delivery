@@ -51,7 +51,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // 배송불가 — 완료 알림과 양식은 같되(담당자/수령인/주문번호/주소) 사유를 덧붙여서
-  // 물류팀-이슈사항 채널로 따로 보냄(2026-09-23)
+  // 물류팀-이슈사항 채널로 따로 보냄. 완료 전에 일부 상품 사진을 이미 찍어뒀을 수 있어서
+  // (예: 문제 상황 증빙) 그것도 같이 보냄(2026-09-23)
   if (kind === 'fail') {
     const { data: order } = await supabase
       .from('orders')
@@ -59,13 +60,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .eq('id', id)
       .maybeSingle()
     if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' })
-    const text = [
+
+    const { data: photos } = await supabase.from('delivery_photos').select('id, order_item_id').eq('order_id', id)
+    const itemIds = [...new Set((photos ?? []).map(p => p.order_item_id).filter((v): v is string => !!v))]
+    let productNameById: Record<string, string> = {}
+    if (itemIds.length) {
+      const { data: itemRows } = await supabase.from('order_items').select('id, product_name').in('id', itemIds)
+      productNameById = Object.fromEntries((itemRows ?? []).map(i => [i.id, i.product_name]))
+    }
+    const photoEntries = (photos ?? []).map(p => ({
+      url: `${origin}/api/channeltalk/notify?photo=${p.id}`,
+      productName: p.order_item_id ? productNameById[p.order_item_id] ?? null : null,
+    }))
+
+    const headerText = [
       `배송불가(${driver_name ?? '알 수 없음'}) ${order.receiver_name || order.customer_name} (${order.cafe24_order_no})`,
       order.address ?? '',
       memo ? `사유: ${memo}` : '',
     ].filter(Boolean).join('\n')
+
     try {
-      await sendMessage(text, ISSUE_GROUP_NAME)
+      const [first, ...rest] = photoEntries
+      await sendMessage(first ? [headerText, '', first.productName, first.url].filter(Boolean).join('\n') : headerText, ISSUE_GROUP_NAME)
+      for (const { url, productName } of rest) {
+        await sendMessage([productName, url].filter(Boolean).join('\n'), ISSUE_GROUP_NAME)
+      }
       return res.status(200).json({ ok: true })
     } catch (e: any) {
       return res.status(500).json({ error: e.message })
