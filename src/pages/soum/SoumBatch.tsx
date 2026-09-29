@@ -502,9 +502,9 @@ export default function SoumBatch() {
   }
 
   const activeBatch = batches.find(b => b.id === activeBatchId)
-  // 팀무버뿐 아니라 직배도 자체배송이라 운송장 수기입력+카페24 배송완료 버튼이 필요함 —
+  // 팀무버뿐 아니라 직배/단순배송도 운송장 수기입력+카페24 배송완료(+일괄) 기능이 필요함 —
   // 팀무버 전용인 주문유형/송장유형 드롭다운(엑셀용)은 여기 안 묶고 그대로 팀무버만 유지(2026-09-29)
-  const showManualComplete = activeBatch?.name?.includes('팀무버') || activeBatch?.type === 'direct'
+  const showManualComplete = activeBatch?.name?.includes('팀무버') || activeBatch?.type === 'direct' || activeBatch?.name === '단순배송'
   const pickingList = buildPickingList()
   const orderGroups = groupItemsByOrder(items)
   const fileInputRef = useRef<HTMLInputElement>(null)
