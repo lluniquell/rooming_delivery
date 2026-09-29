@@ -167,6 +167,9 @@ export default function SoumBatch() {
   // 바로 카페24 배송완료 처리(등록+전환)까지 한 번에 함(2026-09-22)
   const [manualTracking, setManualTracking] = useState<Record<string, string>>({})
   const [completingOrderNo, setCompletingOrderNo] = useState<string | null>(null)
+  // 체크박스로 선택한 주문 일괄 배송완료용(2026-09-29) — cafe24_order_no 기준
+  const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
+  const [bulkCompleting, setBulkCompleting] = useState(false)
 
   useEffect(() => { loadBatches() }, [])
 
@@ -216,6 +219,7 @@ export default function SoumBatch() {
   async function selectBatch(batchId: string) {
     setActiveBatchId(batchId)
     setShowPicking(false)
+    setSelectedOrders(new Set())
     setLoading(true)
     // 업체배송처럼 누적 상품이 1000건을 넘는 배치가 있어서(2026-08-14 발견 - 20260604-0000403
     // 주문 상품이 뒷부분에 있어 조용히 잘려나감), 기본 조회 한도(1000건)를 넘겨서 전부 가져올 때까지 페이징
@@ -273,16 +277,16 @@ export default function SoumBatch() {
     setManualTracking(seeded)
   }
 
-  // 팀무버/직배 공통 — 둘 다 자체배송(carrier_code 0001)이라, 수기로 입력한
-  // 운송장번호로 카페24 배송 등록 + 배송완료 전환을 한 번에 처리. 이미 등록된
-  // 그룹이 아니라도 handleTransit이 등록부터 알아서 해줌(2026-09-29 직배로 확장)
-  async function completeSelfDelivery(group: OrderGroup) {
+  // 팀무버/직배 공통 — 둘 다 자체배송(carrier_code 0001)이라, 수기로 입력한 운송장번호로
+  // 카페24 배송 등록 + 배송완료 전환을 한 번에 처리. 이미 등록된 그룹이 아니라도
+  // handleTransit이 등록부터 알아서 해줌. alert/새로고침 없이 결과만 돌려줘서 단건/일괄
+  // 양쪽에서 재사용(2026-09-29 일괄 처리 추가하며 분리)
+  async function completeSelfDeliveryCore(group: OrderGroup): Promise<{ ok: boolean; error?: string }> {
     const trackingNo = (manualTracking[group.cafe24_order_no] ?? '').trim()
-    if (!trackingNo) { alert('운송장번호를 입력해주세요.'); return }
+    if (!trackingNo) return { ok: false, error: '운송장번호 미입력' }
     const itemCodes = group.items.map(i => i.cafe24_item_code).filter(Boolean) as string[]
-    if (!itemCodes.length) { alert('카페24 상품코드가 없습니다 (재수집 필요).'); return }
+    if (!itemCodes.length) return { ok: false, error: '카페24 상품코드 없음 (재수집 필요)' }
 
-    setCompletingOrderNo(group.cafe24_order_no)
     try {
       const res = await fetch('/api/cafe24/shipments?action=transit', {
         method: 'POST',
@@ -290,19 +294,51 @@ export default function SoumBatch() {
         body: JSON.stringify({ orders: [{ order_no: group.cafe24_order_no, item_codes: itemCodes, tracking_no: trackingNo, status: 'shipped', carrier_code: '0001' }] }),
       })
       const result = await res.json()
-      if (result.errors?.length) {
-        alert(`카페24 배송완료 처리 실패:\n${result.errors.join('\n')}`)
-        return
-      }
+      if (result.errors?.length) return { ok: false, error: result.errors[0] }
       await supabase.from('order_items')
         .update({ tracking_number: trackingNo, status: 'in_transit', shipped_at: new Date().toISOString() })
         .in('id', group.items.map(i => i.id))
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e.message }
+    }
+  }
+
+  async function completeSelfDelivery(group: OrderGroup) {
+    setCompletingOrderNo(group.cafe24_order_no)
+    try {
+      const result = await completeSelfDeliveryCore(group)
+      if (!result.ok) { alert(`카페24 배송완료 처리 실패: ${result.error}`); return }
       alert('배송완료 처리되었습니다.')
       if (activeBatchId) selectBatch(activeBatchId)
-    } catch (e: any) {
-      alert(`처리 중 오류: ${e.message}`)
     } finally {
       setCompletingOrderNo(null)
+    }
+  }
+
+  // 체크한 주문들을 한 번에 배송완료 처리 — 하나씩 처리해서 카페24에 순간적으로
+  // 몰리지 않게 하고, 실패한 것만 모아서 마지막에 한 번에 알려줌
+  async function completeSelectedDeliveries() {
+    const targets = orderGroups.filter(g => selectedOrders.has(g.cafe24_order_no))
+    if (!targets.length) { alert('선택된 주문이 없습니다.'); return }
+    if (!confirm(`선택한 ${targets.length}건을 카페24 배송완료로 일괄 처리할까요?`)) return
+
+    setBulkCompleting(true)
+    const failed: string[] = []
+    try {
+      for (const group of targets) {
+        const result = await completeSelfDeliveryCore(group)
+        if (!result.ok) failed.push(`${group.cafe24_order_no}: ${result.error}`)
+      }
+      const successCount = targets.length - failed.length
+      alert(
+        `${successCount}건 처리 완료.` +
+        (failed.length ? `\n\n실패 ${failed.length}건:\n${failed.slice(0, 10).join('\n')}${failed.length > 10 ? '\n...' : ''}` : '')
+      )
+      setSelectedOrders(new Set())
+      if (activeBatchId) selectBatch(activeBatchId)
+    } finally {
+      setBulkCompleting(false)
     }
   }
 
@@ -928,6 +964,15 @@ export default function SoumBatch() {
                     CJ 송장 출력용 엑셀 다운로드
                   </button>
                 )}
+                {showManualComplete && (
+                  <button
+                    onClick={completeSelectedDeliveries}
+                    disabled={bulkCompleting || selectedOrders.size === 0}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {bulkCompleting ? '처리 중...' : `선택 배송완료 (${selectedOrders.size})`}
+                  </button>
+                )}
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   className="px-3 py-1.5 rounded-lg text-sm font-medium bg-orange-500 text-white hover:bg-orange-600"
@@ -958,6 +1003,7 @@ export default function SoumBatch() {
           ) : (
             <table className="w-full text-sm table-fixed">
               <colgroup>
+                {showManualComplete && <col className="w-10" />}
                 <col className="w-40" />
                 <col className="w-24" />
                 <col className="w-24" />
@@ -969,6 +1015,15 @@ export default function SoumBatch() {
               </colgroup>
               <thead className="border-b bg-gray-50">
                 <tr>
+                  {showManualComplete && (
+                    <th className="px-2 py-2">
+                      <input
+                        type="checkbox"
+                        checked={orderGroups.length > 0 && orderGroups.every(g => selectedOrders.has(g.cafe24_order_no))}
+                        onChange={e => setSelectedOrders(e.target.checked ? new Set(orderGroups.map(g => g.cafe24_order_no)) : new Set())}
+                      />
+                    </th>
+                  )}
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">주문번호</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">주문자명</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">수령인명</th>
@@ -994,6 +1049,19 @@ export default function SoumBatch() {
                           key={item.id}
                           className={`hover:bg-gray-50 ${idx === last ? 'border-b-2 border-gray-200' : 'border-b border-gray-100'}`}
                         >
+                          {showManualComplete && idx === 0 && (
+                            <td rowSpan={group.items.length} className="px-2 py-3 align-top bg-white">
+                              <input
+                                type="checkbox"
+                                checked={selectedOrders.has(group.cafe24_order_no)}
+                                onChange={e => setSelectedOrders(prev => {
+                                  const next = new Set(prev)
+                                  e.target.checked ? next.add(group.cafe24_order_no) : next.delete(group.cafe24_order_no)
+                                  return next
+                                })}
+                              />
+                            </td>
+                          )}
                           {idx === 0 && (
                             <>
                               <td rowSpan={group.items.length} className="px-4 py-3 font-mono text-xs text-gray-500 truncate align-top bg-white" title={group.cafe24_order_no}>
