@@ -273,9 +273,10 @@ export default function SoumBatch() {
     setManualTracking(seeded)
   }
 
-  // 팀무버 예약 — 수기로 입력한 운송장번호로 카페24 배송 등록 + 배송완료(배송중) 전환을
-  // 한 번에 처리. 이미 등록된 그룹이 아니라도 handleTransit이 등록부터 알아서 해줌
-  async function completeTeamMoverReservation(group: OrderGroup) {
+  // 팀무버/직배 공통 — 둘 다 자체배송(carrier_code 0001)이라, 수기로 입력한
+  // 운송장번호로 카페24 배송 등록 + 배송완료 전환을 한 번에 처리. 이미 등록된
+  // 그룹이 아니라도 handleTransit이 등록부터 알아서 해줌(2026-09-29 직배로 확장)
+  async function completeSelfDelivery(group: OrderGroup) {
     const trackingNo = (manualTracking[group.cafe24_order_no] ?? '').trim()
     if (!trackingNo) { alert('운송장번호를 입력해주세요.'); return }
     const itemCodes = group.items.map(i => i.cafe24_item_code).filter(Boolean) as string[]
@@ -465,6 +466,9 @@ export default function SoumBatch() {
   }
 
   const activeBatch = batches.find(b => b.id === activeBatchId)
+  // 팀무버뿐 아니라 직배도 자체배송이라 운송장 수기입력+카페24 배송완료 버튼이 필요함 —
+  // 팀무버 전용인 주문유형/송장유형 드롭다운(엑셀용)은 여기 안 묶고 그대로 팀무버만 유지(2026-09-29)
+  const showManualComplete = activeBatch?.name?.includes('팀무버') || activeBatch?.type === 'direct'
   const pickingList = buildPickingList()
   const orderGroups = groupItemsByOrder(items)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -960,8 +964,8 @@ export default function SoumBatch() {
                 <col />
                 <col className="w-16" />
                 <col className={activeBatch?.name?.includes('팀무버') ? 'w-32' : 'w-24'} />
-                <col className={activeBatch?.name?.includes('팀무버') ? 'w-40' : 'w-28'} />
-                <col className={activeBatch?.name?.includes('팀무버') ? 'w-32' : 'w-48'} />
+                <col className={showManualComplete ? 'w-40' : 'w-28'} />
+                <col className={showManualComplete ? 'w-32' : 'w-48'} />
               </colgroup>
               <thead className="border-b bg-gray-50">
                 <tr>
@@ -1034,7 +1038,7 @@ export default function SoumBatch() {
                           ) : (
                             <td className={`px-4 py-3 text-sm text-gray-600 ${inspected ? 'bg-blue-50' : ''}`}>{item.delivery_method ?? '-'}</td>
                           )}
-                          {activeBatch?.name?.includes('팀무버') ? (
+                          {showManualComplete ? (
                             idx === 0 && (
                               <td rowSpan={group.items.length} className="px-4 py-3 align-top bg-white">
                                 <input
@@ -1050,10 +1054,10 @@ export default function SoumBatch() {
                           )}
                           {idx === 0 && (
                             <td rowSpan={group.items.length} className="px-4 py-3 text-right whitespace-nowrap align-top bg-white">
-                              <div className={`flex ${activeBatch?.name?.includes('팀무버') ? 'flex-col items-end' : 'items-center justify-end'} gap-1.5`}>
-                                {activeBatch?.name?.includes('팀무버') && (
+                              <div className={`flex ${showManualComplete ? 'flex-col items-end' : 'items-center justify-end'} gap-1.5`}>
+                                {showManualComplete && (
                                   <button
-                                    onClick={() => completeTeamMoverReservation(group)}
+                                    onClick={() => completeSelfDelivery(group)}
                                     disabled={completingOrderNo === group.cafe24_order_no}
                                     className="w-full px-2 py-1 rounded-lg text-xs font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 whitespace-nowrap"
                                   >
@@ -1071,7 +1075,7 @@ export default function SoumBatch() {
                                     e.target.value = ''
                                   }}
                                   title="이 주문의 상품 전체를 다른 배치나 미배정/보류로 옮깁니다"
-                                  className={`text-xs border rounded-lg px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 ${activeBatch?.name?.includes('팀무버') ? 'w-full' : ''}`}
+                                  className={`text-xs border rounded-lg px-1.5 py-1 text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 ${showManualComplete ? 'w-full' : ''}`}
                                 >
                                   <option value="" disabled>다른 배치로</option>
                                   <option value="__unassigned__">미배정으로</option>
