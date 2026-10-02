@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = `https://${req.headers.host}`
   const { kind, id, driver_name, memo } = req.body ?? {}
   if (!kind || !id) return res.status(400).json({ error: 'kind, id 필요' })
-  if (kind !== 'order' && kind !== 'adhoc' && kind !== 'fail') return res.status(400).json({ error: "kind는 'order', 'adhoc' 또는 'fail'" })
+  if (kind !== 'photos' && kind !== 'adhoc' && kind !== 'fail') return res.status(400).json({ error: "kind는 'photos', 'adhoc' 또는 'fail'" })
 
   async function sendMessage(plainText: string, groupName: string) {
     const chRes = await fetch(`https://api.channel.io/open/groups/@${encodeURIComponent(groupName)}/messages`, {
@@ -50,9 +50,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!chRes.ok) throw new Error(JSON.stringify(chData))
   }
 
+  // 배송완료 처리와 완전히 분리된 사진 전송이라, 같은 사진을 여러 번 누를 때마다 또
+  // 보내지 않도록 아직 안 보낸(sent_at IS NULL) 사진만 가져옴 — 'fail'(배송불가)도
+  // 같은 기준을 써서 이미 보낸 사진을 중복으로 또 보내지 않게 함(2026-09-29)
+  async function fetchUnsentPhotoEntries(orderId: string) {
+    const { data: photos } = await supabase
+      .from('delivery_photos')
+      .select('id, order_item_id, storage_path')
+      .eq('order_id', orderId)
+      .is('sent_at', null)
+    const itemIds = [...new Set((photos ?? []).map(p => p.order_item_id).filter((v): v is string => !!v))]
+    let productNameById: Record<string, string> = {}
+    if (itemIds.length) {
+      const { data: itemRows } = await supabase.from('order_items').select('id, product_name').in('id', itemIds)
+      productNameById = Object.fromEntries((itemRows ?? []).map(i => [i.id, i.product_name]))
+    }
+    const entries = (photos ?? []).map(p => ({
+      id: p.id,
+      url: `${origin}/api/channeltalk/notify?photo=${p.id}`,
+      productName: p.order_item_id ? productNameById[p.order_item_id] ?? null : null,
+    }))
+    return entries
+  }
+
+  async function sendPhotoBatch(headerText: string, entries: { id: string; url: string; productName: string | null }[], groupName: string) {
+    // 상품 1개짜리 배송이 훨씬 많아서, 그 흔한 경우엔 메시지가 안내문+사진 2개로 안
+    // 쪼개지게 첫 번째 사진은 안내문에 같이 담아 보냄. 둘째 장부터만 따로 보냄 —
+    // 채널톡은 한 메시지에 링크가 여러 개 있으면 첫 번째 것만 미리보기가 뜨기 때문(2026-09-22)
+    const [first, ...rest] = entries
+    await sendMessage(first ? [headerText, '', first.productName, first.url].filter(Boolean).join('\n') : headerText, groupName)
+    for (const { url, productName } of rest) {
+      await sendMessage([productName, url].filter(Boolean).join('\n'), groupName)
+    }
+    if (entries.length) {
+      await supabase.from('delivery_photos').update({ sent_at: new Date().toISOString() }).in('id', entries.map(e => e.id))
+    }
+  }
+
+  // 배송완료 처리와 무관하게, 지금까지 찍은(아직 안 보낸) 사진만 따로 보내는 버튼 —
+  // 품목이 많은 주문에서 사진을 다 못 찍거나 일부만 배송된 경우에도 쓸 수 있게
+  // 배송완료와 분리함(2026-09-29)
+  if (kind === 'photos') {
+    const { data: order } = await supabase
+      .from('orders')
+      .select('cafe24_order_no, customer_name, receiver_name, address')
+      .eq('id', id)
+      .maybeSingle()
+    if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' })
+
+    const entries = await fetchUnsentPhotoEntries(id)
+    if (!entries.length) return res.status(200).json({ ok: true, sent: 0 })
+
+    const headerText = [
+      `사진전송(${driver_name ?? '알 수 없음'}) ${order.receiver_name || order.customer_name} (${order.cafe24_order_no})`,
+      order.address ?? '',
+    ].filter(Boolean).join('\n')
+
+    try {
+      await sendPhotoBatch(headerText, entries, GROUP_NAME)
+      return res.status(200).json({ ok: true, sent: entries.length })
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message })
+    }
+  }
+
   // 배송불가 — 완료 알림과 양식은 같되(담당자/수령인/주문번호/주소) 사유를 덧붙여서
   // 물류팀-이슈사항 채널로 따로 보냄. 완료 전에 일부 상품 사진을 이미 찍어뒀을 수 있어서
-  // (예: 문제 상황 증빙) 그것도 같이 보냄(2026-09-23)
+  // (예: 문제 상황 증빙) 그것도 같이 보냄 — 이미 "사진 전송" 버튼으로 보낸 건 제외(2026-09-23)
   if (kind === 'fail') {
     const { data: order } = await supabase
       .from('orders')
@@ -61,18 +125,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .maybeSingle()
     if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' })
 
-    const { data: photos } = await supabase.from('delivery_photos').select('id, order_item_id').eq('order_id', id)
-    const itemIds = [...new Set((photos ?? []).map(p => p.order_item_id).filter((v): v is string => !!v))]
-    let productNameById: Record<string, string> = {}
-    if (itemIds.length) {
-      const { data: itemRows } = await supabase.from('order_items').select('id, product_name').in('id', itemIds)
-      productNameById = Object.fromEntries((itemRows ?? []).map(i => [i.id, i.product_name]))
-    }
-    const photoEntries = (photos ?? []).map(p => ({
-      url: `${origin}/api/channeltalk/notify?photo=${p.id}`,
-      productName: p.order_item_id ? productNameById[p.order_item_id] ?? null : null,
-    }))
-
+    const entries = await fetchUnsentPhotoEntries(id)
     const headerText = [
       `배송불가(${driver_name ?? '알 수 없음'}) ${order.receiver_name || order.customer_name} (${order.cafe24_order_no})`,
       order.address ?? '',
@@ -80,77 +133,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ].filter(Boolean).join('\n')
 
     try {
-      const [first, ...rest] = photoEntries
-      await sendMessage(first ? [headerText, '', first.productName, first.url].filter(Boolean).join('\n') : headerText, ISSUE_GROUP_NAME)
-      for (const { url, productName } of rest) {
-        await sendMessage([productName, url].filter(Boolean).join('\n'), ISSUE_GROUP_NAME)
-      }
+      await sendPhotoBatch(headerText, entries, ISSUE_GROUP_NAME)
       return res.status(200).json({ ok: true })
     } catch (e: any) {
       return res.status(500).json({ error: e.message })
     }
   }
 
-  let headerName: string
-  let orderNoSuffix = ''
-  let address: string | null = null
-  // 사진마다 어떤 상품 사진인지 같이 보여주기 위해 상품명을 같이 들고 다님(2026-09-22)
-  let photoEntries: { url: string; productName: string | null }[] = []
+  // 기타 배송지(adhoc) — 사진 한 장 찍을 때마다 바로 호출되는 구조라 sent_at 추적 없이도
+  // 중복 전송 걱정이 없음
+  const { data: adhoc } = await supabase
+    .from('schedule_adhoc_stops')
+    .select('name, address')
+    .eq('id', id)
+    .maybeSingle()
+  if (!adhoc) return res.status(404).json({ error: '기타 배송지를 찾을 수 없습니다.' })
 
-  if (kind === 'order') {
-    const { data: order } = await supabase
-      .from('orders')
-      .select('cafe24_order_no, customer_name, receiver_name, address')
-      .eq('id', id)
-      .maybeSingle()
-    if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' })
-    headerName = order.receiver_name || order.customer_name
-    orderNoSuffix = ` (${order.cafe24_order_no})`
-    address = order.address
-
-    const { data: photos } = await supabase.from('delivery_photos').select('id, order_item_id').eq('order_id', id)
-    const itemIds = [...new Set((photos ?? []).map(p => p.order_item_id).filter((v): v is string => !!v))]
-    let productNameById: Record<string, string> = {}
-    if (itemIds.length) {
-      const { data: itemRows } = await supabase.from('order_items').select('id, product_name').in('id', itemIds)
-      productNameById = Object.fromEntries((itemRows ?? []).map(i => [i.id, i.product_name]))
-    }
-    photoEntries = (photos ?? []).map(p => ({
-      url: `${origin}/api/channeltalk/notify?photo=${p.id}`,
-      productName: p.order_item_id ? productNameById[p.order_item_id] ?? null : null,
-    }))
-  } else {
-    const { data: adhoc } = await supabase
-      .from('schedule_adhoc_stops')
-      .select('name, address')
-      .eq('id', id)
-      .maybeSingle()
-    if (!adhoc) return res.status(404).json({ error: '기타 배송지를 찾을 수 없습니다.' })
-    headerName = adhoc.name
-    address = adhoc.address
-
-    const { data: photos } = await supabase.from('delivery_photos').select('id').eq('adhoc_stop_id', id)
-    photoEntries = (photos ?? []).map(p => ({
-      url: `${origin}/api/channeltalk/notify?photo=${p.id}`,
-      productName: null,
-    }))
-  }
-
-  const label = kind === 'order' ? '배송완료' : '처리완료'
+  const { data: photos } = await supabase.from('delivery_photos').select('id').eq('adhoc_stop_id', id)
+  const entries = (photos ?? []).map(p => ({ id: p.id, url: `${origin}/api/channeltalk/notify?photo=${p.id}`, productName: null }))
   const headerText = [
-    `${label}(${driver_name ?? '알 수 없음'}) ${headerName}${orderNoSuffix}`,
-    address ?? '',
+    `처리완료(${driver_name ?? '알 수 없음'}) ${adhoc.name}`,
+    adhoc.address ?? '',
   ].filter(Boolean).join('\n')
 
   try {
-    // 상품 1개짜리 배송이 훨씬 많아서, 그 흔한 경우엔 메시지가 안내문+사진 2개로
-    // 안 쪼개지게 첫 번째 사진은 안내문에 같이 담아 보냄. 둘째 장부터만 따로 보냄
-    // — 채널톡은 한 메시지에 링크가 여러 개 있으면 첫 번째 것만 미리보기가 뜨기 때문(2026-09-22)
-    const [first, ...rest] = photoEntries
-    await sendMessage(first ? [headerText, '', first.productName, first.url].filter(Boolean).join('\n') : headerText, GROUP_NAME)
-    for (const { url, productName } of rest) {
-      await sendMessage([productName, url].filter(Boolean).join('\n'), GROUP_NAME)
-    }
+    await sendPhotoBatch(headerText, entries, GROUP_NAME)
     res.status(200).json({ ok: true })
   } catch (e: any) {
     res.status(500).json({ error: e.message })

@@ -11,6 +11,7 @@ interface OrderItem {
   cafe24_item_code: string | null
   tracking_number: string | null
   item_note: string | null
+  status: string
 }
 
 interface Photo {
@@ -46,6 +47,9 @@ export default function DriverDetail() {
   const [driverName, setDriverName] = useState('')
   const [photosByItem, setPhotosByItem] = useState<Record<string, Photo[]>>({})
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null)
+  // 배송완료를 상품 단위로 선택해서 처리할 수 있게 — 사진 촬영 여부와 무관(2026-09-29)
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set())
+  const [sendingPhotos, setSendingPhotos] = useState(false)
   const [memo, setMemo] = useState('')
   const [processing, setProcessing] = useState(false)
   const [showFailForm, setShowFailForm] = useState(false)
@@ -73,10 +77,13 @@ export default function DriverDetail() {
       // 발견, 2026-09-23)
       const { data: items } = await supabase
         .from('order_items')
-        .select('id, product_name, option_info, quantity, cafe24_item_code, tracking_number, item_note')
+        .select('id, product_name, option_info, quantity, cafe24_item_code, tracking_number, item_note, status')
         .eq('order_id', id)
         .eq('delivery_method', '직배')
         .in('status', ['confirmed', 'in_transit'])
+      // 아직 완료 안 된 상품은 기본으로 전부 선택해둬서, 평소(상품 1~2개)엔 그냥 바로
+      // "배송 완료"만 누르면 되고, 일부만 배송된 경우에만 체크 해제하면 됨(2026-09-29)
+      setSelectedItemIds(new Set((items ?? []).filter(i => i.status !== 'in_transit').map(i => i.id)))
 
       // 이 주문이 다른 배송원 루트에 "동행 (주문번호)" 기타 배송지로 붙어있는지 확인 —
       // 원래 담당자도 2인 배송인 걸 상세 화면에서 바로 알 수 있어야 함(2026-09-22)
@@ -156,8 +163,15 @@ export default function DriverDetail() {
     setPhotosByItem(prev => ({ ...prev, [item.id]: (prev[item.id] ?? []).filter(p => p.id !== photo.id) }))
   }
 
-  async function handleDone() {
+  // 품목이 많으면 사진을 다 못 찍거나(고객이 못 찍게 하는 경우 포함) 일부 상품만
+  // 먼저 배송되는 경우가 있어서, 사진 촬영 여부와 무관하게 체크한 상품만 배송완료
+  // 처리할 수 있게 함. 선택 안 된(아직 배송 안 된) 상품이 남아있으면 주문 자체는
+  // delivered_at을 세우지 않고 계속 진행중으로 남겨서, 나중에 다시 들어와 나머지를
+  // 마저 처리할 수 있게 함(2026-09-29)
+  async function handleCompleteSelected() {
     if (!order) return
+    const targets = order.items.filter(i => selectedItemIds.has(i.id) && i.status !== 'in_transit')
+    if (!targets.length) { alert('완료 처리할 상품을 선택해주세요.'); return }
     setProcessing(true)
     setMessage('')
 
@@ -168,24 +182,9 @@ export default function DriverDetail() {
     const invoiceNo = order.items.find(i => i.tracking_number)?.tracking_number
       ?? `직배${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`
 
-    await supabase.from('orders').update({
-      delivered_at: new Date().toISOString(),
-    }).eq('id', order.id)
-
-    // order_items.status를 안 바꾸면 배송완료 후에도 계속 'confirmed'로 남아서
-    // 주문/배치 화면(SoumOrders/SoumBatch)의 직배 배치에 영원히 남아있게 됨(2026-09-22
-    // 발견) — CJ 출고검수(SoumOutgoing)/팀무버 완료 처리와 동일하게 in_transit으로 전환.
-    // delivery_method='직배' + status='confirmed'로 좁혀야 이 주문의 예전 이력(이미
-    // 다른 방법으로 나갔거나 취소/교환된 상품)까지 같이 안 건드림(2026-09-23)
-    await supabase.from('order_items')
-      .update({ status: 'in_transit', shipped_at: new Date().toISOString() })
-      .eq('order_id', order.id)
-      .eq('delivery_method', '직배')
-      .eq('status', 'confirmed')
-
-    // 카페24 배송완료 전환 — 실패해도 로컬 완료 처리는 유지 (나중에 수동 확인 필요)
+    // 카페24 배송완료 전환 — 선택된 상품만. 실패해도 로컬 완료 처리는 유지(나중에 수동 확인 필요)
     try {
-      const itemCodes = order.items.map(i => i.cafe24_item_code).filter(Boolean) as string[]
+      const itemCodes = targets.map(i => i.cafe24_item_code).filter(Boolean) as string[]
       if (itemCodes.length) {
         const res = await fetch('/api/cafe24/shipments?action=transit', {
           method: 'POST',
@@ -201,26 +200,61 @@ export default function DriverDetail() {
       setMessage('카페24 배송완료 전환 중 네트워크 오류가 발생했습니다.')
     }
 
-    // 카페24 어드민 메모에 담당 배송원 이름 남김 — 실패해도 완료 처리엔 영향 없음
+    const targetIds = targets.map(i => i.id)
+    // order_items.status를 안 바꾸면 배송완료 후에도 계속 'confirmed'로 남아서
+    // 주문/배치 화면(SoumOrders/SoumBatch)의 직배 배치에 영원히 남아있게 됨(2026-09-22 발견)
+    await supabase.from('order_items')
+      .update({ status: 'in_transit', shipped_at: new Date().toISOString() })
+      .in('id', targetIds)
+
+    // 카페24 어드민 메모에 담당 배송원/처리 현황 남김 — 실패해도 완료 처리엔 영향 없음
+    const remainingAfter = order.items.filter(i => i.status !== 'in_transit' && !targetIds.includes(i.id)).length
     try {
       await fetch('/api/cafe24/shipments?action=memo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order_no: order.cafe24_order_no, content: `배송 담당자 : ${driverName}` }),
+        body: JSON.stringify({
+          order_no: order.cafe24_order_no,
+          content: `배송 담당자 : ${driverName}${remainingAfter ? ` (${targets.length}개 완료, ${remainingAfter}개 남음)` : ''}`,
+        }),
       })
     } catch { /* 메모 등록 실패는 배송 완료 처리에 영향 없음 */ }
 
-    // 채널톡 알림 — 실패해도 배송 완료 처리 자체는 이미 끝난 상태라 조용히 넘어감
+    const updatedItems = order.items.map(i => targetIds.includes(i.id) ? { ...i, status: 'in_transit' } : i)
+    if (remainingAfter === 0) {
+      // 선택 안 한 나머지가 없거나 이번에 다 같이 끝남 — 주문 전체 완료 처리
+      await supabase.from('orders').update({ delivered_at: new Date().toISOString() }).eq('id', order.id)
+      setProcessing(false)
+      navigate('/')
+      return
+    }
+
+    // 아직 남은 상품이 있음 — 주문은 계속 진행중으로 두고 화면에 남아서 이어서 처리 가능
+    setOrder({ ...order, items: updatedItems })
+    setSelectedItemIds(new Set())
+    setMessage(`${targets.length}개 상품을 배송완료 처리했습니다. 남은 상품: ${remainingAfter}개`)
+    setProcessing(false)
+  }
+
+  // 배송완료 처리와 완전히 별개 — 지금까지 찍은(아직 안 보낸) 사진만 채널톡으로 전송.
+  // 다시 눌러도 이미 보낸 사진은 서버가 알아서 제외하고 새로 찍은 것만 보냄(2026-09-29)
+  async function handleSendPhotos() {
+    if (!order) return
+    setSendingPhotos(true)
     try {
-      await fetch('/api/channeltalk/notify', {
+      const res = await fetch('/api/channeltalk/notify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'order', id: order.id, driver_name: driverName }),
+        body: JSON.stringify({ kind: 'photos', id: order.id, driver_name: driverName }),
       })
-    } catch { /* 알림 실패는 배송 완료 처리에 영향 없음 */ }
-
-    setProcessing(false)
-    navigate('/')
+      const data = await res.json()
+      if (!res.ok) { alert(`전송 실패: ${data.error}`); return }
+      alert(data.sent ? `사진 ${data.sent}장을 전송했습니다.` : '새로 보낼 사진이 없습니다.')
+    } catch {
+      alert('전송 중 네트워크 오류가 발생했습니다.')
+    } finally {
+      setSendingPhotos(false)
+    }
   }
 
   async function handleFail() {
@@ -246,7 +280,7 @@ export default function DriverDetail() {
   const links = mapDeeplink(order.address)
   const pending = !order.delivered_at && !order.delivery_memo
   const photographedCount = order.items.filter(i => (photosByItem[i.id]?.length ?? 0) > 0).length
-  const allPhotographed = order.items.length > 0 && photographedCount === order.items.length
+  const pendingItemCount = order.items.filter(i => i.status !== 'in_transit').length
 
   return (
     <div>
@@ -285,37 +319,62 @@ export default function DriverDetail() {
         )}
 
         <div className="border-t pt-4">
-          <p className="text-sm font-medium text-gray-700 mb-2">
-            상품별 완료 사진 {pending && <span className="text-gray-400 font-normal">({photographedCount}/{order.items.length})</span>}
-          </p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-medium text-gray-700">
+              상품 목록 <span className="text-gray-400 font-normal">(사진 {photographedCount}/{order.items.length})</span>
+            </p>
+            {pending && (
+              <button
+                onClick={handleSendPhotos}
+                disabled={sendingPhotos}
+                className="text-xs px-2.5 py-1 rounded-lg border border-indigo-300 text-indigo-600 hover:bg-indigo-50 disabled:opacity-50 shrink-0"
+              >
+                {sendingPhotos ? '전송 중...' : '📷 채널톡 사진 전송'}
+              </button>
+            )}
+          </div>
           <ul className="space-y-2">
             {order.items.map(item => {
               const photos = photosByItem[item.id] ?? []
-              const done = photos.length > 0
+              const itemDone = item.status === 'in_transit'
+              const editable = pending && !itemDone
               const uploading = uploadingItemId === item.id
               return (
                 <li
                   key={item.id}
-                  className={`p-2.5 rounded-lg border ${done ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}
+                  className={`p-2.5 rounded-lg border ${itemDone ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm min-w-0">
-                      <div className={done ? 'text-green-700 font-medium' : 'text-gray-800'}>
-                        {item.product_name}
-                        {item.option_info && <span className="text-gray-400 ml-1">({item.option_info})</span>}
-                      </div>
-                      <div className="text-xs text-gray-400">x{item.quantity}</div>
-                      {item.item_note && (
-                        <div className="text-xs font-bold text-red-600 mt-0.5">{item.item_note}</div>
+                    <div className="flex items-center gap-2 min-w-0">
+                      {pending && !itemDone && (
+                        <input
+                          type="checkbox"
+                          checked={selectedItemIds.has(item.id)}
+                          onChange={e => setSelectedItemIds(prev => {
+                            const next = new Set(prev)
+                            e.target.checked ? next.add(item.id) : next.delete(item.id)
+                            return next
+                          })}
+                          className="w-[18px] h-[18px] shrink-0"
+                        />
                       )}
+                      <div className="text-sm min-w-0">
+                        <div className={itemDone ? 'text-green-700 font-medium' : 'text-gray-800'}>
+                          {item.product_name}
+                          {item.option_info && <span className="text-gray-400 ml-1">({item.option_info})</span>}
+                        </div>
+                        <div className="text-xs text-gray-400">x{item.quantity}</div>
+                        {item.item_note && (
+                          <div className="text-xs font-bold text-red-600 mt-0.5">{item.item_note}</div>
+                        )}
+                      </div>
                     </div>
-                    {!done && !pending && (
-                      <span className="text-gray-300 text-xs shrink-0">미촬영</span>
-                    )}
+                    {itemDone && <span className="text-green-600 text-xl shrink-0">✓</span>}
                   </div>
                   {/* 상품 1개에 여러 장 촬영 가능 — 잘못 찍은 사진은 눌러서 지우고 다시 찍음.
-                      완료 처리 전(pending)에만 촬영/삭제 가능(2026-09-23) */}
-                  {(done || pending) && (
+                      사진은 배송완료 조건이 아니라 참고용 — 고객이 촬영을 막는 경우 등
+                      사진 없이도 완료 처리 가능(2026-09-29) */}
+                  {(photos.length > 0 || editable) && (
                     <div className="flex items-center gap-2 mt-2 flex-wrap">
                       {photos.map(photo => (
                         <div key={photo.id} className="relative shrink-0">
@@ -324,7 +383,7 @@ export default function DriverDetail() {
                             alt=""
                             className="w-16 h-16 object-cover rounded-lg border"
                           />
-                          {pending && (
+                          {editable && (
                             <button
                               onClick={() => handleDeletePhoto(item, photo)}
                               className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs leading-none flex items-center justify-center shadow"
@@ -332,7 +391,7 @@ export default function DriverDetail() {
                           )}
                         </div>
                       ))}
-                      {pending && (
+                      {editable && (
                         <label className="w-16 h-16 shrink-0 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 text-xs flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:text-blue-500">
                           {uploading ? '업로드 중' : (
                             <>
@@ -362,16 +421,20 @@ export default function DriverDetail() {
         </div>
       </div>
 
-      {message && <p className="text-sm text-red-500 mb-3">{message}</p>}
+      {message && <p className="text-sm text-amber-600 mb-3">{message}</p>}
 
       {pending && (
         <div className="space-y-3">
           <button
-            onClick={handleDone}
-            disabled={processing || !allPhotographed}
+            onClick={handleCompleteSelected}
+            disabled={processing || selectedItemIds.size === 0}
             className="w-full bg-green-600 text-white py-3 rounded-xl font-medium text-lg hover:bg-green-700 disabled:opacity-50"
           >
-            {processing ? '처리 중...' : allPhotographed ? '배송 완료' : `상품 사진을 모두 찍어주세요 (${photographedCount}/${order.items.length})`}
+            {processing ? '처리 중...' : selectedItemIds.size === 0
+              ? '완료할 상품을 선택해주세요'
+              : selectedItemIds.size === pendingItemCount
+                ? '배송 완료'
+                : `선택한 상품 배송완료 (${selectedItemIds.size}/${pendingItemCount})`}
           </button>
 
           {!showFailForm ? (
