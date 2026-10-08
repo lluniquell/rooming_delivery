@@ -17,7 +17,7 @@
 ## 주요 규칙
 - 배송원 계정은 관리자가 직접 생성 (자체 회원가입 없음)
 - 카페24 상품코드 = 이카운트 품목코드 (동일 체계)
-- 직배 송장번호 형식: `직배YYYYMMDD`
+- 직배 송장번호 형식: `YYMMDD 직배` (예: `261008 직배`)
 
 ## 관련 레포
 - 바코드 생성기: https://github.com/lluniquell/rooming_barcode_generator

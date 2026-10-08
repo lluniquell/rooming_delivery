@@ -976,7 +976,7 @@ export default function ScheduleDay() {
     if (routeOrders.length) {
       setRegisteringRouteId(route.id)
       if (next) {
-        const trackingNo = `직배${date.replace(/-/g, '')}`
+        const trackingNo = `${date.replace(/-/g, '').slice(2)} 직배`
         try {
           const res = await fetch('/api/cafe24/shipments?action=standby', {
             method: 'POST',

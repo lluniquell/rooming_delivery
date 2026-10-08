@@ -180,7 +180,7 @@ export default function DriverDetail() {
     // 날짜 기준)이 달라질 때(예: 하루 밀려서 처리) 카페24에 등록된 운송장번호와
     // 어긋나버림. 마감을 거치지 않은 예외적인 경우를 대비해 없으면만 폴백으로 새로 만듦
     const invoiceNo = order.items.find(i => i.tracking_number)?.tracking_number
-      ?? `직배${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`
+      ?? `${new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(2, 10).replace(/-/g, '')} 직배`
 
     // 카페24 배송완료 전환 — 선택된 상품만. 실패해도 로컬 완료 처리는 유지(나중에 수동 확인 필요)
     try {
