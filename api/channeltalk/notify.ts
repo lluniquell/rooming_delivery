@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = `https://${req.headers.host}`
   const { kind, id, driver_name, memo } = req.body ?? {}
   if (!kind || !id) return res.status(400).json({ error: 'kind, id 필요' })
-  if (kind !== 'photos' && kind !== 'adhoc' && kind !== 'fail') return res.status(400).json({ error: "kind는 'photos', 'adhoc' 또는 'fail'" })
+  if (kind !== 'photos' && kind !== 'complete' && kind !== 'adhoc' && kind !== 'fail') return res.status(400).json({ error: "kind는 'photos', 'complete', 'adhoc' 또는 'fail'" })
 
   async function sendMessage(plainText: string, groupName: string) {
     const chRes = await fetch(`https://api.channel.io/open/groups/@${encodeURIComponent(groupName)}/messages`, {
@@ -109,6 +109,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       await sendPhotoBatch(headerText, entries, GROUP_NAME)
       return res.status(200).json({ ok: true, sent: entries.length })
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message })
+    }
+  }
+
+  // 배송완료 처리 시 자동 알림 — 사진이 없어도 텍스트는 항상 보내고, 이미 "사진 전송"으로
+  // 보낸 게 아닌 사진이 있으면 같이 보냄. 일부 상품만 완료한 경우엔 어떤 상품인지/몇 개
+  // 남았는지도 덧붙임(2026-10-08)
+  if (kind === 'complete') {
+    const { data: order } = await supabase
+      .from('orders')
+      .select('cafe24_order_no, customer_name, receiver_name, address')
+      .eq('id', id)
+      .maybeSingle()
+    if (!order) return res.status(404).json({ error: '주문을 찾을 수 없습니다.' })
+
+    const entries = await fetchUnsentPhotoEntries(id)
+    const names: string[] = Array.isArray(req.body?.product_names) ? req.body.product_names : []
+    const remaining = Number(req.body?.remaining) || 0
+    const headerText = [
+      `배송완료(${driver_name ?? '알 수 없음'}) ${order.receiver_name || order.customer_name} (${order.cafe24_order_no})`,
+      order.address ?? '',
+      remaining ? `일부 완료(${names.length}개 완료, ${remaining}개 남음): ${names.join(', ')}` : '',
+    ].filter(Boolean).join('\n')
+
+    try {
+      await sendPhotoBatch(headerText, entries, GROUP_NAME)
+      return res.status(200).json({ ok: true })
     } catch (e: any) {
       return res.status(500).json({ error: e.message })
     }

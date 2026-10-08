@@ -220,6 +220,22 @@ export default function DriverDetail() {
       })
     } catch { /* 메모 등록 실패는 배송 완료 처리에 영향 없음 */ }
 
+    // 채널톡 완료 알림 — 사진이 없어도 텍스트는 보내고, 아직 안 보낸 사진이 있으면 같이 보냄.
+    // 실패해도 배송 완료 처리 자체는 이미 끝난 상태라 조용히 넘어감
+    try {
+      await fetch('/api/channeltalk/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'complete',
+          id: order.id,
+          driver_name: driverName,
+          product_names: targets.map(i => i.product_name),
+          remaining: remainingAfter,
+        }),
+      })
+    } catch { /* 알림 실패는 배송 완료 처리에 영향 없음 */ }
+
     const updatedItems = order.items.map(i => targetIds.includes(i.id) ? { ...i, status: 'in_transit' } : i)
     if (remainingAfter === 0) {
       // 선택 안 한 나머지가 없거나 이번에 다 같이 끝남 — 주문 전체 완료 처리
