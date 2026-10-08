@@ -433,11 +433,10 @@ export default function DriverList() {
                       )}
                       {!photographed && (
                         <label className="flex-1 text-center bg-purple-600 text-white py-1.5 rounded-lg text-xs font-medium cursor-pointer">
-                          {uploading ? '업로드 중...' : '📷 촬영'}
+                          {uploading ? '업로드 중...' : '📷 사진'}
                           <input
                             type="file"
                             accept="image/*"
-                            capture="environment"
                             className="hidden"
                             disabled={uploading}
                             onChange={e => {

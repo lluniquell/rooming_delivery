@@ -418,7 +418,6 @@ export default function DriverDetail() {
                           <input
                             type="file"
                             accept="image/*"
-                            capture="environment"
                             className="hidden"
                             disabled={uploading}
                             onChange={e => {
