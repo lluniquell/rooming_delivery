@@ -841,6 +841,7 @@ export default function SoumOrders() {
       if (!res.ok) { alert(`재조회 실패: ${order.error ?? res.status}`); return }
       const receiver = order.receivers?.[0]
       const patch = {
+        customer_name: order.buyer?.name || order.billing_name,
         receiver_name: receiver?.name ?? null,
         receiver_phone: receiver?.cellphone || receiver?.phone || null,
         zipcode: receiver?.zipcode ?? null,
@@ -850,7 +851,7 @@ export default function SoumOrders() {
       const { error } = await supabase.from('orders').update(patch).eq('id', group.order_id)
       if (error) { alert(`저장 실패: ${error.message}`); return }
       const apply = <T extends OrderGroup>(g: T): T => g.order_id === group.order_id
-        ? { ...g, receiver_name: patch.receiver_name, address: patch.address }
+        ? { ...g, customer_name: patch.customer_name, receiver_name: patch.receiver_name, address: patch.address }
         : g
       setGroups(prev => prev.map(apply))
       setBatchedMatches(prev => prev.map(apply))

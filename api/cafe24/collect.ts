@@ -57,7 +57,7 @@ async function getToken(): Promise<string> {
 
 // 주문 1건 상세 조회 (orders/[orderNo].ts 병합) — GET ?order_no=xxx
 async function getOrder(orderNo: string, token: string) {
-  const url = `https://${MALL_ID}.cafe24api.com/api/v2/admin/orders/${orderNo}?shop_no=1&embed=receivers`
+  const url = `https://${MALL_ID}.cafe24api.com/api/v2/admin/orders/${orderNo}?shop_no=1&embed=receivers,buyer`
   const apiRes = await fetch(url, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
   })
@@ -98,6 +98,12 @@ function deriveLocation(supplierName: string | null): string | null {
   if (codeMatch) return codeMatch
   if (supplierName.includes('미성')) return '미성'
   return null
+}
+
+// 주문자명 — billing_name은 입금자명이라 "주문자정보 변경"을 해도 안 바뀜(20260801-0000577,
+// 2026-10-08 확인). 실제 주문자명은 buyer.name이고, buyer를 못 받아오면 billing_name으로 폴백
+function ordererNameOf(order: any) {
+  return order.buyer?.name || order.billing_name
 }
 
 function receiverFieldsOf(order: any) {
@@ -411,7 +417,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const cafe24Orders: any[] = []
     for (let offset = 0; offset < 5000; offset += 100) {
       const data = await cafe24Get(
-        `/api/v2/admin/orders?embed=items,receivers&limit=100&offset=${offset}&shop_no=1&start_date=${startDate}&end_date=${endDate}&order_status=${orderStatus}`,
+        `/api/v2/admin/orders?embed=items,receivers,buyer&limit=100&offset=${offset}&shop_no=1&start_date=${startDate}&end_date=${endDate}&order_status=${orderStatus}`,
         token
       )
       if (data.error) return res.status(400).json(data)
@@ -466,6 +472,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (order.receivers?.[0]) {
             await supabase.from('orders').update(receiverFieldsOf(order)).eq('id', existed.id)
           }
+          // 주문자명도 카페24에서 "주문자정보 변경"으로 바뀔 수 있어서 같이 최신화
+          await supabase.from('orders').update({ customer_name: ordererNameOf(order) }).eq('id', existed.id)
           if (!existed.hasPlaceName && order.order_place_name) {
             await supabase.from('orders').update({ order_place_name: order.order_place_name }).eq('id', existed.id)
           }
@@ -522,7 +530,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const { data: saved, error } = await supabase.from('orders').insert({
           cafe24_order_no: order.order_id,
-          customer_name: order.billing_name,
+          customer_name: ordererNameOf(order),
           order_date: order.order_date,
           order_place_name: order.order_place_name ?? null,
           admin_memo: memos,
