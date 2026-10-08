@@ -226,10 +226,12 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
     if (chunk.length) {
       // order_id 지정 시 날짜 파라미터 없이도 조회 가능 (날짜 필터엔 3개월 제한이 있어서 회피)
       const data = await cafe24Get(
-        `/api/v2/admin/orders?order_id=${chunk.join(',')}&embed=items&shop_no=1&limit=${chunk.length}`,
+        `/api/v2/admin/orders?order_id=${chunk.join(',')}&embed=items,buyer&shop_no=1&limit=${chunk.length}`,
         token
       )
       const itemsByOrder = new Map<string, any[]>((data.orders ?? []).map((o: any) => [o.order_id, o.items ?? []]))
+      // 카페24에서 "주문자정보 변경"을 하면 buyer.name만 바뀌므로, 재확인 때 같이 최신화함
+      const ordererNameByOrderNo = new Map<string, string>((data.orders ?? []).map((o: any) => [o.order_id, ordererNameOf(o)]))
       const piiClearedOrderIds = new Set<string>()
       for (const no of chunk) {
         const liveItems = itemsByOrder.get(no) ?? []
@@ -309,7 +311,8 @@ async function handleRecheck(req: VercelRequest, res: VercelResponse) {
           const orderId = orderIdByNo.get(no)
           if (!orderId || piiClearedOrderIds.has(orderId)) return
           const memos = await fetchMemos(no, token)
-          await supabase.from('orders').update({ admin_memo: memos }).eq('id', orderId)
+          const ordererName = ordererNameByOrderNo.get(no)
+          await supabase.from('orders').update({ admin_memo: memos, ...(ordererName ? { customer_name: ordererName } : {}) }).eq('id', orderId)
         }))
       }
     }
@@ -472,8 +475,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (order.receivers?.[0]) {
             await supabase.from('orders').update(receiverFieldsOf(order)).eq('id', existed.id)
           }
-          // 주문자명도 카페24에서 "주문자정보 변경"으로 바뀔 수 있어서 같이 최신화
-          await supabase.from('orders').update({ customer_name: ordererNameOf(order) }).eq('id', existed.id)
           if (!existed.hasPlaceName && order.order_place_name) {
             await supabase.from('orders').update({ order_place_name: order.order_place_name }).eq('id', existed.id)
           }
