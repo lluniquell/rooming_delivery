@@ -432,19 +432,37 @@ export default function DriverList() {
                         <a href={links.naver} className="flex-1 text-center bg-white text-gray-700 border py-1.5 rounded-lg text-xs font-medium">📍 네이버</a>
                       )}
                       {!photographed && (
-                        <label className="flex-1 text-center bg-purple-600 text-white py-1.5 rounded-lg text-xs font-medium cursor-pointer">
-                          {uploading ? '업로드 중...' : '📷 사진'}
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            disabled={uploading}
-                            onChange={e => {
-                              const file = e.target.files?.[0]
-                              if (file) handleAdhocPhoto(s.id, file)
-                            }}
-                          />
-                        </label>
+                        <>
+                          <label className="flex-1 text-center bg-purple-600 text-white py-1.5 rounded-lg text-xs font-medium cursor-pointer">
+                            {uploading ? '업로드 중...' : '📷 촬영'}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              className="hidden"
+                              disabled={uploading}
+                              onChange={e => {
+                                const file = e.target.files?.[0]
+                                if (file) handleAdhocPhoto(s.id, file)
+                                e.target.value = ''
+                              }}
+                            />
+                          </label>
+                          <label className="flex-1 text-center bg-purple-100 text-purple-700 py-1.5 rounded-lg text-xs font-medium cursor-pointer">
+                            {uploading ? '업로드 중...' : '🖼 앨범'}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              disabled={uploading}
+                              onChange={e => {
+                                const file = e.target.files?.[0]
+                                if (file) handleAdhocPhoto(s.id, file)
+                                e.target.value = ''
+                              }}
+                            />
+                          </label>
+                        </>
                       )}
                     </div>
                   </>

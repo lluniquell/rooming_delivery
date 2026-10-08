@@ -407,25 +407,50 @@ export default function DriverDetail() {
                           )}
                         </div>
                       ))}
+                      {/* 폰/브라우저마다 input 하나로는 촬영·앨범 선택창이 안 뜨고 한쪽으로
+                          바로 가버려서(안드로이드는 갤러리로 직행), 버튼을 둘로 나눔 */}
                       {editable && (
-                        <label className="w-16 h-16 shrink-0 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 text-xs flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:text-blue-500">
-                          {uploading ? '업로드 중' : (
-                            <>
-                              <span className="text-xl leading-none">＋</span>
-                              사진
-                            </>
-                          )}
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            disabled={uploading}
-                            onChange={e => {
-                              const file = e.target.files?.[0]
-                              if (file) handleItemPhoto(item, file)
-                            }}
-                          />
-                        </label>
+                        <>
+                          <label className="w-16 h-16 shrink-0 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 text-xs flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:text-blue-500">
+                            {uploading ? '업로드 중' : (
+                              <>
+                                <span className="text-xl leading-none">📷</span>
+                                촬영
+                              </>
+                            )}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              className="hidden"
+                              disabled={uploading}
+                              onChange={e => {
+                                const file = e.target.files?.[0]
+                                if (file) handleItemPhoto(item, file)
+                                e.target.value = ''
+                              }}
+                            />
+                          </label>
+                          <label className="w-16 h-16 shrink-0 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 text-xs flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:text-blue-500">
+                            {uploading ? '업로드 중' : (
+                              <>
+                                <span className="text-xl leading-none">🖼</span>
+                                앨범
+                              </>
+                            )}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              disabled={uploading}
+                              onChange={e => {
+                                const file = e.target.files?.[0]
+                                if (file) handleItemPhoto(item, file)
+                                e.target.value = ''
+                              }}
+                            />
+                          </label>
+                        </>
                       )}
                     </div>
                   )}
