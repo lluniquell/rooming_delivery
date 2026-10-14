@@ -40,6 +40,7 @@ interface Item {
   tm_external_order_no: string | null
   tm_order_type: string | null
   tm_invoice_type: string | null
+  scheduled_date: string | null
 }
 
 // 팀무버 주문 등록 엑셀의 주문유형(필)/송장유형(필) — 이 조합 외의 값은 허용 안 함.
@@ -68,6 +69,13 @@ const INVOICE_TYPE_BARCODE: Record<string, string> = {
 
 // 각 자리는 숫자/문자 상관없이 올 수 있음 (예: NK-01-02-03, NK-A1-B2-C3)
 const LOC_REGEX = /[A-Z]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}-[A-Z0-9]{2}/
+
+// 직배 배치의 배송일자 표시 — "10/19 (월)" 형식. 'YYYY-MM-DD'를 로컬 자정으로 해석해서
+// UTC 변환으로 하루 밀리지 않게 함
+function fmtScheduledDate(dateStr: string) {
+  const d = new Date(`${dateStr}T00:00:00`)
+  return `${d.getMonth() + 1}/${d.getDate()} (${['일', '월', '화', '수', '목', '금', '토'][d.getDay()]})`
+}
 
 // 취소(C*)됐거나 교환으로 대체되어 끝난(E40/E41) 상품은 로컬 status는 여전히 'confirmed'로
 // 남아있어도 실제로는 죽은 라인이라 배치 화면에 계속 보이면 안 됨 (SoumOutgoing.tsx와 동일 규칙)
@@ -228,7 +236,7 @@ export default function SoumBatch() {
     for (let offset = 0; ; offset += PAGE) {
       const { data: page } = await supabase
         .from('order_items')
-        .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, order_status, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no, tm_order_type, tm_invoice_type)')
+        .select('id, product_code, product_name, option_info, brand, supplier_name, location, quantity, inspected_qty, delivery_method, status, cafe24_item_code, tracking_number, order_status, orders!inner(cafe24_order_no, customer_name, order_date, receiver_name, receiver_phone, zipcode, address, shipping_message, visit_time, tm_external_order_no, tm_order_type, tm_invoice_type, scheduled_date)')
         .eq('batch_id', batchId)
         .eq('status', 'confirmed')
         .range(offset, offset + PAGE - 1)
@@ -264,6 +272,7 @@ export default function SoumBatch() {
         tm_external_order_no: row.orders.tm_external_order_no ?? null,
         tm_order_type: row.orders.tm_order_type ?? null,
         tm_invoice_type: row.orders.tm_invoice_type ?? null,
+        scheduled_date: row.orders.scheduled_date ?? null,
       }))
       .sort((a, b) => (a.order_date ?? '').localeCompare(b.order_date ?? '') || a.cafe24_order_no.localeCompare(b.cafe24_order_no))
     setItems(rows)
@@ -1007,6 +1016,7 @@ export default function SoumBatch() {
                 <col className="w-40" />
                 <col className="w-24" />
                 <col className="w-24" />
+                {activeBatch?.type === 'direct' && <col className="w-24" />}
                 <col />
                 <col className="w-16" />
                 <col className={activeBatch?.name?.includes('팀무버') ? 'w-32' : 'w-24'} />
@@ -1027,6 +1037,9 @@ export default function SoumBatch() {
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">주문번호</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">주문자명</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">수령인명</th>
+                  {activeBatch?.type === 'direct' && (
+                    <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">배송일자</th>
+                  )}
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">상품</th>
                   <th className="text-center px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">수량</th>
                   <th className="text-left px-4 py-2 font-medium text-gray-500 text-xs whitespace-nowrap">{activeBatch?.name?.includes('팀무버') ? '주문/송장유형' : '배송방법'}</th>
@@ -1073,6 +1086,13 @@ export default function SoumBatch() {
                               <td rowSpan={group.items.length} className="px-4 py-3 font-medium text-gray-800 truncate align-top bg-white" title={group.receiver_name || '-'}>
                                 {group.receiver_name || '-'}
                               </td>
+                              {activeBatch?.type === 'direct' && (
+                                <td rowSpan={group.items.length} className="px-4 py-3 text-xs align-top bg-white whitespace-nowrap">
+                                  {group.items[0].scheduled_date
+                                    ? <span className="font-medium text-indigo-600">{fmtScheduledDate(group.items[0].scheduled_date)}</span>
+                                    : <span className="text-gray-300">-</span>}
+                                </td>
+                              )}
                             </>
                           )}
                           <td className={`px-4 py-3 text-sm text-gray-700 ${inspected ? 'bg-blue-50' : ''}`}>
