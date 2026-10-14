@@ -372,7 +372,10 @@ async function handleForceSync(req: VercelRequest, res: VercelResponse) {
       } else {
         // 카페24 기준 아직 미출고(N10/N20/N21/N22)거나 교환/취소 등으로 끝난 상태 — 로컬이
         // 잘못 앞서갔던 배송중/완료 표시를 되돌림. 배치 배정 자체는 안 건드림(수동으로 판단)
-        patch.status = 'confirmed'
+        // 배송중(in_transit)으로 잘못 넘어간 것만 confirmed로 되돌림 — 아직 배치에 안 들어간
+        // 'collected' 상품까지 confirmed로 바꾸면 미배정 목록(collected+batch_id null)에도
+        // 배치 검색(batch_id 있음)에도 안 잡혀 어디서도 안 보이게 됨(20260927-0000638, 2026-10-14)
+        if (local.status === 'in_transit') patch.status = 'confirmed'
         patch.shipped_at = null
         if (isDone(liveStatus) && local.batch_id) patch.batch_id = null
       }
