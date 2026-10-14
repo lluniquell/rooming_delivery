@@ -178,6 +178,8 @@ export default function SoumBatch() {
   // 체크박스로 선택한 주문 일괄 배송완료용(2026-09-29) — cafe24_order_no 기준
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
   const [bulkCompleting, setBulkCompleting] = useState(false)
+  // 직배 배치 전용 정렬 — 기본은 주문번호순, 배송일자순을 고르면 스케줄러에서 지정한 날짜 기준
+  const [directSort, setDirectSort] = useState<'order' | 'date'>('order')
 
   useEffect(() => { loadBatches() }, [])
 
@@ -515,7 +517,18 @@ export default function SoumBatch() {
   // 팀무버 전용인 주문유형/송장유형 드롭다운(엑셀용)은 여기 안 묶고 그대로 팀무버만 유지(2026-09-29)
   const showManualComplete = activeBatch?.name?.includes('팀무버') || activeBatch?.type === 'direct' || activeBatch?.name === '단순배송'
   const pickingList = buildPickingList()
-  const orderGroups = groupItemsByOrder(items)
+  const orderGroups = (() => {
+    const groups = groupItemsByOrder(items)
+    if (activeBatch?.type !== 'direct' || directSort !== 'date') return groups
+    // 배송일자 오름차순, 날짜 미지정은 맨 뒤 — 같은 날짜끼리는 기존(주문번호) 순서 유지
+    return [...groups].sort((a, b) => {
+      const da = a.items[0].scheduled_date, db = b.items[0].scheduled_date
+      if (da === db) return 0
+      if (!da) return 1
+      if (!db) return -1
+      return da.localeCompare(db)
+    })
+  })()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // CJ "루밍" 지정형 레이아웃용 (내품수량 필드가 있는 커스텀 양식) — 박스수량은 항상 1,
@@ -931,12 +944,23 @@ export default function SoumBatch() {
             {items.length > 0 && (
               <div className="flex gap-2">
                 {activeBatch?.type === 'direct' ? (
+                  <>
+                  <select
+                    value={directSort}
+                    onChange={e => setDirectSort(e.target.value as 'order' | 'date')}
+                    title="목록 정렬 기준"
+                    className="px-2 py-1.5 rounded-lg text-sm border border-gray-300 text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  >
+                    <option value="order">주문번호순</option>
+                    <option value="date">배송일자순</option>
+                  </select>
                   <button
                     onClick={downloadDirectManual}
                     className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
                   >
                     수기 엑셀 다운로드
                   </button>
+                  </>
                 ) : activeBatch?.name?.includes('팀무버') ? (
                   <>
                     <input
