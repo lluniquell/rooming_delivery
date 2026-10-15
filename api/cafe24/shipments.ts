@@ -58,7 +58,7 @@ async function handleStandby(req: VercelRequest, res: VercelResponse) {
     let updated = 0
     const errors: string[] = []
 
-    for (const { order_no, tracking_no } of orders) {
+    for (const { order_no, tracking_no, item_codes } of orders) {
       if (!order_no || !tracking_no) continue
       try {
         const { data: orderRow } = await supabase
@@ -71,12 +71,16 @@ async function handleStandby(req: VercelRequest, res: VercelResponse) {
 
         // 이 주문에서 해당 배송방법으로 배정된 상품 행만 대상으로 함 — 같은 주문에 다른
         // 배송방법 상품이 섞여 있어도 그쪽 상품은 절대 건드리지 않기 위함
-        const { data: cjItems } = await supabase
+        // 배송방법이 따로 없는 배치(예: 단순배송)는 호출자가 item_codes로 대상 상품을 직접 지정함
+        let itemQuery = supabase
           .from('order_items')
           .select('id, cafe24_item_code')
           .eq('order_id', orderRow.id)
-          .eq('delivery_method', method)
           .eq('status', 'confirmed')
+        itemQuery = Array.isArray(item_codes) && item_codes.length
+          ? itemQuery.in('cafe24_item_code', item_codes)
+          : itemQuery.eq('delivery_method', method)
+        const { data: cjItems } = await itemQuery
         if (!cjItems?.length) { errors.push(`${order_no}: ${method} 배정 상품 없음`); continue }
 
         const itemCodes = cjItems.map(i => i.cafe24_item_code).filter(Boolean) as string[]

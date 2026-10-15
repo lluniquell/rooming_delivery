@@ -178,6 +178,7 @@ export default function SoumBatch() {
   // 체크박스로 선택한 주문 일괄 배송완료용(2026-09-29) — cafe24_order_no 기준
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
   const [bulkCompleting, setBulkCompleting] = useState(false)
+  const [bulkClosing, setBulkClosing] = useState(false)
   // 직배 배치 전용 정렬 — 기본은 주문번호순, 배송일자순을 고르면 스케줄러에서 지정한 날짜 기준
   const [directSort, setDirectSort] = useState<'order' | 'date'>('order')
 
@@ -324,6 +325,56 @@ export default function SoumBatch() {
       if (activeBatchId) selectBatch(activeBatchId)
     } finally {
       setCompletingOrderNo(null)
+    }
+  }
+
+  // 단순배송 배치 — 체크한 주문 중 운송장번호가 입력된 것만 그 번호로 카페24 배송대기로
+  // 먼저 마감해두고, 실제 배송이 끝나면 나중에 "배송완료"로 넘기는 2단계 흐름(2026-10-15).
+  // 이 배치는 delivery_method가 없어서 서버가 배송방법 대신 item_codes로 대상 상품을 찾음
+  async function closeSelectedOrders() {
+    const targets = orderGroups.filter(g => selectedOrders.has(g.cafe24_order_no))
+    if (!targets.length) { alert('선택된 주문이 없습니다.'); return }
+    const ready = targets.filter(g => (manualTracking[g.cafe24_order_no] ?? '').trim())
+    const noTracking = targets.length - ready.length
+    if (!ready.length) { alert('운송장번호가 입력된 선택 주문이 없습니다.'); return }
+    if (!confirm(`운송장번호가 있는 ${ready.length}건을 카페24 배송대기로 마감할까요?${noTracking ? `\n(운송장번호 없는 ${noTracking}건은 제외)` : ''}`)) return
+
+    setBulkClosing(true)
+    try {
+      let updated = 0
+      const errors: string[] = []
+      for (let i = 0; i < ready.length; i += 20) {
+        const chunk = ready.slice(i, i + 20)
+        try {
+          const res = await fetch('/api/cafe24/shipments?action=standby', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orders: chunk.map(g => ({
+                order_no: g.cafe24_order_no,
+                tracking_no: manualTracking[g.cafe24_order_no].trim(),
+                item_codes: g.items.map(it => it.cafe24_item_code).filter(Boolean),
+              })),
+              carrier_code: '0001',
+            }),
+          })
+          const data = await res.json()
+          updated += data.updated ?? 0
+          if (data.errors?.length) errors.push(...data.errors)
+          if (data.error) errors.push(data.error)
+        } catch {
+          errors.push(`${chunk[0].cafe24_order_no} 외 ${chunk.length - 1}건: 네트워크 오류`)
+        }
+      }
+      alert(
+        `${updated}건 배송대기로 마감했습니다.` +
+        (noTracking ? `\n운송장번호 없어 제외: ${noTracking}건` : '') +
+        (errors.length ? `\n\n실패 ${errors.length}건:\n${errors.slice(0, 10).join('\n')}${errors.length > 10 ? '\n...' : ''}` : '')
+      )
+      setSelectedOrders(new Set())
+      if (activeBatchId) selectBatch(activeBatchId)
+    } finally {
+      setBulkClosing(false)
     }
   }
 
@@ -995,6 +1046,16 @@ export default function SoumBatch() {
                     className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
                   >
                     CJ 송장 출력용 엑셀 다운로드
+                  </button>
+                )}
+                {activeBatch?.name === '단순배송' && (
+                  <button
+                    onClick={closeSelectedOrders}
+                    disabled={bulkClosing || bulkCompleting || selectedOrders.size === 0}
+                    title="선택한 주문 중 운송장번호가 입력된 것을 카페24 배송대기로 마감"
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
+                  >
+                    {bulkClosing ? '마감 중...' : `선택 마감 (${selectedOrders.size})`}
                   </button>
                 )}
                 {showManualComplete && (
