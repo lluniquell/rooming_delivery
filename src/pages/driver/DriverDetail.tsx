@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
-import { compressImage } from '../../lib/photo'
+import { compressImage, photoStoragePath } from '../../lib/photo'
 
 interface OrderItem {
   id: string
@@ -45,6 +45,7 @@ export default function DriverDetail() {
   const navigate = useNavigate()
   const [order, setOrder] = useState<OrderStop | null>(null)
   const [driverName, setDriverName] = useState('')
+  const [driverUser, setDriverUser] = useState<{ id: string; email: string | null } | null>(null)
   const [photosByItem, setPhotosByItem] = useState<Record<string, Photo[]>>({})
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null)
   // 배송완료를 상품 단위로 선택해서 처리할 수 있게 — 사진 촬영 여부와 무관(2026-09-29)
@@ -59,6 +60,7 @@ export default function DriverDetail() {
     if (!id) return
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
+      if (user) setDriverUser({ id: user.id, email: user.email ?? null })
       if (user) {
         const { data: driverRow } = await supabase.from('drivers').select('name').eq('id', user.id).maybeSingle()
         if (driverRow) setDriverName(driverRow.name)
@@ -139,7 +141,7 @@ export default function DriverDetail() {
     setUploadingItemId(item.id)
     try {
       const compressed = await compressImage(file)
-      const path = `${order.id}/${item.id}/${Date.now()}.jpg`
+      const path = photoStoragePath(driverUser ?? { id: 'unknown' }, item.cafe24_item_code ?? item.id)
       const { error: uploadError } = await supabase.storage.from('delivery-photos').upload(path, compressed)
       if (uploadError) { alert(`사진 업로드 실패: ${uploadError.message}`); return }
       const { data: inserted, error: insertError } = await supabase

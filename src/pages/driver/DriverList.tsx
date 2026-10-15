@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
-import { compressImage } from '../../lib/photo'
+import { compressImage, photoStoragePath } from '../../lib/photo'
 
 interface OrderStop {
   id: string
@@ -63,6 +63,7 @@ export default function DriverList() {
   const [expandedAdhoc, setExpandedAdhoc] = useState<Set<string>>(new Set())
   const [uploadingAdhocId, setUploadingAdhocId] = useState<string | null>(null)
   const [driverName, setDriverName] = useState('')
+  const [driverUser, setDriverUser] = useState<{ id: string; email: string | null } | null>(null)
   const todayStr = fmtDate(new Date())
   const [viewDate, setViewDate] = useState(todayStr)
   const touchStart = useRef<{ x: number; y: number } | null>(null)
@@ -71,6 +72,7 @@ export default function DriverList() {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
+      setDriverUser({ id: user.id, email: user.email ?? null })
 
       const { data: driverRow } = await supabase.from('drivers').select('name').eq('id', user.id).maybeSingle()
       if (driverRow) setDriverName(driverRow.name)
@@ -247,7 +249,7 @@ export default function DriverList() {
     setUploadingAdhocId(stopId)
     try {
       const compressed = await compressImage(file)
-      const path = `adhoc/${stopId}/${Date.now()}.jpg`
+      const path = photoStoragePath(driverUser ?? { id: 'unknown' }, `adhoc-${stopId}`)
       const { error: uploadError } = await supabase.storage.from('delivery-photos').upload(path, compressed)
       if (uploadError) { alert(`사진 업로드 실패: ${uploadError.message}`); return }
       const { error: insertError } = await supabase.from('delivery_photos').insert({ adhoc_stop_id: stopId, storage_path: path })
