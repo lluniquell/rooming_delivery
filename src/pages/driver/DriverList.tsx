@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
-import { compressImage, photoStoragePath } from '../../lib/photo'
+import { preparePhotoUpload, photoStoragePath } from '../../lib/photo'
 
 interface OrderStop {
   id: string
@@ -248,9 +248,9 @@ export default function DriverList() {
   async function handleAdhocPhoto(stopId: string, file: File) {
     setUploadingAdhocId(stopId)
     try {
-      const compressed = await compressImage(file)
-      const path = photoStoragePath(driverUser ?? { id: 'unknown' }, `adhoc-${stopId}`)
-      const { error: uploadError } = await supabase.storage.from('delivery-photos').upload(path, compressed)
+      const prepared = await preparePhotoUpload(file)
+      const path = photoStoragePath(driverUser ?? { id: 'unknown' }, `adhoc-${stopId}`, prepared.ext)
+      const { error: uploadError } = await supabase.storage.from('delivery-photos').upload(path, prepared.blob, { contentType: prepared.contentType })
       if (uploadError) { alert(`사진 업로드 실패: ${uploadError.message}`); return }
       const { error: insertError } = await supabase.from('delivery_photos').insert({ adhoc_stop_id: stopId, storage_path: path })
       if (insertError) { alert(`사진 저장 실패: ${insertError.message}`); return }

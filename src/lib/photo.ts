@@ -20,9 +20,24 @@ export function compressImage(file: File): Promise<Blob> {
 // 사진 저장 경로: 업로드날짜(KST, YYYYMMDD) / 담당자ID / 파일명 — 스토리지에서 날짜→담당자 순으로
 // 찾아볼 수 있게 함. 스토리지 경로는 한글 같은 비ASCII 문자를 못 써서 담당자ID는 이메일 앞부분
 // (없으면 계정 id)을 쓰고, 허용 안 되는 문자는 _로 바꿈(2026-10-15)
-export function photoStoragePath(user: { id: string; email?: string | null }, fileBase: string) {
+export function photoStoragePath(user: { id: string; email?: string | null }, fileBase: string, ext = 'jpg') {
   const ymd = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10).replace(/-/g, '')
   const who = (user.email?.split('@')[0] || user.id).replace(/[^A-Za-z0-9._-]/g, '_')
   const base = fileBase.replace(/[^A-Za-z0-9._-]/g, '_')
-  return `${ymd}/${who}/${base}_${Date.now()}.jpg`
+  return `${ymd}/${who}/${base}_${Date.now()}.${ext}`
+}
+
+// 업로드 방식 스위치 — true면 폰 원본 그대로, false면 compressImage로 축소(가로 800px, 품질 0.7).
+// 원본이 용량/속도에 부담 없는지 며칠 테스트해보고 유지할지 결정하려고 compressImage는 지우지
+// 않고 이 값만 바꾸면 되돌릴 수 있게 둠(2026-10-20)
+export const UPLOAD_ORIGINAL_PHOTO = true
+
+export async function preparePhotoUpload(file: File): Promise<{ blob: Blob; ext: string; contentType: string }> {
+  if (UPLOAD_ORIGINAL_PHOTO) {
+    const fromName = file.name.split('.').pop()?.toLowerCase()
+    const fromType = file.type.split('/')[1]?.toLowerCase()
+    const ext = (fromName && /^[a-z0-9]{2,5}$/.test(fromName) ? fromName : fromType) || 'jpg'
+    return { blob: file, ext, contentType: file.type || 'image/jpeg' }
+  }
+  return { blob: await compressImage(file), ext: 'jpg', contentType: 'image/jpeg' }
 }

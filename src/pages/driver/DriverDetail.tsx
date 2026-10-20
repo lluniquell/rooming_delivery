@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
-import { compressImage, photoStoragePath } from '../../lib/photo'
+import { preparePhotoUpload, photoStoragePath } from '../../lib/photo'
 
 interface OrderItem {
   id: string
@@ -140,9 +140,9 @@ export default function DriverDetail() {
     if (!order) return
     setUploadingItemId(item.id)
     try {
-      const compressed = await compressImage(file)
-      const path = photoStoragePath(driverUser ?? { id: 'unknown' }, item.cafe24_item_code ?? item.id)
-      const { error: uploadError } = await supabase.storage.from('delivery-photos').upload(path, compressed)
+      const prepared = await preparePhotoUpload(file)
+      const path = photoStoragePath(driverUser ?? { id: 'unknown' }, item.cafe24_item_code ?? item.id, prepared.ext)
+      const { error: uploadError } = await supabase.storage.from('delivery-photos').upload(path, prepared.blob, { contentType: prepared.contentType })
       if (uploadError) { alert(`사진 업로드 실패: ${uploadError.message}`); return }
       const { data: inserted, error: insertError } = await supabase
         .from('delivery_photos')
