@@ -196,13 +196,17 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
         const targetSet = new Set<string>(
           item_codes?.length ? item_codes : allItems.map((i: any) => i.order_item_code)
         )
+        // 취소(C*)·교환완료(E4*)된 상품은 같은 shipping_code에 묶여 있어도 그룹 판단에서 뺌 —
+        // 안 빼면 "그룹 전체가 대상"이 안 돼서, 이미 등록된 그룹을 미등록으로 보고 새로
+        // 등록하려다 거절돼 배송완료 전환이 통째로 실패함(20261011-0000368, 2026-10-23)
+        const isDeadItem = (it: any) => /^C|^E4/.test(it.order_status ?? '')
         const groupOf: Record<string, string[]> = {}
         for (const it of allItems) {
-          if (!it.shipping_code) continue
+          if (!it.shipping_code || isDeadItem(it)) continue
           ;(groupOf[it.shipping_code] ??= []).push(it.order_item_code)
         }
         const touchedGroups = [...new Set(
-          allItems.filter((i: any) => targetSet.has(i.order_item_code)).map((i: any) => i.shipping_code).filter(Boolean)
+          allItems.filter((i: any) => targetSet.has(i.order_item_code) && !isDeadItem(i)).map((i: any) => i.shipping_code).filter(Boolean)
         )]
 
         if (!touchedGroups.length) {
@@ -216,8 +220,11 @@ async function handleTransit(req: VercelRequest, res: VercelResponse) {
           // shipping_code는 등록 안 된 상품에도 기본값이 항상 붙어있어서, 실제 등록 여부는
           // 그 그룹 상품의 tracking_no 존재 여부로 판단해야 함 (2026-07-29 실제로 이 체크가
           // 없어서 미등록 그룹에 DELETE를 시도하다 실패해 등록/전환 자체가 통째로 스킵된 적 있음)
-          const groupTrackingNo = allItems.find((i: any) => i.shipping_code === shippingCode)?.tracking_no as string | undefined
-          const groupStatus = allItems.find((i: any) => i.shipping_code === shippingCode)?.order_status as string | undefined
+          // 그룹의 첫 상품이 아니라 살아있는 상품 중 운송장이 있는 것으로 판단(첫 상품이 취소된
+          // 상품이면 운송장이 비어 있음). 현재 상태도 이번에 전환할 상품 기준으로 읽음
+          const liveGroupItems = allItems.filter((i: any) => i.shipping_code === shippingCode && !isDeadItem(i))
+          const groupTrackingNo = liveGroupItems.find((i: any) => i.tracking_no)?.tracking_no as string | undefined
+          const groupStatus = (liveGroupItems.find((i: any) => targetSet.has(i.order_item_code)) ?? liveGroupItems[0])?.order_status as string | undefined
 
           if (isFullGroup && groupTrackingNo) {
             // 이미 등록된 그룹 전체가 대상 — 그대로 전환

@@ -185,6 +185,7 @@ export default function DriverDetail() {
       ?? `${new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(2, 10).replace(/-/g, '')} 직배`
 
     // 카페24 배송완료 전환 — 선택된 상품만. 실패해도 로컬 완료 처리는 유지(나중에 수동 확인 필요)
+    let cafe24Error: string | null = null
     try {
       const itemCodes = targets.map(i => i.cafe24_item_code).filter(Boolean) as string[]
       if (itemCodes.length) {
@@ -195,11 +196,11 @@ export default function DriverDetail() {
         })
         const result = await res.json()
         if (result.errors?.length) {
-          setMessage(`카페24 배송완료 전환 실패: ${result.errors[0]}`)
+          cafe24Error = `카페24 배송완료 전환 실패: ${result.errors[0]}`
         }
       }
     } catch {
-      setMessage('카페24 배송완료 전환 중 네트워크 오류가 발생했습니다.')
+      cafe24Error = '카페24 배송완료 전환 중 네트워크 오류가 발생했습니다.'
     }
 
     const targetIds = targets.map(i => i.id)
@@ -241,8 +242,17 @@ export default function DriverDetail() {
     const updatedItems = order.items.map(i => targetIds.includes(i.id) ? { ...i, status: 'in_transit' } : i)
     if (remainingAfter === 0) {
       // 선택 안 한 나머지가 없거나 이번에 다 같이 끝남 — 주문 전체 완료 처리
-      await supabase.from('orders').update({ delivered_at: new Date().toISOString() }).eq('id', order.id)
+      const deliveredAt = new Date().toISOString()
+      await supabase.from('orders').update({ delivered_at: deliveredAt }).eq('id', order.id)
       setProcessing(false)
+      if (cafe24Error) {
+        // 바로 목록으로 넘어가면 실패 메시지를 못 보고 딜리버리 웹에서만 완료로 남음 —
+        // 화면에 머물면서 알려서 관리자가 바로 확인/재처리하게 함(2026-10-23)
+        setOrder({ ...order, items: updatedItems, delivered_at: deliveredAt })
+        setMessage(`${cafe24Error} — 딜리버리 웹엔 완료로 저장됐으니 관리자에게 알려주세요.`)
+        alert(`${cafe24Error}\n딜리버리 웹엔 완료로 저장됐으니 관리자에게 알려주세요.`)
+        return
+      }
       navigate('/')
       return
     }
@@ -250,7 +260,8 @@ export default function DriverDetail() {
     // 아직 남은 상품이 있음 — 주문은 계속 진행중으로 두고 화면에 남아서 이어서 처리 가능
     setOrder({ ...order, items: updatedItems })
     setSelectedItemIds(new Set())
-    setMessage(`${targets.length}개 상품을 배송완료 처리했습니다. 남은 상품: ${remainingAfter}개`)
+    setMessage(cafe24Error ? `${cafe24Error} (로컬엔 ${targets.length}개 완료로 저장됨, 남은 상품 ${remainingAfter}개)` : `${targets.length}개 상품을 배송완료 처리했습니다. 남은 상품: ${remainingAfter}개`)
+    if (cafe24Error) alert(`${cafe24Error}\n딜리버리 웹엔 완료로 저장됐으니 관리자에게 알려주세요.`)
     setProcessing(false)
   }
 
