@@ -79,13 +79,19 @@ export default function DriverDetail() {
       // 발견, 2026-09-23)
       const { data: items } = await supabase
         .from('order_items')
-        .select('id, product_name, option_info, quantity, cafe24_item_code, tracking_number, item_note, status')
+        .select('id, product_name, option_info, quantity, cafe24_item_code, tracking_number, item_note, status, batch_id')
         .eq('order_id', id)
         .eq('delivery_method', '직배')
         .in('status', ['confirmed', 'in_transit'])
+      // 스케줄러와 같은 기준으로 맞춤 — 스케줄러는 직배 배치에 남아있는 상품만 보여주는데, 주문재확인이
+      // 카페24 배송완료(N4x) 등을 확인하면 batch_id를 비워 배치에서 빼므로, 여기도 배치에 남은 상품만
+      // 보여야 둘이 안 어긋남(20260903-0001012). 이미 이 앱에서 완료 처리한(in_transit) 상품은
+      // 배치에서 빠져도 완료 내역으로 계속 보여줌. PostgREST or() 필터는 깨지기 쉬워 JS에서 거름
+      const { data: jikbaeBatch } = await supabase.from('batches').select('id').eq('type', 'direct').maybeSingle()
+      const visibleItems = (items ?? []).filter(i => i.status === 'in_transit' || (!!jikbaeBatch && i.batch_id === jikbaeBatch.id))
       // 아직 완료 안 된 상품은 기본으로 전부 선택해둬서, 평소(상품 1~2개)엔 그냥 바로
       // "배송 완료"만 누르면 되고, 일부만 배송된 경우에만 체크 해제하면 됨(2026-09-29)
-      setSelectedItemIds(new Set((items ?? []).filter(i => i.status !== 'in_transit').map(i => i.id)))
+      setSelectedItemIds(new Set(visibleItems.filter(i => i.status !== 'in_transit').map(i => i.id)))
 
       // 이 주문이 다른 배송원 루트에 "동행 (주문번호)" 기타 배송지로 붙어있는지 확인 —
       // 원래 담당자도 2인 배송인 걸 상세 화면에서 바로 알 수 있어야 함(2026-09-22)
@@ -117,7 +123,7 @@ export default function DriverDetail() {
         delivery_memo: o.delivery_memo,
         schedule_note: o.schedule_note,
         companionName,
-        items: items ?? [],
+        items: visibleItems,
       })
 
       // 앱을 도중에 나갔다 다시 들어온 경우를 대비해 이미 찍은 사진들을 미리 불러와둠
