@@ -9,6 +9,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { supabase } from '../../lib/supabase'
+import { isItemToDeliver } from '../../lib/deliveryItems'
 // 셀 서식(자동 줄바꿈 등) 쓰기가 필요해서 일반 xlsx 대신 씀 — 일반 xlsx는 스타일 쓰기를 지원 안 함
 import * as XLSX from 'xlsx-js-style'
 
@@ -454,7 +455,7 @@ export default function ScheduleDay() {
   }
 
   async function loadAll(bid: string, routesForDate: RouteLane[], waypointsForDate: DayWaypoint[] = dayWaypoints, presetsForDate: PresetLocation[] = presets) {
-    const SELECT = 'id, product_name, quantity, supplier_name, brand, item_note, orders!inner(id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time, schedule_note)'
+    const SELECT = 'id, product_name, quantity, supplier_name, brand, item_note, status, order_status, shipped_at, orders!inner(id, cafe24_order_no, customer_name, receiver_name, receiver_phone, address, crew_size, route_order, route_id, lat, lng, scheduled_date, visit_time, schedule_note)'
 
     const { data: scheduledData } = await supabase
       .from('order_items')
@@ -462,7 +463,7 @@ export default function ScheduleDay() {
       .eq('batch_id', bid)
       .in('status', ['confirmed', 'in_transit'])
       .eq('orders.scheduled_date', date)
-    const scheduledStops = groupRows((scheduledData ?? []) as any[])
+    const scheduledStops = groupRows(((scheduledData ?? []) as any[]).filter(r => isItemToDeliver(r, date!)))
 
     // 기준점 = 각 루트의 "마지막" 배송지 (다음 배송지를 그 뒤에 이어붙일 위치)
     const routedStops = scheduledStops.filter(s => s.route_id)

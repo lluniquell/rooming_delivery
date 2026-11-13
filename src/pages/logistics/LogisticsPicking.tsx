@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
+import { isItemToDeliver } from '../../lib/deliveryItems'
 
 interface Item {
   id: string
@@ -146,11 +147,11 @@ export default function LogisticsPicking() {
 
     const { data } = await supabase
       .from('order_items')
-      .select('id, order_id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, picked_at, item_note, orders!inner(cafe24_order_no, receiver_name, customer_name, route_id, route_order, scheduled_date)')
+      .select('id, order_id, product_code, product_name, option_info, brand, supplier_name, quantity, inspected_qty, picked_at, item_note, status, order_status, shipped_at, orders!inner(cafe24_order_no, receiver_name, customer_name, route_id, route_order, scheduled_date)')
       .eq('batch_id', jikbae.id)
       .in('status', ['confirmed', 'in_transit'])
       .eq('orders.scheduled_date', date)
-    const rows: Item[] = ((data ?? []) as any[]).map(row => ({
+    const rows: Item[] = ((data ?? []) as any[]).filter(row => isItemToDeliver(row, date)).map(row => ({
       id: row.id,
       order_id: row.order_id,
       product_code: row.product_code,
