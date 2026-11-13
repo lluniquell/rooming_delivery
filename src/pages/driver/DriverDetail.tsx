@@ -313,7 +313,9 @@ export default function DriverDetail() {
   if (!order) return <div className="py-12 text-center text-gray-400">불러오는 중...</div>
 
   const links = mapDeeplink(order.address)
-  const pending = !order.delivered_at && !order.delivery_memo
+  // delivered_at이 있어도 이 주문에 아직 처리 안 된 직배 상품이 남아있으면(완료 처리 뒤에 새로 들어온
+  // 상품, 20261010-0000556) 진행중으로 봐서 그 상품을 마저 완료할 수 있게 함(2026-11-13)
+  const pending = !order.delivery_memo && (!order.delivered_at || order.items.some(i => i.status !== 'in_transit'))
   const photographedCount = order.items.filter(i => (photosByItem[i.id]?.length ?? 0) > 0).length
   const pendingItemCount = order.items.filter(i => i.status !== 'in_transit').length
 

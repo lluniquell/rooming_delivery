@@ -11,6 +11,8 @@ interface OrderStop {
   delivery_memo: string | null
   schedule_note: string | null
   companionName: string | null
+  // delivered_at이 있어도 직배 배치에 아직 처리 안 된 상품이 남아있으면 진행중으로 봄
+  hasPendingItems: boolean
 }
 
 // 관리자 화면(ScheduleDay)의 루트 순서에는 실제 주문뿐 아니라 경유지/기타 배송지도 자기 순번을
@@ -28,7 +30,7 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 function statusOf(s: OrderStop): 'pending' | 'done' | 'failed' {
-  if (s.delivered_at) return 'done'
+  if (s.delivered_at && !s.hasPendingItems) return 'done'
   if (s.delivery_memo) return 'failed'
   return 'pending'
 }
@@ -106,6 +108,23 @@ export default function DriverList() {
           .eq('date', viewDate),
       ])
 
+      // 주문 완료(delivered_at)는 "그 시점에 보이던 상품을 다 끝냈다"는 뜻일 뿐이라, 그 뒤에 같은
+      // 주문의 상품이 직배 배치에 새로 들어오면(20261010-0000556) delivered_at이 남아있어도 아직
+      // 처리 안 된 상품이 있음 — 상세 화면과 같은 기준(직배 배치의 confirmed 상품)으로 진행중 판단(2026-11-13)
+      const { data: jikbaeBatch } = await supabase.from('batches').select('id').eq('type', 'direct').maybeSingle()
+      const orderIdsWithPendingItems = async (ids: string[]) => {
+        if (!ids.length || !jikbaeBatch) return new Set<string>()
+        const { data } = await supabase
+          .from('order_items')
+          .select('order_id')
+          .in('order_id', ids)
+          .eq('delivery_method', '직배')
+          .eq('status', 'confirmed')
+          .eq('batch_id', jikbaeBatch.id)
+        return new Set((data ?? []).map(r => r.order_id as string))
+      }
+      const pendingOwn = await orderIdsWithPendingItems((orderData ?? []).filter((o: any) => o.delivered_at).map((o: any) => o.id))
+
       // 출발지(선진)는 관리자 화면에서도 번호 매김 없이 맨 위에 고정 표시되므로 여기서도 동일하게 분리
       const depotWaypoint = (waypointData ?? []).find(w => w.preset_key === 'depot')
       const routedWaypoints = (waypointData ?? []).filter(w => w.preset_key !== 'depot')
@@ -149,9 +168,10 @@ export default function DriverList() {
             if (o.route_id && namesByRoute[o.route_id]) companionNameByOrderNo[o.cafe24_order_no] = namesByRoute[o.route_id]
           }
         }
+        const pendingCompanion = await orderIdsWithPendingItems((originalOrders ?? []).filter(o => o.delivered_at).map(o => o.id))
         for (const o of originalOrders ?? []) {
           companionOrderIdByOrderNo[o.cafe24_order_no] = o.id
-          companionStatusByOrderNo[o.cafe24_order_no] = o.delivered_at ? 'done' : o.delivery_memo ? 'failed' : 'pending'
+          companionStatusByOrderNo[o.cafe24_order_no] = o.delivered_at && !pendingCompanion.has(o.id) ? 'done' : o.delivery_memo ? 'failed' : 'pending'
           companionScheduleNoteByOrderNo[o.cafe24_order_no] = o.schedule_note
         }
       }
@@ -202,6 +222,7 @@ export default function DriverList() {
             delivery_memo: o.delivery_memo,
             schedule_note: o.schedule_note,
             companionName: accompaniedByOrderNo[o.cafe24_order_no] ?? null,
+            hasPendingItems: pendingOwn.has(o.id),
           },
         })),
         ...routedWaypoints.map((w): CombinedStop => ({
